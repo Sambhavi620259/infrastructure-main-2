@@ -1,0 +1,2 @@
+import { AssetOperationPage } from "@/components/assets/asset-operation-page";
+export default function AssetStatusPage() { return <AssetOperationPage eyebrow="Assets · Status" title="Asset Status" description="Monitor availability, maintenance, and retirement status across inventory." action="Update status" rows={[["2,651 assets", "Assigned to employees and locations", "In use"], ["310 assets", "Available for deployment", "In stock"], ["28 assets", "Repair or maintenance queue", "Attention"]]} />; }

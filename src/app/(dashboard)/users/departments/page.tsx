@@ -1,0 +1,2 @@
+import { ModuleListPage } from "@/components/shared/module-list-page";
+export default function DepartmentsPage() { return <ModuleListPage eyebrow="Users · Organization" title="Departments / Teams" description="Manage departments and teams used for user and asset assignment." action="Add department" items={[["Engineering", "42 users · 238 assigned assets", "Active"], ["Finance", "18 users · 56 assigned assets", "Active"], ["Operations", "31 users · 74 assigned assets", "Active"]]} />; }

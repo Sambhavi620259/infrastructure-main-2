@@ -1,0 +1,2 @@
+import { ModuleListPage } from "@/components/shared/module-list-page";
+export default function SoftwareInventoryPage() { return <ModuleListPage eyebrow="Inventory · Software" title="Software Inventory" description="Review application licenses, entitlements, and availability." action="Add software" items={[["Microsoft 365 Business", "1,240 of 1,350 seats assigned", "Compliant"], ["Adobe Creative Cloud", "98 of 120 seats assigned", "Available"], ["Figma Organization", "214 of 220 seats assigned", "Attention"]]} />; }

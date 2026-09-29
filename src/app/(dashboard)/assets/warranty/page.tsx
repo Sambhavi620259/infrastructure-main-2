@@ -1,0 +1,2 @@
+import { AssetOperationPage } from "@/components/assets/asset-operation-page";
+export default function AssetWarrantyPage() { return <AssetOperationPage eyebrow="Assets · Warranty & AMC" title="Warranty / AMC" description="Monitor warranty coverage and annual maintenance contracts." action="Add coverage" rows={[["MacBook Pro 16 · AST-101", "AppleCare+ · Expires 14 Jun 2029", "Covered"], ["HP LaserJet Pro · AST-103", "AMC renewal due in 19 days", "Attention"], ["Dell OptiPlex 7010 · AST-102", "Dell ProSupport · Expires 12 Jan 2027", "Covered"]]} />; }

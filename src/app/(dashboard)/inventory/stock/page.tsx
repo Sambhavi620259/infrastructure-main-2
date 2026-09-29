@@ -1,0 +1,2 @@
+import { ModuleListPage } from "@/components/shared/module-list-page";
+export default function InventoryStockPage() { return <ModuleListPage eyebrow="Inventory · Stock" title="Stock / Available Items" description="Review inventory available for deployment or replacement." action="Receive stock" items={[["MacBook Air M2", "45 in stock · Bengaluru Store", "Available"], ["Dell Latitude 7440", "28 in stock · Mumbai HQ", "Available"], ["USB-C Dock", "9 in stock · Kolkata Office", "Low stock"]]} />; }

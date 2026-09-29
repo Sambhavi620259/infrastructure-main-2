@@ -1,0 +1,2 @@
+import { ModuleListPage } from "@/components/shared/module-list-page";
+export default function VendorsPage() { return <ModuleListPage eyebrow="Inventory · Suppliers" title="Vendors" description="Maintain supplier contacts, contracts, and purchase history." action="Add vendor" items={[["Tech Solutions Pvt. Ltd.", "Hardware supplier · 12 active orders", "Active"], ["Apple India", "Device supplier · 4 active orders", "Active"], ["Dell Technologies", "Hardware supplier · 6 active orders", "Active"]]} />; }

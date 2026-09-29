@@ -1,0 +1,2 @@
+import { ModuleListPage } from "@/components/shared/module-list-page";
+export default function PurchaseOrdersPage() { return <ModuleListPage eyebrow="Inventory · Procurement" title="Purchase Orders" description="Track purchase orders and goods-receipt status." action="Create purchase order" items={[["PO-2026-041", "Tech Solutions Pvt. Ltd. · 24 May 2026", "Approved"], ["PO-2026-042", "Apple India · 27 May 2026", "Awaiting receipt"], ["PO-2026-043", "Dell Technologies · 30 May 2026", "Draft"]]} />; }

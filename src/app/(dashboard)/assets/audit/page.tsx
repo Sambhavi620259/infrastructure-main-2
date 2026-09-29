@@ -1,0 +1,2 @@
+import { AssetOperationPage } from "@/components/assets/asset-operation-page";
+export default function AssetAuditPage() { return <AssetOperationPage eyebrow="Assets · Audit" title="Asset Audit" description="Track physical verification and reconcile audit exceptions." action="Start audit" rows={[["Kolkata Office · 1,182 assets", "Last audit: 23 Aug 2026", "Verified"], ["Mumbai Office · 964 assets", "Last audit: 18 Aug 2026", "Verified"], ["Bengaluru Store · 412 assets", "17 assets awaiting verification", "Open"]]} />; }

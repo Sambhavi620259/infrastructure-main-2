@@ -1,0 +1,2 @@
+import { AssetOperationPage } from "@/components/assets/asset-operation-page";
+export default function AssetLifecyclePage() { return <AssetOperationPage eyebrow="Assets · Lifecycle" title="Asset Lifecycle" description="Follow assets from procurement through retirement and disposal." action="Update lifecycle" rows={[["MacBook Pro 16 · AST-101", "Deployed 14 Jun 2026", "In use"], ["HP LaserJet Pro · AST-103", "Maintenance review due", "In use"], ["Legacy Dell Latitude · AST-087", "Retirement approved", "Retiring"]]} />; }

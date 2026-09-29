@@ -1,0 +1,2 @@
+import { AssetOperationPage } from "@/components/assets/asset-operation-page";
+export default function AssetAssignmentPage() { return <AssetOperationPage eyebrow="Assets · Assignment" title="Asset Assignment" description="Assign devices to employees, departments, and locations." action="Assign asset" rows={[["MacBook Pro 16 · AST-101", "Sarah Desai · Kolkata Office", "Assigned"], ["Dell OptiPlex 7010 · AST-102", "Rahul Jain · Mumbai Office", "Assigned"], ["MacBook Air M2 · AST-104", "Unassigned · Bengaluru Store", "Available"]]} />; }

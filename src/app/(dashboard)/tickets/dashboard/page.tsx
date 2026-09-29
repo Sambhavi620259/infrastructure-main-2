@@ -1,0 +1,2 @@
+import { ModuleListPage } from "@/components/shared/module-list-page";
+export default function TicketDashboardPage() { return <ModuleListPage eyebrow="Tickets · Dashboard" title="Ticket Dashboard" description="Monitor service requests and incident response across your organization." action="Create ticket" items={[["Open tickets", "42 requests currently in queue", "Open"], ["High priority", "8 requests need immediate action", "Attention"], ["Resolved today", "31 requests closed by the support team", "Resolved"]]} />; }

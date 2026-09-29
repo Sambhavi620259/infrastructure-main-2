@@ -1,0 +1,2 @@
+import { ModuleListPage } from "@/components/shared/module-list-page";
+export default function HardwareInventoryPage() { return <ModuleListPage eyebrow="Inventory · Hardware" title="Hardware Inventory" description="Track physical devices and accessories available to the organization." action="Add item" items={[["Laptops", "1,955 total · 164 available", "In stock"], ["Desktops", "642 total · 43 available", "In stock"], ["Printers", "78 total · 6 in maintenance", "Attention"]]} />; }

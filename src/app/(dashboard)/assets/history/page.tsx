@@ -1,0 +1,2 @@
+import { AssetOperationPage } from "@/components/assets/asset-operation-page";
+export default function AssetHistoryPage() { return <AssetOperationPage eyebrow="Assets · History" title="Asset History" description="Review assignment, maintenance, and lifecycle events." action="Export history" rows={[["AST-101 · MacBook Pro 16", "Assigned to Sarah Desai · Today", "Recorded"], ["AST-105 · iPhone 15", "Moved to repair · Yesterday", "Recorded"], ["AST-104 · MacBook Air M2", "Received into stock · 26 Aug", "Recorded"]]} />; }
