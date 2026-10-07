@@ -7,7 +7,7 @@ from sqlalchemy import func
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_roles, get_tenant_company_id
 from app.models.models import (
-    Asset, AssetCategory, Software, InventoryItem, MaintenanceLog, 
+    Asset, AssetCategory, Software, InventoryItem, Maintenance, 
     AssetStatusEnum, PlatformRole, User
 )
 from app.schemas.schemas import ExecutiveDashboardSummary, AssetCategoryReport
@@ -45,17 +45,20 @@ def get_executive_dashboard_summary(
     in_stock_assets = asset_query.filter(Asset.status == AssetStatusEnum.IN_STOCK).count()
     maintenance_assets = asset_query.filter(Asset.status == AssetStatusEnum.UNDER_MAINTENANCE).count()
 
-    total_asset_value = db.query(func.sum(Asset.current_value)).filter(
-        Asset.company_id == company_id if current_user.role != PlatformRole.SUPER_ADMIN else True
-    ).scalar() or 0.0
+    total_asset_value_query = db.query(func.coalesce(func.sum(Asset.current_value), 0.0))
+    if current_user.role != PlatformRole.SUPER_ADMIN:
+        total_asset_value_query = total_asset_value_query.filter(Asset.company_id == company_id)
+    total_asset_value = total_asset_value_query.scalar() or 0.0
 
-    total_software_licenses = db.query(func.sum(Software.total_licenses)).filter(
-        Software.company_id == company_id if current_user.role != PlatformRole.SUPER_ADMIN else True
-    ).scalar() or 0
+    total_software_licenses_query = db.query(func.coalesce(func.sum(Software.total_licenses), 0))
+    if current_user.role != PlatformRole.SUPER_ADMIN:
+        total_software_licenses_query = total_software_licenses_query.filter(Software.company_id == company_id)
+    total_software_licenses = total_software_licenses_query.scalar() or 0
 
-    used_software_licenses = db.query(func.sum(Software.used_licenses)).filter(
-        Software.company_id == company_id if current_user.role != PlatformRole.SUPER_ADMIN else True
-    ).scalar() or 0
+    used_software_licenses_query = db.query(func.coalesce(func.sum(Software.used_licenses), 0))
+    if current_user.role != PlatformRole.SUPER_ADMIN:
+        used_software_licenses_query = used_software_licenses_query.filter(Software.company_id == company_id)
+    used_software_licenses = used_software_licenses_query.scalar() or 0
 
     low_stock_items = inventory_query.filter(InventoryItem.status == "LOW_STOCK").count()
 
@@ -65,8 +68,8 @@ def get_executive_dashboard_summary(
         in_stock_assets=in_stock_assets,
         under_maintenance_assets=maintenance_assets,
         total_asset_value=round(float(total_asset_value), 2),
-        total_software_licenses=total_software_licenses,
-        used_software_licenses=used_software_licenses,
+        total_software_licenses=int(total_software_licenses),
+        used_software_licenses=int(used_software_licenses),
         low_stock_inventory_alerts=low_stock_items
     )
 
@@ -81,13 +84,18 @@ def get_assets_by_category_report(
     Get breakdown of hardware assets grouped by category with total valuation.
     """
     company_id = tenant_company_id or current_user.company_id
+    if not company_id and current_user.role != PlatformRole.SUPER_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Company context required."
+        )
 
     query = db.query(
         AssetCategory.id.label("category_id"),
         AssetCategory.name.label("category_name"),
         func.count(Asset.id).label("total_count"),
         func.coalesce(func.sum(Asset.current_value), 0.0).label("total_value")
-    ).join(Asset, Asset.category_id == AssetCategory.id, isouter=True)
+    ).outerjoin(Asset, Asset.category_id == AssetCategory.id)
 
     if current_user.role != PlatformRole.SUPER_ADMIN:
         query = query.filter(AssetCategory.company_id == company_id)
@@ -98,8 +106,8 @@ def get_assets_by_category_report(
         AssetCategoryReport(
             category_id=r.category_id,
             category_name=r.category_name,
-            total_count=r.total_count,
-            total_value=round(float(r.total_value), 2)
+            total_count=int(r.total_count or 0),
+            total_value=round(float(r.total_value or 0.0), 2)
         )
         for r in results
     ]
@@ -115,6 +123,11 @@ def get_maintenance_cost_analysis(
     Generate cost and frequency breakdown for asset repairs and preventive maintenance.
     """
     company_id = tenant_company_id or current_user.company_id
+    if not company_id and current_user.role != PlatformRole.SUPER_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Company context required."
+        )
 
     query = db.query(
         MaintenanceLog.maintenance_type,
@@ -131,8 +144,8 @@ def get_maintenance_cost_analysis(
         "summary": [
             {
                 "maintenance_type": r.maintenance_type,
-                "total_records": r.total_records,
-                "total_cost": round(float(r.total_cost), 2)
+                "total_records": int(r.total_records or 0),
+                "total_cost": round(float(r.total_cost or 0.0), 2)
             }
             for r in results
         ]
@@ -149,6 +162,11 @@ def get_license_utilization_report(
     Report software license allocation efficiency and unused seat metrics.
     """
     company_id = tenant_company_id or current_user.company_id
+    if not company_id and current_user.role != PlatformRole.SUPER_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Company context required."
+        )
 
     query = db.query(Software)
     if current_user.role != PlatformRole.SUPER_ADMIN:
@@ -167,7 +185,7 @@ def get_license_utilization_report(
             "used_licenses": sw.used_licenses,
             "available_licenses": sw.total_licenses - sw.used_licenses,
             "utilization_rate_pct": round(utilization_rate, 2),
-            "total_cost": sw.cost
+            "total_cost": round(float(sw.cost or 0.0), 2)
         })
 
     return {"license_utilization": report_data}

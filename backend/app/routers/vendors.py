@@ -23,7 +23,7 @@ def create_vendor(
     Register a new procurement vendor or supplier.
     """
     company_id = tenant_company_id or current_user.company_id
-    if not company_id:
+    if not company_id and current_user.role != PlatformRole.SUPER_ADMIN:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Valid company context is required."
@@ -67,9 +67,13 @@ def list_vendors(
     """
     Retrieve registered vendors for the organization.
     """
+    company_id = tenant_company_id or current_user.company_id
     query = db.query(Vendor)
+    
     if current_user.role != PlatformRole.SUPER_ADMIN:
-        query = query.filter(Vendor.company_id == tenant_company_id)
+        if not company_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company context required.")
+        query = query.filter(Vendor.company_id == company_id)
 
     return query.offset(skip).limit(limit).all()
 
@@ -84,9 +88,13 @@ def get_vendor(
     """
     Get detailed information about a specific vendor.
     """
+    company_id = tenant_company_id or current_user.company_id
     query = db.query(Vendor).filter(Vendor.id == vendor_id)
+    
     if current_user.role != PlatformRole.SUPER_ADMIN:
-        query = query.filter(Vendor.company_id == tenant_company_id)
+        if not company_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company context required.")
+        query = query.filter(Vendor.company_id == company_id)
 
     vendor = query.first()
     if not vendor:
@@ -108,9 +116,13 @@ def update_vendor(
     """
     Update vendor contact info or attributes.
     """
+    company_id = tenant_company_id or current_user.company_id
     query = db.query(Vendor).filter(Vendor.id == vendor_id)
+    
     if current_user.role != PlatformRole.SUPER_ADMIN:
-        query = query.filter(Vendor.company_id == tenant_company_id)
+        if not company_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company context required.")
+        query = query.filter(Vendor.company_id == company_id)
 
     vendor = query.first()
     if not vendor:
@@ -119,7 +131,7 @@ def update_vendor(
             detail="Vendor record not found."
         )
 
-    update_data = vendor_in.dict(exclude_unset=True)
+    update_data = vendor_in.model_dump(exclude_unset=True) if hasattr(vendor_in, "model_dump") else vendor_in.dict(exclude_unset=True)
     for field, value in update_data.items():
         setattr(vendor, field, value)
 
@@ -149,9 +161,13 @@ def delete_vendor(
     """
     Delete a vendor from the system.
     """
+    company_id = tenant_company_id or current_user.company_id
     query = db.query(Vendor).filter(Vendor.id == vendor_id)
+    
     if current_user.role != PlatformRole.SUPER_ADMIN:
-        query = query.filter(Vendor.company_id == tenant_company_id)
+        if not company_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company context required.")
+        query = query.filter(Vendor.company_id == company_id)
 
     vendor = query.first()
     if not vendor:

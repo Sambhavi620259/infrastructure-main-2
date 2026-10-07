@@ -24,6 +24,16 @@ class TokenData(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+    role: Optional[PlatformRole] = None
+
+
+class RegisterRequest(BaseModel):
+    name: str = Field(..., min_length=2, max_length=150)
+    email: EmailStr
+    password: str = Field(..., min_length=8)
+    role: str = Field(..., pattern="^(IT_ADMIN|IT_AGENT|SUPER_ADMIN)$")
+    invitationToken: Optional[str] = None
+    registrationKey: Optional[str] = None
 
 
 # --- Company & Subscription Schemas ---
@@ -112,6 +122,18 @@ class UserResponse(UserBase):
     company_id: Optional[str] = None
     status: str
     created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class UserProfile(BaseModel):
+    id: str
+    name: str
+    email: str
+    role: PlatformRole
+    department: Optional[str] = None
+    companyId: Optional[str] = None
+    avatarUrl: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -293,10 +315,13 @@ class LicenseAssignRequest(BaseModel):
 
 class VendorCreate(BaseModel):
     name: str = Field(..., max_length=150)
+    contact_person: Optional[str] = None
     contact: Optional[str] = None
     email: Optional[EmailStr] = None
     phone: Optional[str] = None
     address: Optional[str] = None
+    website: Optional[str] = None
+    notes: Optional[str] = None
     gst: Optional[str] = None
 
 
@@ -304,6 +329,21 @@ class VendorResponse(VendorCreate):
     id: str
     company_id: str
     status: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class VendorUpdate(BaseModel):
+    name: Optional[str] = None
+    contact_person: Optional[str] = None
+    contact: Optional[str] = None
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = None
+    address: Optional[str] = None
+    website: Optional[str] = None
+    notes: Optional[str] = None
+    gst: Optional[str] = None
+    status: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -339,6 +379,14 @@ class MaintenanceResponse(MaintenanceCreate):
     status: str
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class MaintenanceUpdate(BaseModel):
+    issue: Optional[str] = None
+    vendor_id: Optional[str] = None
+    cost: Optional[Decimal] = None
+    completion_date: Optional[datetime] = None
+    status: Optional[str] = None
 
 
 # --- Discovery & Cloud Schemas ---
@@ -393,6 +441,28 @@ class FinancialRecordResponse(FinancialRecordCreate):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ExecutiveDashboardSummary(BaseModel):
+    total_assets: int
+    assigned_assets: int
+    in_stock_assets: int
+    under_maintenance_assets: int
+    total_asset_value: float
+    total_software_licenses: int
+    used_software_licenses: int
+    low_stock_inventory_alerts: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AssetCategoryReport(BaseModel):
+    category_id: Optional[str] = None
+    category_name: Optional[str] = None
+    total_count: int
+    total_value: float
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ReportConfigCreate(BaseModel):
     name: str
     report_type: str
@@ -435,3 +505,22 @@ class DashboardSummaryResponse(BaseModel):
     software_licenses_used: int
     software_licenses_total: int
     total_asset_value: Decimal
+
+
+class DepreciationCalculateRequest(BaseModel):
+    method: Optional[str] = None
+    useful_life_years: Optional[int] = None
+    salvage_value: Optional[float] = None
+
+
+class DepreciationResponse(BaseModel):
+    asset_id: str
+    original_cost: float
+    salvage_value: float
+    current_value: float
+    total_depreciated: float
+    annual_depreciation: float
+    method: str
+    years_in_service: float
+
+    model_config = ConfigDict(from_attributes=True)

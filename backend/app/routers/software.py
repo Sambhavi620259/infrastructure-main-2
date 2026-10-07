@@ -23,7 +23,7 @@ def create_software(
     Register a new software license asset within the tenant account.
     """
     company_id = tenant_company_id or current_user.company_id
-    if not company_id:
+    if not company_id and current_user.role != PlatformRole.SUPER_ADMIN:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, 
             detail="Valid company context is required."
@@ -69,9 +69,13 @@ def list_software(
     """
     List all software entries and license allocation usage.
     """
+    company_id = tenant_company_id or current_user.company_id
     query = db.query(Software)
+    
     if current_user.role != PlatformRole.SUPER_ADMIN:
-        query = query.filter(Software.company_id == tenant_company_id)
+        if not company_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company context required.")
+        query = query.filter(Software.company_id == company_id)
 
     return query.offset(skip).limit(limit).all()
 
@@ -86,9 +90,13 @@ def get_software(
     """
     Retrieve single software license details.
     """
+    company_id = tenant_company_id or current_user.company_id
     query = db.query(Software).filter(Software.id == software_id)
+    
     if current_user.role != PlatformRole.SUPER_ADMIN:
-        query = query.filter(Software.company_id == tenant_company_id)
+        if not company_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company context required.")
+        query = query.filter(Software.company_id == company_id)
 
     software = query.first()
     if not software:
@@ -110,9 +118,13 @@ def assign_software_license(
     """
     Assign an available software license key to an active user.
     """
+    company_id = tenant_company_id or current_user.company_id
     query = db.query(Software).filter(Software.id == software_id)
+    
     if current_user.role != PlatformRole.SUPER_ADMIN:
-        query = query.filter(Software.company_id == tenant_company_id)
+        if not company_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company context required.")
+        query = query.filter(Software.company_id == company_id)
 
     software = query.first()
     if not software:
@@ -160,6 +172,7 @@ def assign_software_license(
 
     db.add(assignment)
     db.commit()
+    db.refresh(assignment)
 
     log_audit_event(
         db=db,
@@ -184,9 +197,13 @@ def delete_software(
     """
     Remove a software entry and revoke all assigned seats.
     """
+    company_id = tenant_company_id or current_user.company_id
     query = db.query(Software).filter(Software.id == software_id)
+    
     if current_user.role != PlatformRole.SUPER_ADMIN:
-        query = query.filter(Software.company_id == tenant_company_id)
+        if not company_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company context required.")
+        query = query.filter(Software.company_id == company_id)
 
     software = query.first()
     if not software:

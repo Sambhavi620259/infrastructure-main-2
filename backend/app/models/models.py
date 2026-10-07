@@ -355,3 +355,27 @@ class AuditLog(Base):
     new_value = Column(Text, nullable=True)
     ip_address = Column(String(50), nullable=True)
     timestamp = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class AuditSession(Base):
+    __tablename__ = "audit_sessions"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    company_id = Column(String, ForeignKey("companies.id"), nullable=False, index=True)
+    title = Column(String(150), nullable=False)
+    location_id = Column(String, nullable=True)
+    started_by = Column(String, ForeignKey("users.id"), nullable=False)
+    status = Column(String(50), default="IN_PROGRESS")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class AuditScanRecord(Base):
+    __tablename__ = "audit_scan_records"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    audit_session_id = Column(String, ForeignKey("audit_sessions.id"), nullable=False, index=True)
+    asset_id = Column(String, ForeignKey("assets.id"), nullable=True, index=True)
+    scanned_tag = Column(String(100), nullable=False)
+    is_verified = Column(Boolean, default=False)
+    scanned_by = Column(String, ForeignKey("users.id"), nullable=False)
+    scanned_at = Column(DateTime, default=datetime.utcnow)

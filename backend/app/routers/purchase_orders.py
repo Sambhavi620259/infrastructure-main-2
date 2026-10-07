@@ -3,7 +3,7 @@ from typing import List, Optional
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_roles, get_tenant_company_id
@@ -21,6 +21,7 @@ class PurchaseOrderCreate(BaseModel):
     expected_delivery: Optional[datetime] = None
     notes: Optional[str] = None
 
+
 class PurchaseOrderResponse(BaseModel):
     id: str
     company_id: str
@@ -30,9 +31,9 @@ class PurchaseOrderResponse(BaseModel):
     total_amount: float
     order_date: datetime
     expected_delivery: Optional[datetime] = None
+    notes: Optional[str] = None
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 @router.post("", response_model=PurchaseOrderResponse, status_code=status.HTTP_201_CREATED)
@@ -46,8 +47,8 @@ def create_purchase_order(
     Create a new procurement purchase order.
     """
     company_id = tenant_company_id or current_user.company_id
-    if not company_id:
-        raise HTTPException(status_code=400, detail="Company context required.")
+    if not company_id and current_user.role != PlatformRole.SUPER_ADMIN:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company context required.")
 
     po = PurchaseOrder(
         company_id=company_id,
@@ -79,6 +80,8 @@ def create_purchase_order(
 
 @router.get("", response_model=List[PurchaseOrderResponse])
 def list_purchase_orders(
+    skip: int = 0,
+    limit: int = 100,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
@@ -86,11 +89,15 @@ def list_purchase_orders(
     """
     List purchase orders for the active tenant.
     """
+    company_id = tenant_company_id or current_user.company_id
     query = db.query(PurchaseOrder)
-    if current_user.role != PlatformRole.SUPER_ADMIN:
-        query = query.filter(PurchaseOrder.company_id == tenant_company_id)
 
-    return query.order_by(PurchaseOrder.order_date.desc()).all()
+    if current_user.role != PlatformRole.SUPER_ADMIN:
+        if not company_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company context required.")
+        query = query.filter(PurchaseOrder.company_id == company_id)
+
+    return query.order_by(PurchaseOrder.order_date.desc()).offset(skip).limit(limit).all()
 
 
 @router.put("/{po_id}/status", response_model=PurchaseOrderResponse)
@@ -104,13 +111,17 @@ def update_po_status(
     """
     Update purchase order workflow status (e.g., ORDERED, RECEIVED, CANCELLED).
     """
+    company_id = tenant_company_id or current_user.company_id
     query = db.query(PurchaseOrder).filter(PurchaseOrder.id == po_id)
+
     if current_user.role != PlatformRole.SUPER_ADMIN:
-        query = query.filter(PurchaseOrder.company_id == tenant_company_id)
+        if not company_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company context required.")
+        query = query.filter(PurchaseOrder.company_id == company_id)
 
     po = query.first()
     if not po:
-        raise HTTPException(status_code=404, detail="Purchase order not found.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Purchase order not found.")
 
     old_status = po.status
     po.status = status_str.upper()

@@ -1,12 +1,13 @@
-from typing import List, Optional
+"""Implementation file: app/routers/depreciation.py"""
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_roles, get_tenant_company_id
-from app.models.models import Asset, DepreciationSchedule, PlatformRole, User
+from app.models.models import Asset, PlatformRole, User
 from app.schemas.schemas import (
-    DepreciationCalculateRequest, DepreciationResponse, DepreciationScheduleResponse
+    DepreciationCalculateRequest, DepreciationResponse
 )
 from app.services.audit_service import log_audit_event
 from app.services.depreciation_service import calculate_asset_depreciation
@@ -36,12 +37,13 @@ def calculate_depreciation_for_asset(
             detail="Target asset not found."
         )
 
-    method = calc_in.method if calc_in and calc_in.method else asset.depreciation_method or "STRAIGHT_LINE"
-    useful_years = calc_in.useful_life_years if calc_in and calc_in.useful_life_years else asset.useful_life_years or 5
-    salvage_val = calc_in.salvage_value if calc_in and calc_in.salvage_value is not None else asset.salvage_value or 0.0
+    method = calc_in.method if calc_in and calc_in.method else getattr(asset, "depreciation_method", "STRAIGHT_LINE")
+    useful_years = calc_in.useful_life_years if calc_in and calc_in.useful_life_years else getattr(asset, "useful_life_years", 5)
+    salvage_val = calc_in.salvage_value if calc_in and calc_in.salvage_value is not None else getattr(asset, "salvage_value", 0.0)
+    asset_cost = getattr(asset, "purchase_price", getattr(asset, "cost", 0.0))
 
     depreciation_result = calculate_asset_depreciation(
-        purchase_cost=asset.cost,
+        purchase_cost=asset_cost,
         purchase_date=asset.purchase_date,
         salvage_value=salvage_val,
         useful_life_years=useful_years,
@@ -65,7 +67,7 @@ def calculate_depreciation_for_asset(
 
     return DepreciationResponse(
         asset_id=asset.id,
-        original_cost=asset.cost,
+        original_cost=asset_cost,
         salvage_value=salvage_val,
         current_value=depreciation_result["current_value"],
         total_depreciated=depreciation_result["total_depreciated"],
@@ -73,34 +75,6 @@ def calculate_depreciation_for_asset(
         method=method,
         years_in_service=depreciation_result["years_in_service"]
     )
-
-
-@router.get("/schedule/{asset_id}", response_model=List[DepreciationScheduleResponse])
-def get_depreciation_schedule(
-    asset_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
-):
-    """
-    Retrieve or generate multi-year depreciation schedule breakdown for an asset.
-    """
-    query = db.query(Asset).filter(Asset.id == asset_id)
-    if current_user.role != PlatformRole.SUPER_ADMIN:
-        query = query.filter(Asset.company_id == tenant_company_id)
-
-    asset = query.first()
-    if not asset:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Target asset not found."
-        )
-
-    schedules = db.query(DepreciationSchedule).filter(
-        DepreciationSchedule.asset_id == asset.id
-    ).order_by(DepreciationSchedule.year.asc()).all()
-
-    return schedules
 
 
 @router.post("/batch-recalculate", status_code=status.HTTP_200_OK)
@@ -123,13 +97,14 @@ def batch_recalculate_depreciation(
     updated_count = 0
 
     for asset in assets:
-        if asset.cost and asset.purchase_date:
-            method = asset.depreciation_method or "STRAIGHT_LINE"
-            useful_years = asset.useful_life_years or 5
-            salvage_val = asset.salvage_value or 0.0
+        asset_cost = getattr(asset, "purchase_price", getattr(asset, "cost", None))
+        if asset_cost and asset.purchase_date:
+            method = getattr(asset, "depreciation_method", "STRAIGHT_LINE")
+            useful_years = getattr(asset, "useful_life_years", 5)
+            salvage_val = getattr(asset, "salvage_value", 0.0)
 
             result = calculate_asset_depreciation(
-                purchase_cost=asset.cost,
+                purchase_cost=asset_cost,
                 purchase_date=asset.purchase_date,
                 salvage_value=salvage_val,
                 useful_life_years=useful_years,

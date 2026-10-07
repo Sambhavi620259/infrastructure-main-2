@@ -24,7 +24,7 @@ def create_user(
     Create a new user within the authenticated tenant context.
     Super Admins can explicitly pass a target company_id.
     """
-    target_company_id = user_in.company_id if current_user.role == PlatformRole.SUPER_ADMIN else tenant_company_id
+    target_company_id = user_in.company_id if current_user.role == PlatformRole.SUPER_ADMIN else (tenant_company_id or current_user.company_id)
 
     if not target_company_id and current_user.role != PlatformRole.SUPER_ADMIN:
         raise HTTPException(
@@ -94,10 +94,13 @@ def list_users(
     """
     List all users in current tenant company.
     """
+    company_id = tenant_company_id or current_user.company_id
     query = db.query(User)
     
     if current_user.role != PlatformRole.SUPER_ADMIN:
-        query = query.filter(User.company_id == tenant_company_id)
+        if not company_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company context required.")
+        query = query.filter(User.company_id == company_id)
 
     if department_id:
         query = query.filter(User.department_id == department_id)
@@ -116,9 +119,13 @@ def get_user_by_id(
     """
     Retrieve specific user details.
     """
+    company_id = tenant_company_id or current_user.company_id
     query = db.query(User).filter(User.id == user_id)
+    
     if current_user.role != PlatformRole.SUPER_ADMIN:
-        query = query.filter(User.company_id == tenant_company_id)
+        if not company_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company context required.")
+        query = query.filter(User.company_id == company_id)
 
     user = query.first()
     if not user:
@@ -140,9 +147,13 @@ def update_user(
     """
     Update user profile, department, location, or role.
     """
+    company_id = tenant_company_id or current_user.company_id
     query = db.query(User).filter(User.id == user_id)
+    
     if current_user.role != PlatformRole.SUPER_ADMIN:
-        query = query.filter(User.company_id == tenant_company_id)
+        if not company_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company context required.")
+        query = query.filter(User.company_id == company_id)
 
     user = query.first()
     if not user:
@@ -152,16 +163,10 @@ def update_user(
         )
 
     old_role = user.role.value
-    if user_in.full_name is not None:
-        user.full_name = user_in.full_name
-    if user_in.role is not None:
-        user.role = user_in.role
-    if user_in.location is not None:
-        user.location = user_in.location
-    if user_in.department_id is not None:
-        user.department_id = user_in.department_id
-    if user_in.status is not None:
-        user.status = user_in.status
+    
+    update_data = user_in.model_dump(exclude_unset=True) if hasattr(user_in, "model_dump") else user_in.dict(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(user, field, value)
 
     db.commit()
     db.refresh(user)
@@ -190,9 +195,13 @@ def deactivate_user(
     """
     Soft delete / deactivate user account.
     """
+    company_id = tenant_company_id or current_user.company_id
     query = db.query(User).filter(User.id == user_id)
+    
     if current_user.role != PlatformRole.SUPER_ADMIN:
-        query = query.filter(User.company_id == tenant_company_id)
+        if not company_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company context required.")
+        query = query.filter(User.company_id == company_id)
 
     user = query.first()
     if not user:

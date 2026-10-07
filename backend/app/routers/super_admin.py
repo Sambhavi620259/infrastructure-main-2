@@ -118,10 +118,12 @@ def update_company(
         )
 
     old_status = company.status
-    if company_in.name is not None:
-        company.name = company_in.name
-    if company_in.status is not None:
-        company.status = company_in.status
+    
+    # Handle update fields flexibly
+    update_data = company_in.model_dump(exclude_unset=True) if hasattr(company_in, "model_dump") else company_in.dict(exclude_unset=True)
+    
+    for field, value in update_data.items():
+        setattr(company, field, value)
 
     db.commit()
     db.refresh(company)
@@ -142,10 +144,12 @@ def update_company(
 
 @router.get("/subscriptions", response_model=List[SubscriptionResponse])
 def list_subscriptions(
+    skip: int = 0,
+    limit: int = 100,
     db: Session = Depends(get_db),
     admin_user: User = Depends(require_roles([PlatformRole.SUPER_ADMIN]))
 ):
     """
     List subscription metrics and limits across all tenants.
     """
-    return db.query(Subscription).all()
+    return db.query(Subscription).offset(skip).limit(limit).all()

@@ -1,5 +1,7 @@
+"""Implementation file: app/services/qr_service.py"""
 import io
 import base64
+from typing import Optional
 import qrcode
 from qrcode.image.pil import PilImage
 

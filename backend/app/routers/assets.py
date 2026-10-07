@@ -258,8 +258,6 @@ def update_asset(
     return asset
 
 
-# --- Asset Operations: Assign / Return / Lifecycle ---
-
 @router.post("/{asset_id}/assign", response_model=AssetResponse)
 def assign_asset_to_user(
     asset_id: str,
@@ -285,7 +283,6 @@ def assign_asset_to_user(
             detail=f"Asset cannot be assigned because its status is currently {asset.status.value}."
         )
 
-    # Verify assigned target user exists
     target_user = db.query(User).filter(User.id == assign_in.user_id, User.status == "ACTIVE").first()
     if not target_user:
         raise HTTPException(status_code=404, detail="Target active user not found.")
@@ -293,7 +290,6 @@ def assign_asset_to_user(
     old_status = asset.status.value
     asset.status = AssetStatusEnum.ASSIGNED
 
-    # Deactivate existing assignments if any
     db.query(AssetAssignment).filter(
         AssetAssignment.asset_id == asset.id, 
         AssetAssignment.is_active == True
@@ -307,7 +303,6 @@ def assign_asset_to_user(
     )
     db.add(new_assignment)
 
-    # Lifecycle trail
     lifecycle = AssetLifecycle(
         company_id=asset.company_id,
         asset_id=asset.id,

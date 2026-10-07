@@ -14,15 +14,16 @@ router = APIRouter(prefix="/departments", tags=["Department Management"])
 
 class DepartmentCreate(BaseModel):
     name: str
-    code: Optional[str] = None
-    cost_center: Optional[str] = None
+    description: Optional[str] = None
+    department_head: Optional[str] = None
 
 class DepartmentResponse(BaseModel):
     id: str
     company_id: str
     name: str
-    code: Optional[str] = None
-    cost_center: Optional[str] = None
+    description: Optional[str] = None
+    department_head: Optional[str] = None
+    status: Optional[str] = "ACTIVE"
 
     class Config:
         orm_mode = True
@@ -36,7 +37,7 @@ def create_department(
     tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
 ):
     """
-    Create a new organizational department or cost center.
+    Create a new organizational department.
     """
     company_id = tenant_company_id or current_user.company_id
     if not company_id:
@@ -45,8 +46,8 @@ def create_department(
     dept = Department(
         company_id=company_id,
         name=dept_in.name,
-        code=dept_in.code,
-        cost_center=dept_in.cost_center
+        description=dept_in.description,
+        department_head=dept_in.department_head
     )
     db.add(dept)
     db.commit()

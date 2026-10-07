@@ -1,4 +1,5 @@
-from typing import List, Optional
+"""Implementation file: app/routers/notifications.py"""
+from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -56,7 +57,7 @@ def mark_notification_as_read(
     return notification
 
 
-@router.put("/read-all", status_code=status.HTTP_200_OK)
+@router.put("/read-all", response_model=Dict[str, Any], status_code=status.HTTP_200_OK)
 def mark_all_notifications_as_read(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)

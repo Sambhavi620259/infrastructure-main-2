@@ -25,11 +25,19 @@ def create_inventory_item(
     Create a new inventory or consumable item entry.
     """
     company_id = tenant_company_id or current_user.company_id
-    if not company_id:
+    if not company_id and current_user.role != PlatformRole.SUPER_ADMIN:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, 
             detail="Valid company context is required."
         )
+
+    # Determine initial stock status
+    if item_in.quantity <= 0:
+        initial_status = "OUT_OF_STOCK"
+    elif item_in.quantity <= item_in.reorder_level:
+        initial_status = "LOW_STOCK"
+    else:
+        initial_status = "IN_STOCK"
 
     item = InventoryItem(
         company_id=company_id,
@@ -39,7 +47,7 @@ def create_inventory_item(
         reorder_level=item_in.reorder_level,
         unit_cost=item_in.unit_cost,
         location=item_in.location,
-        status="IN_STOCK" if item_in.quantity > 0 else "OUT_OF_STOCK"
+        status=initial_status
     )
     db.add(item)
     db.commit()
@@ -70,9 +78,13 @@ def list_inventory_items(
     """
     List all inventory and consumable items for the current tenant.
     """
+    company_id = tenant_company_id or current_user.company_id
     query = db.query(InventoryItem)
+
     if current_user.role != PlatformRole.SUPER_ADMIN:
-        query = query.filter(InventoryItem.company_id == tenant_company_id)
+        if not company_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company context required.")
+        query = query.filter(InventoryItem.company_id == company_id)
 
     if category:
         query = query.filter(InventoryItem.category == category)
@@ -90,9 +102,13 @@ def get_inventory_item(
     """
     Retrieve specific inventory item details.
     """
+    company_id = tenant_company_id or current_user.company_id
     query = db.query(InventoryItem).filter(InventoryItem.id == item_id)
+
     if current_user.role != PlatformRole.SUPER_ADMIN:
-        query = query.filter(InventoryItem.company_id == tenant_company_id)
+        if not company_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company context required.")
+        query = query.filter(InventoryItem.company_id == company_id)
 
     item = query.first()
     if not item:
@@ -114,9 +130,13 @@ def update_inventory_item(
     """
     Update stock quantities, unit cost, reorder levels, or location.
     """
+    company_id = tenant_company_id or current_user.company_id
     query = db.query(InventoryItem).filter(InventoryItem.id == item_id)
+
     if current_user.role != PlatformRole.SUPER_ADMIN:
-        query = query.filter(InventoryItem.company_id == tenant_company_id)
+        if not company_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company context required.")
+        query = query.filter(InventoryItem.company_id == company_id)
 
     item = query.first()
     if not item:
@@ -126,12 +146,14 @@ def update_inventory_item(
         )
 
     old_qty = item.quantity
-    update_data = item_in.dict(exclude_unset=True)
+    
+    # Use model_dump for Pydantic v2 compatibility (fallback to dict if needed)
+    update_data = item_in.model_dump(exclude_unset=True) if hasattr(item_in, "model_dump") else item_in.dict(exclude_unset=True)
 
     for field, value in update_data.items():
         setattr(item, field, value)
 
-    # Adjust stock status dynamically based on current quantity
+    # Adjust stock status dynamically based on current quantity and reorder level
     if item.quantity <= 0:
         item.status = "OUT_OF_STOCK"
     elif item.quantity <= item.reorder_level:
@@ -166,9 +188,13 @@ def delete_inventory_item(
     """
     Remove an inventory entry from the system.
     """
+    company_id = tenant_company_id or current_user.company_id
     query = db.query(InventoryItem).filter(InventoryItem.id == item_id)
+
     if current_user.role != PlatformRole.SUPER_ADMIN:
-        query = query.filter(InventoryItem.company_id == tenant_company_id)
+        if not company_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company context required.")
+        query = query.filter(InventoryItem.company_id == company_id)
 
     item = query.first()
     if not item:

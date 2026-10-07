@@ -1,3 +1,4 @@
+"""Implementation file: app/services/notification_service.py"""
 from typing import Optional, List
 from sqlalchemy.orm import Session
 

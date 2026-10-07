@@ -1,3 +1,4 @@
+"""Implementation file: app/routers/audit_logs.py"""
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -36,7 +37,8 @@ def list_audit_logs(
     if user_id:
         query = query.filter(AuditLog.user_id == user_id)
 
-    return query.order_by(AuditLog.created_at.desc()).offset(skip).limit(limit).all()
+    # Fixed: AuditLog model uses 'timestamp' instead of 'created_at'
+    return query.order_by(AuditLog.timestamp.desc()).offset(skip).limit(limit).all()
 
 
 @router.get("/{log_id}", response_model=AuditLogResponse)

@@ -1,7 +1,7 @@
 """Implementation file: app/routers/cloud.py"""
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm Session
+from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from app.core.database import get_db
@@ -52,7 +52,7 @@ def register_cloud_resource(
         resource_id=res_in.resource_id,
         resource_type=res_in.resource_type,
         region=res_in.region,
-        cost_monthly=res_in.cost_monthly
+        monthly_cost=res_in.cost_monthly
     )
     db.add(cloud_res)
     db.commit()

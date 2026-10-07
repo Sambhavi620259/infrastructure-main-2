@@ -1,4 +1,5 @@
 """Implementation file: app/routers/financial.py"""
+"""Implementation file: app/routers/financial.py"""
 from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -23,7 +24,7 @@ def get_financial_summary(
     """
     company_id = tenant_company_id or current_user.company_id
     if not company_id and current_user.role != PlatformRole.SUPER_ADMIN:
-        raise HTTPException(status_code=400, detail="Company context required.")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company context required.")
 
     query = db.query(
         func.coalesce(func.sum(Asset.purchase_price), 0.0).label("total_purchase_cost"),
@@ -34,8 +35,8 @@ def get_financial_summary(
         query = query.filter(Asset.company_id == company_id)
 
     res = query.first()
-    total_cost = float(res.total_purchase_cost) if res else 0.0
-    net_value = float(res.net_book_value) if res else 0.0
+    total_cost = float(res.total_purchase_cost) if res and res.total_purchase_cost is not None else 0.0
+    net_value = float(res.net_book_value) if res and res.net_book_value is not None else 0.0
     accumulated_depreciation = max(0.0, total_cost - net_value)
 
     return {
@@ -56,6 +57,8 @@ def get_department_financial_breakdown(
     Get asset valuation and financial allocation broken down by company department.
     """
     company_id = tenant_company_id or current_user.company_id
+    if not company_id and current_user.role != PlatformRole.SUPER_ADMIN:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company context required.")
 
     query = db.query(
         Department.id.label("department_id"),
@@ -74,9 +77,9 @@ def get_department_financial_breakdown(
         {
             "department_id": r.department_id,
             "department_name": r.department_name,
-            "asset_count": r.asset_count,
-            "total_cost": round(float(r.total_cost), 2),
-            "current_value": round(float(r.current_value), 2)
+            "asset_count": int(r.asset_count or 0),
+            "total_cost": round(float(r.total_cost or 0.0), 2),
+            "current_value": round(float(r.current_value or 0.0), 2)
         }
         for r in results
     ]

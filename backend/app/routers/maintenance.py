@@ -1,10 +1,11 @@
+"""Implementation file: app/routers/maintenance.py"""
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_roles, get_tenant_company_id
-from app.models.models import MaintenanceLog, Asset, AssetStatusEnum, PlatformRole, User
+from app.models.models import Maintenance, Asset, AssetStatusEnum, PlatformRole, User
 from app.schemas.schemas import (
     MaintenanceCreate, MaintenanceResponse, MaintenanceUpdate
 )
@@ -24,25 +25,29 @@ def create_maintenance_log(
     Schedule or log a new maintenance event for an asset.
     """
     company_id = tenant_company_id or current_user.company_id
-    if not company_id:
+    if not company_id and current_user.role != PlatformRole.SUPER_ADMIN:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Valid company context is required."
         )
 
-    asset = db.query(Asset).filter(
-        Asset.id == maintenance_in.asset_id,
-        Asset.company_id == company_id
-    ).first()
-
+    # For super admins without tenant context, fetch asset by id alone if company_id isn't forced, 
+    # otherwise scope by company_id for security.
+    asset_query = db.query(Asset).filter(Asset.id == maintenance_in.asset_id)
+    if company_id:
+        asset_query = asset_query.filter(Asset.company_id == company_id)
+    
+    asset = asset_query.first()
     if not asset:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Target asset for maintenance not found."
         )
 
+    resolved_company_id = asset.company_id
+
     m_log = MaintenanceLog(
-        company_id=company_id,
+        company_id=resolved_company_id,
         asset_id=asset.id,
         maintenance_type=maintenance_in.maintenance_type,
         scheduled_date=maintenance_in.scheduled_date,
@@ -65,7 +70,7 @@ def create_maintenance_log(
         db=db,
         action="CREATE_MAINTENANCE_LOG",
         entity="MaintenanceLog",
-        company_id=company_id,
+        company_id=resolved_company_id,
         user_id=current_user.id,
         entity_id=m_log.id,
         new_value=f"Asset ID: {asset.id}, Type: {m_log.maintenance_type}"
@@ -87,9 +92,13 @@ def list_maintenance_logs(
     """
     List all maintenance records with optional filters.
     """
+    company_id = tenant_company_id or current_user.company_id
     query = db.query(MaintenanceLog)
+
     if current_user.role != PlatformRole.SUPER_ADMIN:
-        query = query.filter(MaintenanceLog.company_id == tenant_company_id)
+        if not company_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company context required.")
+        query = query.filter(MaintenanceLog.company_id == company_id)
 
     if asset_id:
         query = query.filter(MaintenanceLog.asset_id == asset_id)
@@ -110,9 +119,13 @@ def get_maintenance_log(
     """
     Retrieve specific maintenance log details.
     """
+    company_id = tenant_company_id or current_user.company_id
     query = db.query(MaintenanceLog).filter(MaintenanceLog.id == maintenance_id)
+
     if current_user.role != PlatformRole.SUPER_ADMIN:
-        query = query.filter(MaintenanceLog.company_id == tenant_company_id)
+        if not company_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company context required.")
+        query = query.filter(MaintenanceLog.company_id == company_id)
 
     m_log = query.first()
     if not m_log:
@@ -134,9 +147,13 @@ def update_maintenance_log(
     """
     Update maintenance status, completion details, or associated costs.
     """
+    company_id = tenant_company_id or current_user.company_id
     query = db.query(MaintenanceLog).filter(MaintenanceLog.id == maintenance_id)
+
     if current_user.role != PlatformRole.SUPER_ADMIN:
-        query = query.filter(MaintenanceLog.company_id == tenant_company_id)
+        if not company_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company context required.")
+        query = query.filter(MaintenanceLog.company_id == company_id)
 
     m_log = query.first()
     if not m_log:
@@ -146,7 +163,9 @@ def update_maintenance_log(
         )
 
     old_status = m_log.status
-    update_data = maintenance_in.dict(exclude_unset=True)
+    
+    # Use model_dump for Pydantic v2 compatibility (fallback to dict if needed)
+    update_data = maintenance_in.model_dump(exclude_unset=True) if hasattr(maintenance_in, "model_dump") else maintenance_in.dict(exclude_unset=True)
 
     for field, value in update_data.items():
         setattr(m_log, field, value)
@@ -184,9 +203,13 @@ def delete_maintenance_log(
     """
     Delete a maintenance log record.
     """
+    company_id = tenant_company_id or current_user.company_id
     query = db.query(MaintenanceLog).filter(MaintenanceLog.id == maintenance_id)
+
     if current_user.role != PlatformRole.SUPER_ADMIN:
-        query = query.filter(MaintenanceLog.company_id == tenant_company_id)
+        if not company_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company context required.")
+        query = query.filter(MaintenanceLog.company_id == company_id)
 
     m_log = query.first()
     if not m_log:
