@@ -138,6 +138,12 @@ class UserProfile(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class UserProfileResponse(BaseModel):
+    """Envelope the frontend expects: {"user": {...}}."""
+
+    user: UserProfile
+
+
 # --- Asset Management Schemas ---
 
 class AssetCategoryCreate(BaseModel):

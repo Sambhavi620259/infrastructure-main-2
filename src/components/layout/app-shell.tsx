@@ -28,7 +28,7 @@ import {
   Bars3Icon,
 } from "@heroicons/react/24/outline";
 import { endDemoSession, type DemoSession } from "@/lib/demo-session";
-import { apiFetch, clearAuth } from "@/lib/api";
+import { apiFetch, ApiRequestError, clearAuth } from "@/lib/api";
 import { canAccessPath, defaultRouteForRole, roles, workspaceForRole, type Workspace } from "@/lib/roles";
 import { routes } from "@/lib/routes";
 
@@ -126,11 +126,15 @@ export function AppShell({ children }: { children: ReactNode }) {
         if (cancelled) return;
         const name = data.user.name || data.user.email.split("@")[0];
         setAuthenticatedUser({ name, initials: name.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase(), role: data.user.role });
-      } catch {
+      } catch (caught) {
         if (cancelled) return;
-        clearAuth();
-        endDemoSession();
-        router.replace("/login");
+        if (caught instanceof ApiRequestError && caught.status === 401) {
+          clearAuth();
+          endDemoSession();
+          router.replace("/login");
+          return;
+        }
+        console.error("Failed to load session profile", caught);
       }
     };
     loadSession();

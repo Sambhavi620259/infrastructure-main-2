@@ -19,9 +19,9 @@ export interface UserProfile {
   name: string;
   email: string;
   role: UserRole;
-  department: string;
-  companyId: string;
-  avatarUrl: string;
+  department: string | null;
+  companyId: string | null;
+  avatarUrl: string | null;
 }
 
 export const ROLE_REDIRECT_MAP: Record<UserRole, string> = {

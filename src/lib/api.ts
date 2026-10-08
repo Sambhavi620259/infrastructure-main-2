@@ -3,6 +3,13 @@
 
 export type ApiError = { detail?: string; message?: string };
 
+export class ApiRequestError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = "ApiRequestError";
+  }
+}
+
 export function apiUrl(path: string) {
   return path.startsWith("/") ? path : `/${path}`;
 }
@@ -22,7 +29,10 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
 
   const data = (await response.json().catch(() => ({}))) as T & ApiError;
   if (!response.ok) {
-    throw new Error(data.detail || data.message || `Request failed (${response.status})`);
+    throw new ApiRequestError(
+      data.detail || data.message || `Request failed (${response.status})`,
+      response.status,
+    );
   }
   return data as T;
 }

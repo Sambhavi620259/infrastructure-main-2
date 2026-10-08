@@ -1,10 +1,13 @@
 """Implementation file: app/main.py"""
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.database import engine, Base
+from app.core.deps import get_current_user
 from app.core.seed import seed_initial_users
+from app.models.models import User
+from app.schemas.schemas import UserProfile, UserProfileResponse
 from app.routers import (
     auth,
     users,
@@ -71,21 +74,17 @@ app.include_router(audit_logs.router, prefix="/api")
 app.include_router(super_admin.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
 
-# Handle /api/profile endpoint (frontend expects this path)
-from app.core.deps import get_current_user
-from app.models.models import User
-from app.schemas.schemas import UserProfile
-from fastapi import Depends
-
-@app.get("/api/profile", response_model=UserProfile)
-def api_profile(current_user: User = Depends(get_current_user)):
+@app.get("/api/profile", response_model=UserProfileResponse)
+def api_profile(current_user: User = Depends(get_current_user)) -> UserProfileResponse:
     department_name = current_user.department.name if current_user.department else None
-    return UserProfile(
-        id=current_user.id,
-        name=current_user.full_name,
-        email=current_user.email,
-        role=current_user.role,
-        department=department_name,
-        companyId=current_user.company_id,
-        avatarUrl=None
+    return UserProfileResponse(
+        user=UserProfile(
+            id=current_user.id,
+            name=current_user.full_name,
+            email=current_user.email,
+            role=current_user.role,
+            department=department_name,
+            companyId=current_user.company_id,
+            avatarUrl=None,
+        )
     )
