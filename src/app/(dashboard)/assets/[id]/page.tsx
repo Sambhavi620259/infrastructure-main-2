@@ -1,11 +1,168 @@
-import Link from "next/link";
+"use client";
 
-export default async function AssetDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  return <main className="mx-auto max-w-7xl space-y-8">
-    <Link href="/assets" className="inline-flex text-sm font-semibold text-brand-600 hover:text-brand-700">← Back to assets</Link>
-    <header className="flex flex-col justify-between gap-4 rounded-xl border border-slate-200 bg-white p-6 shadow-sm lg:flex-row lg:items-start"><div className="flex gap-4"><span className="grid h-14 w-14 shrink-0 place-items-center rounded-xl bg-brand-50 text-xl font-bold text-brand-700">MB</span><div><div className="flex flex-wrap items-center gap-3"><h1 className="text-2xl font-bold tracking-tight text-slate-950">MacBook Pro 14&quot;</h1><span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">Assigned</span></div><p className="mt-2 text-sm text-slate-500">Asset tag: <span className="font-semibold text-slate-700">{id}</span> · Apple M3 Pro · 18 GB unified memory</p></div></div><div className="flex gap-3"><button className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Edit asset</button><button className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700">Assign / transfer</button></div></header>
-    <section className="grid gap-6 lg:grid-cols-[1.5fr_1fr]"><article className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm"><h2 className="font-semibold text-slate-900">Asset details</h2><dl className="mt-6 grid gap-x-8 gap-y-5 sm:grid-cols-2">{[["Category", "Laptop"], ["Manufacturer", "Apple"], ["Serial number", "C02ZD1ABC123"], ["Purchase date", "08 May 2026"], ["Purchase cost", "₹2,49,900"], ["Warranty expires", "08 May 2029"], ["Location", "Mumbai · HQ"], ["Cost center", "Engineering · 4102"]].map(([label, value]) => <div key={label}><dt className="text-sm text-slate-500">{label}</dt><dd className="mt-1 text-sm font-semibold text-slate-800">{value}</dd></div>)}</dl></article><article className="rounded-xl bg-slate-950 p-6 text-white shadow-sm"><p className="text-sm font-medium text-slate-400">Current assignment</p><div className="mt-5 flex items-center gap-3"><span className="grid h-11 w-11 place-items-center rounded-full bg-brand-600 text-sm font-bold">PS</span><div><p className="font-semibold">Priya Sharma</p><p className="text-sm text-slate-400">Product Design · Mumbai HQ</p></div></div><div className="mt-8 border-t border-white/10 pt-4"><p className="text-sm text-slate-400">Assigned since</p><p className="mt-1 font-semibold">12 May 2026</p><button className="mt-5 text-sm font-semibold text-brand-400 hover:text-brand-300">View assignment history →</button></div></article></section>
-    <section className="grid gap-6 lg:grid-cols-[1.5fr_1fr]"><article className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm"><h2 className="font-semibold text-slate-900">Lifecycle history</h2><div className="mt-6 space-y-6 border-l border-slate-200 pl-5">{[["12 May 2026", "Assigned to Priya Sharma", "Asset was deployed from Mumbai HQ inventory."], ["09 May 2026", "Inventory received", "Purchase order PO-2026-184 received and asset tagged."], ["08 May 2026", "Procured from Apple India", "Added to the FY 2026 fleet refresh order."]].map(([date, title, note]) => <div key={date} className="relative"><span className="absolute -left-[1.65rem] top-1.5 h-3 w-3 rounded-full border-2 border-white bg-brand-500" /><p className="text-xs font-semibold text-slate-400">{date}</p><p className="mt-1 font-semibold text-slate-800">{title}</p><p className="mt-1 text-sm text-slate-500">{note}</p></div>)}</div></article><article className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm"><h2 className="font-semibold text-slate-900">Device health</h2><div className="mt-6 space-y-5">{[["Last seen", "Today, 10:31", "text-emerald-600"], ["Encryption", "FileVault enabled", "text-emerald-600"], ["OS patch level", "Current", "text-emerald-600"], ["Security agent", "Healthy", "text-emerald-600"]].map(([label, value, color]) => <div key={label} className="flex items-center justify-between"><span className="text-sm text-slate-500">{label}</span><span className={`text-sm font-semibold ${color}`}>{value}</span></div>)}</div><button className="mt-7 text-sm font-semibold text-brand-600 hover:text-brand-700">View telemetry →</button></article></section>
-  </main>;
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { useParams } from "next/navigation";
+import { getAsset, listAssetLifecycle } from "@/lib/assets";
+import {
+  assetStatusLabel,
+  assetStatusStyle,
+  formatDate,
+  type Asset,
+  type AssetLifecycleEntry,
+} from "@/types/asset";
+
+function initials(name: string): string {
+  return name
+    .split(/\s+/)
+    .map((part) => part[0] ?? "")
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+}
+
+export default function AssetDetailPage() {
+  const params = useParams<{ id: string }>();
+  const assetId = typeof params.id === "string" ? params.id : "";
+
+  const [asset, setAsset] = useState<Asset | null>(null);
+  const [lifecycle, setLifecycle] = useState<AssetLifecycleEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!assetId) return;
+    let cancelled = false;
+    setLoading(true);
+
+    getAsset(assetId)
+      .then((data) => {
+        if (!cancelled) {
+          setAsset(data);
+          setError("");
+        }
+      })
+      .catch((caught) => {
+        if (!cancelled) setError(caught instanceof Error ? caught.message : "Unable to load this asset.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    listAssetLifecycle(assetId)
+      .then((data) => {
+        if (!cancelled) setLifecycle(data);
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [assetId]);
+
+  if (loading) {
+    return (
+      <main className="mx-auto max-w-7xl">
+        <p className="text-sm text-slate-500">Loading asset\u2026</p>
+      </main>
+    );
+  }
+
+  if (error || !asset) {
+    return (
+      <main className="mx-auto max-w-7xl space-y-4">
+        <Link href="/assets" className="inline-flex text-sm font-semibold text-brand-600 hover:text-brand-700">
+          \u2190 Back to assets
+        </Link>
+        <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800">
+          {error || "Asset not found."}
+        </div>
+      </main>
+    );
+  }
+
+  const details: [string, string][] = [
+    ["Category", asset.category],
+    ["Type", asset.type ?? "\u2014"],
+    ["Manufacturer", asset.brand ?? "\u2014"],
+    ["Model", asset.model ?? "\u2014"],
+    ["Serial number", asset.serial_number],
+    ["Condition", asset.condition],
+    ["Purchase date", formatDate(asset.purchase_date)],
+    ["Purchase cost", String(asset.purchase_price ?? "\u2014")],
+    ["Warranty expires", formatDate(asset.warranty_end)],
+    ["Registered", formatDate(asset.created_at)],
+  ];
+
+  return (
+    <main className="mx-auto max-w-7xl space-y-8">
+      <Link href="/assets" className="inline-flex text-sm font-semibold text-brand-600 hover:text-brand-700">
+        \u2190 Back to assets
+      </Link>
+
+      <header className="flex flex-col justify-between gap-4 rounded-xl border border-slate-200 bg-white p-6 shadow-sm lg:flex-row lg:items-start">
+        <div className="flex gap-4">
+          <span className="grid h-14 w-14 shrink-0 place-items-center rounded-xl bg-brand-50 text-xl font-bold text-brand-700">
+            {initials(asset.name)}
+          </span>
+          <div>
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="text-2xl font-bold tracking-tight text-slate-950">{asset.name}</h1>
+              <span
+                className={`rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${assetStatusStyle(asset.status)}`}
+              >
+                {assetStatusLabel(asset.status)}
+              </span>
+            </div>
+            <p className="mt-2 text-sm text-slate-500">
+              Asset tag: <span className="font-semibold text-slate-700">{asset.asset_tag}</span>
+              {asset.model ? ` \u00b7 ${asset.model}` : ""}
+            </p>
+          </div>
+        </div>
+      </header>
+
+      <section className="grid gap-6 lg:grid-cols-[1.5fr_1fr]">
+        <article className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="font-semibold text-slate-900">Asset details</h2>
+          <dl className="mt-6 grid gap-x-8 gap-y-5 sm:grid-cols-2">
+            {details.map(([label, value]) => (
+              <div key={label}>
+                <dt className="text-sm text-slate-500">{label}</dt>
+                <dd className="mt-1 text-sm font-semibold text-slate-800">{value}</dd>
+              </div>
+            ))}
+          </dl>
+          {asset.description && (
+            <div className="mt-6 border-t border-slate-100 pt-5">
+              <p className="text-sm text-slate-500">Description</p>
+              <p className="mt-1 text-sm text-slate-800">{asset.description}</p>
+            </div>
+          )}
+        </article>
+
+        <article className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="font-semibold text-slate-900">Lifecycle history</h2>
+          {lifecycle.length === 0 ? (
+            <p className="mt-6 text-sm text-slate-500">No lifecycle events recorded for this asset yet.</p>
+          ) : (
+            <div className="mt-6 space-y-6 border-l border-slate-200 pl-5">
+              {lifecycle.map((entry) => (
+                <div key={entry.id} className="relative">
+                  <span className="absolute -left-[1.65rem] top-1.5 h-3 w-3 rounded-full border-2 border-white bg-brand-500" />
+                  <p className="text-xs font-semibold text-slate-400">{formatDate(entry.timestamp)}</p>
+                  <p className="mt-1 font-semibold text-slate-800">{entry.action}</p>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {entry.previous_status ? `${entry.previous_status} \u2192 ` : ""}
+                    {entry.new_status}
+                  </p>
+                  {entry.remarks && <p className="mt-1 text-sm text-slate-500">{entry.remarks}</p>}
+                </div>
+              ))}
+            </div>
+          )}
+        </article>
+      </section>
+    </main>
+  );
 }

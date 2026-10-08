@@ -4,7 +4,9 @@ const BACKEND_API_URL = (process.env.BACKEND_API_URL || "http://127.0.0.1:8000")
 
 async function proxy(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   const { path } = await context.params;
-  const target = `${BACKEND_API_URL}/api/${path.join("/")}`;
+  // request.nextUrl.search carries the query string ("" when there is none).
+  // Without it every filter, search term and pagination parameter is dropped.
+  const target = `${BACKEND_API_URL}/api/${path.join("/")}${request.nextUrl.search}`;
   const headers = new Headers();
 
   const contentType = request.headers.get("content-type");
