@@ -1,5 +1,5 @@
 """Implementation file: app/routers/assets.py"""
-from typing import List, Optional
+from typing import Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
@@ -16,6 +16,37 @@ from app.schemas.schemas import (
 from app.services.audit_service import log_audit_event
 
 router = APIRouter(prefix="/assets", tags=["Asset Management"])
+
+
+def _active_assignees(db: Session, asset_ids: List[str]) -> Dict[str, User]:
+    """
+    Map asset id -> currently assigned User, in a single query.
+
+    Assignment is held in asset_assignments (one active row per asset), not on
+    the asset record, so it has to be joined in rather than read off the model.
+    """
+    if not asset_ids:
+        return {}
+    rows = (
+        db.query(AssetAssignment.asset_id, User)
+        .join(User, User.id == AssetAssignment.user_id)
+        .filter(
+            AssetAssignment.asset_id.in_(asset_ids),
+            AssetAssignment.is_active.is_(True),
+        )
+        .all()
+    )
+    return {asset_id: user for asset_id, user in rows}
+
+
+def _with_assignee(asset: Asset, assignee: Optional[User]) -> AssetResponse:
+    """Build the response and attach the current holder, when there is one."""
+    response = AssetResponse.model_validate(asset)
+    if assignee is not None:
+        response.assigned_to_id = assignee.id
+        response.assigned_to_name = assignee.full_name
+        response.assigned_to_email = assignee.email
+    return response
 
 
 # --- Asset Categories ---
@@ -181,7 +212,9 @@ def list_assets(
             (Asset.serial_number.ilike(search_fmt))
         )
 
-    return query.offset(skip).limit(limit).all()
+    assets = query.offset(skip).limit(limit).all()
+    assignees = _active_assignees(db, [asset.id for asset in assets])
+    return [_with_assignee(asset, assignees.get(asset.id)) for asset in assets]
 
 
 @router.get("/{asset_id}", response_model=AssetResponse)
@@ -201,7 +234,7 @@ def get_asset(
     asset = query.first()
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found.")
-    return asset
+    return _with_assignee(asset, _active_assignees(db, [asset.id]).get(asset.id))
 
 
 @router.put("/{asset_id}", response_model=AssetResponse)
@@ -327,7 +360,7 @@ def assign_asset_to_user(
         new_value=f"Assigned To User ID: {target_user.id}"
     )
 
-    return asset
+    return _with_assignee(asset, target_user)
 
 
 @router.post("/{asset_id}/unassign", response_model=AssetResponse)

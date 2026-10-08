@@ -3,8 +3,8 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.core.database import engine, Base
 from app.core.deps import get_current_user
+from app.core.logging_config import configure_logging
 from app.core.seed import seed_initial_users
 from app.models.models import User
 from app.schemas.schemas import UserProfile, UserProfileResponse
@@ -34,9 +34,10 @@ from app.routers import (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Create tables if they don't exist
-    Base.metadata.create_all(bind=engine)
-    # Seed initial admin user
+    configure_logging()
+    # Schema is owned by Alembic (see backend/migrations/README.md).
+    # Run `alembic upgrade head` before starting; create_all is deliberately gone
+    # so migrations are the single source of truth.
     seed_initial_users()
     yield
 

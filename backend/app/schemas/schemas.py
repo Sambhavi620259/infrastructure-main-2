@@ -102,6 +102,8 @@ class UserBase(BaseModel):
     role: PlatformRole = PlatformRole.EMPLOYEE
     location: Optional[str] = None
     department_id: Optional[str] = None
+    # Only meaningful for SUB_ADMIN; see SubAdminModule.
+    modules: Optional[List[str]] = None
 
 
 class UserCreate(UserBase):
@@ -112,6 +114,7 @@ class UserCreate(UserBase):
 class UserUpdate(BaseModel):
     full_name: Optional[str] = None
     role: Optional[PlatformRole] = None
+    modules: Optional[List[str]] = None
     location: Optional[str] = None
     department_id: Optional[str] = None
     status: Optional[str] = None
@@ -203,6 +206,10 @@ class AssetResponse(AssetBase):
     id: str
     company_id: str
     status: AssetStatusEnum
+    # Derived from the active AssetAssignment row, not stored on the asset.
+    assigned_to_id: Optional[str] = None
+    assigned_to_name: Optional[str] = None
+    assigned_to_email: Optional[str] = None
     created_by: Optional[str] = None
     created_at: datetime
     updated_at: datetime

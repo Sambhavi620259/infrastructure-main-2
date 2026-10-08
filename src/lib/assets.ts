@@ -53,3 +53,16 @@ export async function getDashboardMetrics(): Promise<DashboardMetrics> {
   const data = await apiFetch<{ metrics: DashboardMetrics }>("/api/dashboard/overview");
   return data.metrics;
 }
+
+/** POST /api/assets/{id}/assign — the asset must be IN_STOCK or REQUESTED. */
+export function assignAsset(assetId: string, userId: string): Promise<Asset> {
+  return apiFetch<Asset>(`/api/assets/${encodeURIComponent(assetId)}/assign`, {
+    method: "POST",
+    body: JSON.stringify({ user_id: userId }),
+  });
+}
+
+/** POST /api/assets/{id}/unassign — returns the asset to IN_STOCK. */
+export function unassignAsset(assetId: string): Promise<Asset> {
+  return apiFetch<Asset>(`/api/assets/${encodeURIComponent(assetId)}/unassign`, { method: "POST" });
+}

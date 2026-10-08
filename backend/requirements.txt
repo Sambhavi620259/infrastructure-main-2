@@ -1,13 +1,16 @@
-# Backend dependencies go here.
-fastapi>=0.110.0
-uvicorn[standard]>=0.28.0
-sqlalchemy>=2.0.28
-psycopg2-binary>=2.9.9
-alembic>=1.13.1
-pydantic>=2.6.4
-pydantic-settings>=2.2.1
-python-jose[cryptography]>=3.3.0
+# Pinned to the versions this codebase is known to work against.
+# Unbounded ranges previously resolved to SQLAlchemy 2.1 (which changed the
+# default Postgres driver) and bcrypt 5.0 (which broke passlib), neither of
+# which existed when this code was written. Upgrade deliberately, one at a time.
+fastapi==0.143.0
+uvicorn[standard]==0.54.0
+sqlalchemy==2.1.4
+psycopg2-binary==2.9.13
+alembic==1.20.0
+pydantic==2.14.0
+pydantic-settings==2.15.0
+python-jose[cryptography]==3.5.0
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
-python-multipart>=0.0.9
-email-validator>=2.1.1
+python-multipart==0.0.32
+email-validator==2.3.0

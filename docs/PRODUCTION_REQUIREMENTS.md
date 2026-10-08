@@ -2,15 +2,15 @@
 
 ## Roles
 
-| Role | Scope | UI workspace/pages |
-|---|---|---|
-| Super Admin | All tenants | `/super-admin/*` |
-| IT Admin | One company; all ITAM modules + configuration | `/dashboard`, `/users`, `/settings`, all ITAM modules |
-| HAM Sub-Admin | Hardware | `/assets` + reports |
-| SAM Sub-Admin | Software | `/software` + reports |
-| Cloud Sub-Admin | Cloud resources | `/cloud` + reports |
-| Discovery Sub-Admin | Discovery/scanning | `/discovery` + reports |
-| Reporting User | Reports only | `/reports` |
+| Role                | Scope                                         | UI workspace/pages                                    |
+| ------------------- | --------------------------------------------- | ----------------------------------------------------- |
+| Super Admin         | All tenants                                   | `/super-admin/*`                                      |
+| IT Admin            | One company; all ITAM modules + configuration | `/dashboard`, `/users`, `/settings`, all ITAM modules |
+| HAM Sub-Admin       | Hardware                                      | `/assets` + reports                                   |
+| SAM Sub-Admin       | Software                                      | `/software` + reports                                 |
+| Cloud Sub-Admin     | Cloud resources                               | `/cloud` + reports                                    |
+| Discovery Sub-Admin | Discovery/scanning                            | `/discovery` + reports                                |
+| Reporting User      | Reports only                                  | `/reports`                                            |
 
 The canonical role and permission model lives in `src/lib/roles.ts`.
 
@@ -84,7 +84,6 @@ Recommended runtime:
 - CI/CD should run install, lint, typecheck, production build, unit/integration tests and dependency/security scans before deployment.
 
 The current repository contains the frontend/admin UI and local fixture data. It is not a substitute for the backend authorization, tenant isolation, billing, discovery workers or persistence layers described above.
-
 
 ## IT Agent workspace
 

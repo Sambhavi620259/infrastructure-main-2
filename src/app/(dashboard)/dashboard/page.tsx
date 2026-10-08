@@ -71,8 +71,18 @@ export default function DashboardPage() {
   }, []);
 
   const tiles: [string, string, typeof CubeIcon, string][] = [
-    ["Total assets", metrics ? String(metrics.total_assets) : "\u2014", CubeIcon, "text-brand-600 bg-blue-50"],
-    ["Assigned", metrics ? String(metrics.assigned_assets) : "\u2014", CheckCircleIcon, "text-emerald-600 bg-emerald-50"],
+    [
+      "Total assets",
+      metrics ? String(metrics.total_assets) : "\u2014",
+      CubeIcon,
+      "text-brand-600 bg-blue-50",
+    ],
+    [
+      "Assigned",
+      metrics ? String(metrics.assigned_assets) : "\u2014",
+      CheckCircleIcon,
+      "text-emerald-600 bg-emerald-50",
+    ],
     [
       "Under maintenance",
       metrics ? String(metrics.under_maintenance) : "\u2014",
@@ -89,7 +99,9 @@ export default function DashboardPage() {
             IT Admin \u00b7 Asset management
           </p>
           <h1 className="mt-1 text-3xl font-extrabold tracking-tight text-slate-950">All Assets</h1>
-          <p className="mt-1 text-sm text-slate-500">Manage and track all your organization assets in one place.</p>
+          <p className="mt-1 text-sm text-slate-500">
+            Manage and track all your organization assets in one place.
+          </p>
         </div>
         <Link
           href="/assets/new"
@@ -100,7 +112,10 @@ export default function DashboardPage() {
       </header>
 
       {error && (
-        <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800">
+        <div
+          role="alert"
+          className="rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800"
+        >
           {error}
         </div>
       )}
@@ -143,11 +158,13 @@ export default function DashboardPage() {
           <table className="min-w-[760px] w-full text-left">
             <thead className="bg-blue-50/70 text-[11px] font-bold text-slate-600">
               <tr>
-                {["", "Asset tag", "Asset name", "Category", "Serial", "Status"].map((heading, index) => (
-                  <th key={heading || `icon-${index}`} className="px-5 py-3">
-                    {heading}
-                  </th>
-                ))}
+                {["", "Asset tag", "Asset name", "Category", "Assigned to", "Status"].map(
+                  (heading, index) => (
+                    <th key={heading || `icon-${index}`} className="px-5 py-3">
+                      {heading}
+                    </th>
+                  ),
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200">
@@ -165,7 +182,9 @@ export default function DashboardPage() {
                     </td>
                     <td className="px-5 py-3 font-semibold text-slate-900">{asset.name}</td>
                     <td className="px-5 py-3 text-slate-600">{asset.category}</td>
-                    <td className="px-5 py-3 text-slate-600">{asset.serial_number}</td>
+                    <td className="px-5 py-3 text-slate-600">
+                      {asset.assigned_to_name ?? <span className="text-slate-400">Unassigned</span>}
+                    </td>
                     <td className="px-5 py-3">
                       <span
                         className={`rounded-full px-2.5 py-1 text-xs font-bold ring-1 ring-inset ${assetStatusStyle(asset.status)}`}

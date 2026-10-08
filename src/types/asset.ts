@@ -41,6 +41,10 @@ export interface Asset {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  /** Derived server-side from the active asset_assignments row. */
+  assigned_to_id: string | null;
+  assigned_to_name: string | null;
+  assigned_to_email: string | null;
 }
 
 /** Mirrors AssetLifecycleResponse. */

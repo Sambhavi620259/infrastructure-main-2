@@ -32,10 +32,16 @@ export function getDemoSession(): DemoSession | null {
   try {
     const session: unknown = JSON.parse(raw);
     if (
-      typeof session === "object" && session !== null &&
-      "name" in session && "initials" in session && "role" in session &&
-      typeof session.name === "string" && typeof session.initials === "string" && isRole(session.role)
-    ) return session as DemoSession;
+      typeof session === "object" &&
+      session !== null &&
+      "name" in session &&
+      "initials" in session &&
+      "role" in session &&
+      typeof session.name === "string" &&
+      typeof session.initials === "string" &&
+      isRole(session.role)
+    )
+      return session as DemoSession;
   } catch {
     // Invalid browser storage is treated as a signed-out session.
   }

@@ -71,10 +71,16 @@ export default function AssetDetailPage() {
   if (error || !asset) {
     return (
       <main className="mx-auto max-w-7xl space-y-4">
-        <Link href="/assets" className="inline-flex text-sm font-semibold text-brand-600 hover:text-brand-700">
+        <Link
+          href="/assets"
+          className="inline-flex text-sm font-semibold text-brand-600 hover:text-brand-700"
+        >
           \u2190 Back to assets
         </Link>
-        <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800">
+        <div
+          role="alert"
+          className="rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800"
+        >
           {error || "Asset not found."}
         </div>
       </main>
@@ -88,6 +94,7 @@ export default function AssetDetailPage() {
     ["Model", asset.model ?? "\u2014"],
     ["Serial number", asset.serial_number],
     ["Condition", asset.condition],
+    ["Assigned to", asset.assigned_to_name ?? "Unassigned"],
     ["Purchase date", formatDate(asset.purchase_date)],
     ["Purchase cost", String(asset.purchase_price ?? "\u2014")],
     ["Warranty expires", formatDate(asset.warranty_end)],

@@ -60,7 +60,8 @@ for (const [route, file] of requiredRoutes) {
 
 const packageJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 if (packageJson.engines?.node !== ">=20.9.0") failures.push("Node engine must remain >=20.9.0.");
-if (packageJson.scripts?.check !== "npm run lint && npm run typecheck && npm run build") failures.push("The production check script is missing or changed unexpectedly.");
+if (packageJson.scripts?.check !== "npm run lint && npm run typecheck && npm run build")
+  failures.push("The production check script is missing or changed unexpectedly.");
 
 const routeSource = fs.readFileSync(path.join(root, "src/lib/routes.ts"), "utf8");
 for (const route of requiredRoutes.map(([route]) => route)) {
@@ -72,4 +73,6 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log(`ITAM project verification passed: ${requiredFiles.length} required files and ${requiredRoutes.length} routes checked.`);
+console.log(
+  `ITAM project verification passed: ${requiredFiles.length} required files and ${requiredRoutes.length} routes checked.`,
+);

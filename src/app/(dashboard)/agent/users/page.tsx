@@ -1,2 +1,46 @@
-const users = [["Sandeep Malik","IT Agent","IT Operations","sandeep@boldandwise.com","Online"],["Sarah Khan","Employee","Finance","sarah@boldandwise.com","Offline"],["Liza Roy","Employee","HR","liza@boldandwise.com","Online"],["Tina Das","Employee","Engineering","tina@boldandwise.com","Online"]];
-export default function AgentUsersPage(){return <main className="mx-auto max-w-[1400px] space-y-4"><header><p className="text-[11px] font-semibold text-brand-600">Users · Users</p><h1 className="mt-1 text-2xl font-extrabold">User Directory</h1><p className="mt-1 text-xs text-slate-500">Read-only user lookup for ticket and asset support.</p></header><section className="ui-surface overflow-hidden"><div className="overflow-x-auto"><table className="w-full min-w-[700px] text-left text-[10px]"><thead className="bg-slate-50 text-[9px] uppercase text-slate-400"><tr>{["Name","Role","Department","Email","Presence"].map(h=><th key={h} className="px-4 py-2 font-bold">{h}</th>)}</tr></thead><tbody className="divide-y divide-slate-100">{users.map(u=><tr key={u[0]} className="hover:bg-slate-50">{u.map((v,i)=><td key={`${u[0]}-${i}`} className={`px-4 py-3 ${i===0?"font-semibold text-slate-700":"text-slate-500"}`}>{v}</td>)}</tr>)}</tbody></table></div></section></main>}
+const users = [
+  ["Sandeep Malik", "IT Agent", "IT Operations", "sandeep@boldandwise.com", "Online"],
+  ["Sarah Khan", "Employee", "Finance", "sarah@boldandwise.com", "Offline"],
+  ["Liza Roy", "Employee", "HR", "liza@boldandwise.com", "Online"],
+  ["Tina Das", "Employee", "Engineering", "tina@boldandwise.com", "Online"],
+];
+export default function AgentUsersPage() {
+  return (
+    <main className="mx-auto max-w-[1400px] space-y-4">
+      <header>
+        <p className="text-[11px] font-semibold text-brand-600">Users · Users</p>
+        <h1 className="mt-1 text-2xl font-extrabold">User Directory</h1>
+        <p className="mt-1 text-xs text-slate-500">Read-only user lookup for ticket and asset support.</p>
+      </header>
+      <section className="ui-surface overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[700px] text-left text-[10px]">
+            <thead className="bg-slate-50 text-[9px] uppercase text-slate-400">
+              <tr>
+                {["Name", "Role", "Department", "Email", "Presence"].map((h) => (
+                  <th key={h} className="px-4 py-2 font-bold">
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {users.map((u) => (
+                <tr key={u[0]} className="hover:bg-slate-50">
+                  {u.map((v, i) => (
+                    <td
+                      key={`${u[0]}-${i}`}
+                      className={`px-4 py-3 ${i === 0 ? "font-semibold text-slate-700" : "text-slate-500"}`}
+                    >
+                      {v}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  );
+}

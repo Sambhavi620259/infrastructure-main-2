@@ -96,7 +96,10 @@ export default function AssetsPage() {
       </header>
 
       {error && (
-        <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800">
+        <div
+          role="alert"
+          className="rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800"
+        >
           {error}
         </div>
       )}
@@ -156,8 +159,8 @@ export default function AssetsPage() {
               <tr>
                 <th className="px-6 py-3 font-semibold">Asset</th>
                 <th className="px-6 py-3 font-semibold">Category</th>
+                <th className="px-6 py-3 font-semibold">Assigned to</th>
                 <th className="px-6 py-3 font-semibold">Serial</th>
-                <th className="px-6 py-3 font-semibold">Condition</th>
                 <th className="px-6 py-3 font-semibold">Status</th>
                 <th className="px-6 py-3 font-semibold">Updated</th>
                 <th className="px-6 py-3" />
@@ -174,8 +177,17 @@ export default function AssetsPage() {
                     </p>
                   </td>
                   <td className="px-6 py-4 text-sm text-slate-700">{asset.category}</td>
+                  <td className="px-6 py-4 text-sm">
+                    {asset.assigned_to_name ? (
+                      <>
+                        <p className="font-medium text-slate-700">{asset.assigned_to_name}</p>
+                        <p className="mt-0.5 text-xs text-slate-500">{asset.assigned_to_email}</p>
+                      </>
+                    ) : (
+                      <span className="text-slate-400">Unassigned</span>
+                    )}
+                  </td>
                   <td className="px-6 py-4 text-sm text-slate-600">{asset.serial_number}</td>
-                  <td className="px-6 py-4 text-sm text-slate-600">{asset.condition}</td>
                   <td className="px-6 py-4">
                     <span
                       className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${assetStatusStyle(asset.status)}`}

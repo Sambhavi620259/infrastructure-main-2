@@ -63,6 +63,7 @@ def create_user(
         company_id=target_company_id,
         department_id=user_in.department_id,
         location=user_in.location,
+        modules=user_in.modules if user_in.role == PlatformRole.SUB_ADMIN else None,
         status="ACTIVE"
     )
     db.add(new_user)

@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from enum import Enum as PyEnum
 from sqlalchemy import (
-    Column, String, DateTime, ForeignKey, Integer, Numeric, Text, Boolean, Enum, Index
+    Column, String, DateTime, ForeignKey, Integer, JSON, Numeric, Text, Boolean, Enum, Index
 )
 from sqlalchemy.orm import relationship
 from app.core.database import Base
@@ -82,6 +82,10 @@ class User(Base):
     hashed_password = Column(String(255), nullable=False)
     full_name = Column(String(150), nullable=False)
     role = Column(Enum(PlatformRole), default=PlatformRole.EMPLOYEE, nullable=False)
+    # Which ITAM modules a SUB_ADMIN administers, e.g. ["HAM", "SAM"].
+    # The requirements define sub-admin specialisations as a scope within one
+    # role, not as separate roles. Null or empty for every other role.
+    modules = Column(JSON, nullable=True)
     status = Column(String(20), default="ACTIVE")
     location = Column(String(100), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

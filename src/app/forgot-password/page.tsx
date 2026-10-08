@@ -35,7 +35,9 @@ export default function ForgotPasswordPage() {
     <main className="min-h-screen bg-slate-950 px-4 py-10 sm:px-6">
       <section className="mx-auto w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl sm:p-8">
         <div className="flex items-center gap-3">
-          <span className="grid h-10 w-10 place-items-center rounded-xl bg-brand-600 text-sm font-black text-white">B</span>
+          <span className="grid h-10 w-10 place-items-center rounded-xl bg-brand-600 text-sm font-black text-white">
+            B
+          </span>
           <div>
             <p className="font-extrabold text-slate-950">Bold And Wise</p>
             <p className="text-[10px] font-bold tracking-wider text-brand-600">IT ASSET MANAGEMENT</p>
@@ -58,8 +60,16 @@ export default function ForgotPasswordPage() {
             />
           </label>
 
-          {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-          {success && <p role="status" className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{success}</p>}
+          {error && (
+            <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+              {error}
+            </p>
+          )}
+          {success && (
+            <p role="status" className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+              {success}
+            </p>
+          )}
 
           <button
             type="submit"
@@ -70,7 +80,9 @@ export default function ForgotPasswordPage() {
           </button>
 
           <p className="mt-6 text-center text-sm text-slate-500">
-            <Link href="/login" className="font-medium text-brand-600 hover:text-brand-700 hover:underline">Back to sign in</Link>
+            <Link href="/login" className="font-medium text-brand-600 hover:text-brand-700 hover:underline">
+              Back to sign in
+            </Link>
           </p>
         </form>
       </section>

@@ -1,9 +1,13 @@
 """Implementation file: app/core/seed.py"""
+import logging
+
 from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
 from app.core.security import get_password_hash
 from app.models.models import User, PlatformRole
+
+logger = logging.getLogger(__name__)
 
 
 def seed_initial_users():
@@ -17,10 +21,10 @@ def seed_initial_users():
     try:
         super_admin = db.query(User).filter(User.role == PlatformRole.SUPER_ADMIN).first()
         if super_admin:
-            print("Super Admin already exists. Skipping seed.")
+            logger.info("Super Admin already exists; skipping seed.")
             return
 
-        print("Seeding default Super Admin...")
+        logger.info("Seeding default Super Admin\u2026")
         admin_user = User(
             email="superadmin@boldandwise.com",
             hashed_password=get_password_hash("AdminPassword123!"),
@@ -30,13 +34,17 @@ def seed_initial_users():
         )
         db.add(admin_user)
         db.commit()
-        print("Super Admin created successfully!")
+        logger.info("Super Admin created successfully.")
     except Exception:
         db.rollback()
+        logger.exception("Failed to seed the initial Super Admin account.")
         raise
     finally:
         db.close()
 
 
 if __name__ == "__main__":
+    from app.core.logging_config import configure_logging
+
+    configure_logging()
     seed_initial_users()

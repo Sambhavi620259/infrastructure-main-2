@@ -4,7 +4,10 @@
 export type ApiError = { detail?: string; message?: string };
 
 export class ApiRequestError extends Error {
-  constructor(message: string, readonly status: number) {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
     super(message);
     this.name = "ApiRequestError";
   }
@@ -24,7 +27,9 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   try {
     response = await fetch(apiUrl(path), { ...init, headers, cache: "no-store" });
   } catch {
-    throw new Error("Unable to connect to the application API. Make sure the backend is running on port 8000.");
+    throw new Error(
+      "Unable to connect to the application API. Make sure the backend is running on port 8000.",
+    );
   }
 
   const data = (await response.json().catch(() => ({}))) as T & ApiError;

@@ -73,5 +73,7 @@ This repository is the frontend/admin UI layer. Fixture records are intentionall
 A dedicated operational IT Agent workspace is included for **Bold And Wise Ventures Pvt Ltd**, matching the supplied bright IT-operations reference. It includes dashboard, assets, tickets, users, inventory, reports and settings, with an explicit `IT_AGENT` least-privilege role and workspace switching alongside IT Admin and Super Admin.
 
 See `VERIFICATION_REPORT.md` for the verification scope and environment limitation.
+
 # infrastructure
+
 # infrastructure-main-2

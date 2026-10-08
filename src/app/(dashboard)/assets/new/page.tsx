@@ -38,13 +38,20 @@ export default function NewAssetPage() {
   return (
     <main className="mx-auto max-w-6xl space-y-5">
       <header>
-        <p className="text-[11px] font-bold uppercase tracking-wider text-brand-600">Assets \u00b7 Register</p>
+        <p className="text-[11px] font-bold uppercase tracking-wider text-brand-600">
+          Assets \u00b7 Register
+        </p>
         <h1 className="mt-1 text-2xl font-extrabold tracking-tight text-slate-950">Add a new asset</h1>
-        <p className="mt-1 text-sm text-slate-500">Register a new hardware or software asset in the system.</p>
+        <p className="mt-1 text-sm text-slate-500">
+          Register a new hardware or software asset in the system.
+        </p>
       </header>
 
       {error && (
-        <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-800">
+        <div
+          role="alert"
+          className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-800"
+        >
           {error}
         </div>
       )}
@@ -52,7 +59,9 @@ export default function NewAssetPage() {
       <form onSubmit={submit} className="rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-100 px-5 py-4">
           <h2 className="text-lg font-extrabold">Asset information</h2>
-          <p className="mt-1 text-xs text-slate-500">Complete the required fields to create the asset record.</p>
+          <p className="mt-1 text-xs text-slate-500">
+            Complete the required fields to create the asset record.
+          </p>
         </div>
 
         <div className="grid gap-5 p-5 md:grid-cols-2">

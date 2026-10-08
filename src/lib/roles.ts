@@ -57,12 +57,15 @@ export type Permission =
   | "inventory:read"
   | "users:read";
 
-export const roleDefinitions: Record<Role, {
-  label: string;
-  description: string;
-  scope: string;
-  permissions: readonly Permission[];
-}> = {
+export const roleDefinitions: Record<
+  Role,
+  {
+    label: string;
+    description: string;
+    scope: string;
+    permissions: readonly Permission[];
+  }
+> = {
   SUPER_ADMIN: {
     label: "Super Admin",
     description: "Platform owner role for companies, subscriptions, tenants and platform governance.",
@@ -74,9 +77,21 @@ export const roleDefinitions: Record<Role, {
     description: "Primary company administrator responsible for configuration, users and all ITAM modules.",
     scope: "One company",
     permissions: [
-      "users:manage", "roles:assign", "organization:configure", "ham:read", "ham:write",
-      "sam:read", "sam:write", "cloud:read", "cloud:write", "scan:read", "scan:write",
-      "financial:read", "financial:write", "reports:read", "reports:export",
+      "users:manage",
+      "roles:assign",
+      "organization:configure",
+      "ham:read",
+      "ham:write",
+      "sam:read",
+      "sam:write",
+      "cloud:read",
+      "cloud:write",
+      "scan:read",
+      "scan:write",
+      "financial:read",
+      "financial:write",
+      "reports:read",
+      "reports:export",
     ],
   },
   HAM_ADMIN: {
@@ -113,7 +128,15 @@ export const roleDefinitions: Record<Role, {
     label: "IT Agent",
     description: "Operational support role for tickets, assigned assets, inventory and approved reports.",
     scope: "Company operations",
-    permissions: ["tickets:read", "tickets:write", "assets:read", "inventory:read", "users:read", "reports:read", "reports:export"],
+    permissions: [
+      "tickets:read",
+      "tickets:write",
+      "assets:read",
+      "inventory:read",
+      "users:read",
+      "reports:read",
+      "reports:export",
+    ],
   },
 };
 
