@@ -2,7 +2,7 @@
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_roles, get_tenant_company_id
@@ -28,8 +28,7 @@ class CloudResourceResponse(BaseModel):
     region: str
     cost_monthly: float
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 @router.post("/resources", response_model=CloudResourceResponse, status_code=status.HTTP_201_CREATED)

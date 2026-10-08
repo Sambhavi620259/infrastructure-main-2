@@ -1,5 +1,4 @@
 # Local backend/database services go here.
-version: '3.8'
 
 services:
   db:
