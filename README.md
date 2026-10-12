@@ -99,6 +99,29 @@ docker compose up -d --build      # db + backend (runs migrations) + frontend
 - `GET /api/health` checks the database; Docker uses it as the backend health check.
 - Back up the `postgres_data` volume.
 
+## Deploying (Render + Vercel)
+
+The backend needs WebSockets, a background job and one long-running process,
+so it runs on Render; the Next.js frontend runs on Vercel.
+
+1. **Backend and database (Render).** New → Blueprint → pick this repository.
+   `render.yaml` creates `itam-db` (PostgreSQL) and `itam-backend`, generates
+   `JWT_SECRET` and runs migrations on start. When asked for `CORS_ORIGINS`,
+   enter the Vercel address (you can set it after step 2). Note the backend
+   address, e.g. `https://itam-backend.onrender.com`.
+2. **Frontend (Vercel).** Add New → Project → import this repository (framework:
+   Next.js). Environment variables:
+   - `BACKEND_API_URL` = `https://itam-backend.onrender.com`
+   - `NEXT_PUBLIC_WS_URL` = `wss://itam-backend.onrender.com`
+3. Set `CORS_ORIGINS` on Render to the Vercel address
+   (e.g. `https://your-app.vercel.app`) if you skipped it.
+4. Open the Vercel address → Register → Super Admin (choose the platform key),
+   then register an IT Admin for the organization.
+
+Free plans: the Render service sleeps after ~15 minutes idle (the first request
+then takes about a minute) and the free database expires after 30 days. Use
+paid plans for real use.
+
 ## Security notes
 
 - No default accounts: the first Super Admin registers (creating the Super Admin key) or is seeded from `SEED_SUPER_ADMIN_EMAIL` / `SEED_SUPER_ADMIN_PASSWORD`.

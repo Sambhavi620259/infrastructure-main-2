@@ -61,6 +61,15 @@ class Settings(BaseSettings):
         if problems:
             raise RuntimeError("Unsafe production configuration: " + "; ".join(problems))
 
+    @field_validator("DATABASE_URL", mode="after")
+    @classmethod
+    def use_psycopg2_driver(cls, v: str) -> str:
+        """Hosts such as Render give postgres:// or postgresql:// URLs; the installed driver is psycopg2."""
+        for prefix in ("postgres://", "postgresql://"):
+            if v.startswith(prefix):
+                return "postgresql+psycopg2://" + v[len(prefix):]
+        return v
+
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def assemble_cors_origins(cls, v: Union[str, List[str]]) -> List[str]:
