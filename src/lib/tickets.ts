@@ -1,5 +1,35 @@
 import { apiFetch } from "@/lib/api";
 
+/**
+ * Ticket flow: Pending -> In progress -> Approved (waiting for stock) -> Fulfilled,
+ * or Rejected / Cancelled. Mirrors RequestStatusEnum and _NEXT_STATUS in the backend.
+ */
+export const TICKET_STATUSES = ["PENDING", "IN_PROGRESS", "APPROVED", "FULFILLED", "REJECTED", "CANCELLED"] as const;
+
+export type TicketStatus = (typeof TICKET_STATUSES)[number];
+
+const TICKET_STATUS_META: Record<TicketStatus, { label: string; style: string }> = {
+  PENDING: { label: "Pending", style: "bg-amber-50 text-amber-700 ring-amber-200" },
+  IN_PROGRESS: { label: "In progress", style: "bg-blue-50 text-blue-700 ring-blue-200" },
+  APPROVED: { label: "Approved · awaiting stock", style: "bg-violet-50 text-violet-700 ring-violet-200" },
+  FULFILLED: { label: "Fulfilled", style: "bg-emerald-50 text-emerald-700 ring-emerald-200" },
+  REJECTED: { label: "Rejected", style: "bg-rose-50 text-rose-700 ring-rose-200" },
+  CANCELLED: { label: "Cancelled", style: "bg-slate-100 text-slate-600 ring-slate-200" },
+};
+
+export function ticketStatusLabel(status: string): string {
+  return TICKET_STATUS_META[status as TicketStatus]?.label ?? status;
+}
+
+export function ticketStatusStyle(status: string): string {
+  return TICKET_STATUS_META[status as TicketStatus]?.style ?? TICKET_STATUS_META.CANCELLED.style;
+}
+
+/** Tickets still being worked. */
+export function isOpenTicket(status: string): boolean {
+  return status === "PENDING" || status === "IN_PROGRESS" || status === "APPROVED";
+}
+
 export interface AssetRequest {
   id: string;
   company_id: string;
@@ -36,6 +66,11 @@ export interface AssetRequestCreateInput {
 
 export interface AssetRequestCounts {
   pending: number;
+  in_progress: number;
+  /** Approved, waiting for stock. */
+  approved: number;
+  fulfilled: number;
+  /** Pending + in progress + approved. */
   open: number;
   my_open: number;
 }
@@ -89,17 +124,37 @@ export function createAssetCategory(name: string): Promise<AssetCategory> {
   return apiFetch<AssetCategory>("/api/assets/categories", { method: "POST", body: JSON.stringify({ name }) });
 }
 
-/** Approving assigns the chosen in-stock asset to the person who raised the ticket. */
-export function approveAssetRequest(id: string, assignedAssetId: string): Promise<AssetRequest> {
+function moveTicket(id: string, body: Record<string, string>): Promise<AssetRequest> {
   return apiFetch<AssetRequest>(`/api/asset-requests/${encodeURIComponent(id)}`, {
     method: "PUT",
-    body: JSON.stringify({ status: "APPROVED", assigned_asset_id: assignedAssetId }),
+    body: JSON.stringify(body),
   });
 }
 
-export function rejectAssetRequest(id: string, reason: string): Promise<AssetRequest> {
-  return apiFetch<AssetRequest>(`/api/asset-requests/${encodeURIComponent(id)}`, {
-    method: "PUT",
-    body: JSON.stringify({ status: "REJECTED", rejection_reason: reason }),
-  });
+/** Pick the ticket up: In progress, handled by the caller. */
+export function startTicket(id: string): Promise<AssetRequest> {
+  return moveTicket(id, { status: "IN_PROGRESS" });
+}
+
+/** Put an in-progress ticket back in the queue for someone else. */
+export function releaseTicket(id: string): Promise<AssetRequest> {
+  return moveTicket(id, { status: "PENDING" });
+}
+
+/** Agree to the request while no suitable asset is in stock yet. */
+export function approveTicket(id: string): Promise<AssetRequest> {
+  return moveTicket(id, { status: "APPROVED" });
+}
+
+/** Hand an in-stock asset to the requester; the ticket becomes Fulfilled. */
+export function fulfilTicket(id: string, assignedAssetId: string): Promise<AssetRequest> {
+  return moveTicket(id, { status: "FULFILLED", assigned_asset_id: assignedAssetId });
+}
+
+export function rejectTicket(id: string, reason: string): Promise<AssetRequest> {
+  return moveTicket(id, { status: "REJECTED", rejection_reason: reason });
+}
+
+export function cancelTicket(id: string): Promise<AssetRequest> {
+  return moveTicket(id, { status: "CANCELLED" });
 }

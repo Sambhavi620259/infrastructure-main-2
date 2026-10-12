@@ -106,7 +106,10 @@ export function reactivateUser(userId: string): Promise<AppUser> {
 
 export interface ActivitySummary {
   tickets_raised: number;
+  /** Raised by them and still open (pending, in progress or awaiting stock). */
   tickets_raised_pending: number;
+  /** Tickets they are handling right now. */
+  tickets_in_progress: number;
   tickets_approved: number;
   tickets_rejected: number;
   assets_assigned: number;

@@ -36,8 +36,12 @@ class AssetStatusEnum(str, PyEnum):
 
 
 class RequestStatusEnum(str, PyEnum):
+    # Ticket flow: PENDING -> IN_PROGRESS -> APPROVED (waiting for stock) -> FULFILLED,
+    # or REJECTED / CANCELLED. Return requests use PENDING / APPROVED / REJECTED.
     PENDING = "PENDING"
+    IN_PROGRESS = "IN_PROGRESS"
     APPROVED = "APPROVED"
+    FULFILLED = "FULFILLED"
     REJECTED = "REJECTED"
     CANCELLED = "CANCELLED"
 

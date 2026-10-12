@@ -3,10 +3,11 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { PlusIcon, ArrowPathIcon, ExclamationTriangleIcon, CheckCircleIcon, ClockIcon } from "@heroicons/react/24/outline";
-import { listAssetRequests, getAssetRequestCounts, type AssetRequest } from "@/lib/tickets";
+import { listAssetRequests, getAssetRequestCounts, type AssetRequest, type AssetRequestCounts } from "@/lib/tickets";
+import { TicketStatusBadge } from "@/components/tickets/ticket-actions";
 
 export default function TicketDashboardPage() {
-  const [counts, setCounts] = useState<{ pending: number; open: number; my_open: number } | null>(null);
+  const [counts, setCounts] = useState<AssetRequestCounts | null>(null);
   const [recentTickets, setRecentTickets] = useState<AssetRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -34,17 +35,6 @@ export default function TicketDashboardPage() {
     load();
   }, []);
 
-  const statusBadge = (status: string) => {
-    const classes: Record<string, string> = {
-      PENDING: "bg-amber-50 text-amber-700",
-      APPROVED: "bg-blue-50 text-blue-700",
-      REJECTED: "bg-red-50 text-red-700",
-      FULFILLED: "bg-emerald-50 text-emerald-700",
-      CANCELLED: "bg-slate-50 text-slate-700",
-    };
-    return classes[status] ?? "bg-slate-50 text-slate-700";
-  };
-
   return (
     <main className="mx-auto max-w-7xl space-y-5">
       <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -68,7 +58,7 @@ export default function TicketDashboardPage() {
       )}
 
       {counts && (
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <article className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex items-start justify-between">
               <div>
@@ -81,16 +71,25 @@ export default function TicketDashboardPage() {
           <article className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex items-start justify-between">
               <div>
-                <p className="text-xs font-semibold text-slate-500">Open</p>
-                <p className="mt-1 text-2xl font-extrabold text-blue-600">{counts.open}</p>
+                <p className="text-xs font-semibold text-slate-500">In progress</p>
+                <p className="mt-1 text-2xl font-extrabold text-blue-600">{counts.in_progress}</p>
               </div>
-              <ClockIcon className="h-8 w-8 text-blue-300" />
+              <ArrowPathIcon className="h-8 w-8 text-blue-300" />
             </div>
           </article>
           <article className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex items-start justify-between">
               <div>
-                <p className="text-xs font-semibold text-slate-500">My Open</p>
+                <p className="text-xs font-semibold text-slate-500">Approved · awaiting stock</p>
+                <p className="mt-1 text-2xl font-extrabold text-violet-600">{counts.approved}</p>
+              </div>
+              <ClockIcon className="h-8 w-8 text-violet-300" />
+            </div>
+          </article>
+          <article className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-xs font-semibold text-slate-500">My open tickets</p>
                 <p className="mt-1 text-2xl font-extrabold text-emerald-600">{counts.my_open}</p>
               </div>
               <CheckCircleIcon className="h-8 w-8 text-emerald-300" />
@@ -153,9 +152,7 @@ export default function TicketDashboardPage() {
                     </td>
                     <td className="px-5 py-3 text-slate-600">{ticket.requested_by_name ?? ticket.requested_for}</td>
                     <td className="px-5 py-3">
-                      <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${statusBadge(ticket.status)}`}>
-                        {ticket.status}
-                      </span>
+                      <TicketStatusBadge status={ticket.status} />
                     </td>
                     <td className="px-5 py-3 text-slate-600">{ticket.category_name ?? "—"}</td>
                     <td className="px-5 py-3 text-slate-500">

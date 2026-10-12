@@ -3,12 +3,10 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { PlusIcon } from "@heroicons/react/24/outline";
 import {
-  approveAssetRequest,
   createAssetRequest,
   getAssetRequestCounts,
   listAssetCategories,
   listAssetRequests,
-  rejectAssetRequest,
   type AssetCategory,
   type AssetRequest,
   type AssetRequestCounts,
@@ -18,24 +16,17 @@ import { listDepartments, listUserDirectory, type DirectoryEntry } from "@/lib/u
 import type { Asset } from "@/types/asset";
 import type { Department } from "@/types/user";
 import { CategoryPicker, resolveCategoryId } from "@/components/tickets/category-picker";
+import { TicketActions, TicketProgress, ticketHandler, ticketNumber } from "@/components/tickets/ticket-actions";
 
 const TABS = [
   ["PENDING", "Pending"],
-  ["APPROVED", "Approved"],
+  ["IN_PROGRESS", "In progress"],
+  ["APPROVED", "Awaiting stock"],
+  ["FULFILLED", "Fulfilled"],
   ["REJECTED", "Rejected"],
+  ["CANCELLED", "Cancelled"],
   ["", "All"],
 ] as const;
-
-const STATUS_STYLE: Record<string, string> = {
-  PENDING: "bg-amber-50 text-amber-700",
-  APPROVED: "bg-emerald-50 text-emerald-700",
-  REJECTED: "bg-rose-50 text-rose-700",
-  CANCELLED: "bg-slate-100 text-slate-600",
-};
-
-function ticketNumber(ticket: AssetRequest): string {
-  return `#${ticket.id.slice(0, 6).toUpperCase()}`;
-}
 
 function timeAgo(value: string): string {
   const minutes = Math.round((Date.now() - new Date(value).getTime()) / 60000);
@@ -118,7 +109,8 @@ export function TicketQueue({
           <p className="text-[11px] font-semibold text-brand-600">{eyebrow}</p>
           <h1 className="mt-1 text-2xl font-extrabold">{title}</h1>
           <p className="mt-1 text-xs text-slate-500">
-            Asset requests from your organization. Approving one hands an in-stock asset to the requester.
+            Asset requests from your organization. Start work on a ticket, then assign an in-stock asset to fulfil it,
+            or approve it to wait for stock.
           </p>
         </div>
         <button
@@ -159,10 +151,12 @@ export function TicketQueue({
         />
       )}
 
-      <section className="grid gap-3 sm:grid-cols-3">
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         {[
           ["Pending", counts?.pending, "text-amber-600"],
-          ["Approved", counts?.open, "text-emerald-600"],
+          ["In progress", counts?.in_progress, "text-blue-600"],
+          ["Awaiting stock", counts?.approved, "text-violet-600"],
+          ["Fulfilled", counts?.fulfilled, "text-emerald-600"],
           ["Raised by me (open)", counts?.my_open, "text-slate-900"],
         ].map(([label, value, color]) => (
           <div key={String(label)} className="ui-surface p-4">
@@ -174,7 +168,7 @@ export function TicketQueue({
 
       <section className="ui-surface overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-slate-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-          <div role="tablist" aria-label="Ticket status" className="flex gap-1">
+          <div role="tablist" aria-label="Ticket status" className="flex flex-wrap gap-1">
             {TABS.map(([value, label]) => (
               <button
                 key={label}
@@ -196,7 +190,7 @@ export function TicketQueue({
           </label>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[900px] text-left text-xs">
+          <table className="w-full min-w-[1000px] text-left text-xs">
             <thead className="bg-slate-50 text-[10px] uppercase text-slate-400">
               <tr>
                 {["Ticket", "Requester", "Category / dept.", "Reason", "Status", "Raised", ""].map((heading) => (
@@ -232,131 +226,34 @@ function TicketRow({
   onDone: (message: string) => void;
   onError: (message: string) => void;
 }) {
-  const [mode, setMode] = useState<"approve" | "reject" | null>(null);
-  const [assetId, setAssetId] = useState("");
-  const [reason, setReason] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  // Suggest matching stock first: assets whose category matches the ticket's category name.
-  const category = ticket.category_name?.toLowerCase() ?? "";
-  const options = [...stock].sort(
-    (a, b) => Number(b.category.toLowerCase() === category) - Number(a.category.toLowerCase() === category),
-  );
-
-  const act = async () => {
-    setBusy(true);
-    try {
-      if (mode === "approve") {
-        const updated = await approveAssetRequest(ticket.id, assetId);
-        onDone(`${ticketNumber(ticket)} approved: ${updated.assigned_asset_tag} assigned to ${updated.requested_by_name}.`);
-      } else {
-        await rejectAssetRequest(ticket.id, reason.trim());
-        onDone(`${ticketNumber(ticket)} rejected.`);
-      }
-      setMode(null);
-    } catch (caught) {
-      onError(caught instanceof Error ? caught.message : "Update failed.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
+  const handler = ticketHandler(ticket);
   return (
-    <>
-      <tr className="align-top hover:bg-slate-50">
-        <td className="px-4 py-3 font-mono font-semibold text-slate-700">{ticketNumber(ticket)}</td>
-        <td className="px-4 py-3">
-          <p className="font-semibold text-slate-700">{ticket.requested_by_name ?? ticket.requested_for}</p>
-          {ticket.raised_by_name && ticket.raised_by_name !== ticket.requested_by_name && (
-            <p className="text-[11px] text-slate-500">Raised by {ticket.raised_by_name}</p>
-          )}
-        </td>
-        <td className="px-4 py-3 text-slate-600">
-          {ticket.category_name ?? "—"}
-          {ticket.department_name && <p className="text-[11px] text-slate-400">{ticket.department_name}</p>}
-        </td>
-        <td className="max-w-xs px-4 py-3 text-slate-600">
-          {ticket.reason}
-          {ticket.rejection_reason && <p className="mt-1 text-[11px] text-rose-600">Rejected: {ticket.rejection_reason}</p>}
-          {ticket.assigned_asset_tag && <p className="mt-1 text-[11px] text-emerald-700">Assigned {ticket.assigned_asset_tag}</p>}
-          {ticket.processed_by_name && (
-            <p className="mt-1 text-[11px] text-slate-400">
-              {ticket.status === "APPROVED" ? "Approved" : "Processed"} by {ticket.processed_by_name}
-            </p>
-          )}
-        </td>
-        <td className="px-4 py-3">
-          <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${STATUS_STYLE[ticket.status] ?? STATUS_STYLE.CANCELLED}`}>
-            {ticket.status}
-          </span>
-        </td>
-        <td className="whitespace-nowrap px-4 py-3 text-slate-500">{timeAgo(ticket.created_at)}</td>
-        <td className="whitespace-nowrap px-4 py-3 text-right">
-          {ticket.status === "PENDING" && !mode && (
-            <span className="inline-flex gap-3 font-semibold">
-              <button type="button" onClick={() => setMode("approve")} className="text-emerald-700 hover:text-emerald-800">
-                Approve
-              </button>
-              <button type="button" onClick={() => setMode("reject")} className="text-rose-600 hover:text-rose-700">
-                Reject
-              </button>
-            </span>
-          )}
-        </td>
-      </tr>
-      {mode && (
-        <tr className="bg-slate-50/70">
-          <td colSpan={7} className="px-4 py-3">
-            <div className="flex flex-wrap items-center gap-2">
-              {mode === "approve" ? (
-                stock.length === 0 ? (
-                  <span className="text-xs text-amber-700">No assets are in stock to assign. Return or register one first.</span>
-                ) : (
-                  <label className="flex items-center gap-2">
-                    <span className="text-[11px] font-semibold text-slate-600">Asset to hand over</span>
-                    <select
-                      value={assetId}
-                      onChange={(event) => setAssetId(event.target.value)}
-                      className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs"
-                    >
-                      <option value="">Choose an in-stock asset…</option>
-                      {options.map((asset) => (
-                        <option key={asset.id} value={asset.id}>
-                          {asset.asset_tag} · {asset.name} ({asset.category})
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )
-              ) : (
-                <label>
-                  <span className="sr-only">Reason for rejecting</span>
-                  <input
-                    value={reason}
-                    onChange={(event) => setReason(event.target.value)}
-                    placeholder="Reason for rejecting"
-                    className="w-72 rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
-                  />
-                </label>
-              )}
-              <button
-                type="button"
-                disabled={busy || (mode === "approve" ? !assetId : !reason.trim())}
-                onClick={act}
-                className={`rounded-lg px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50 ${
-                  mode === "approve" ? "bg-emerald-600 hover:bg-emerald-700" : "bg-rose-600 hover:bg-rose-700"
-                }`}
-              >
-                {busy ? "Saving…" : mode === "approve" ? "Approve & assign" : "Reject ticket"}
-              </button>
-              <button type="button" onClick={() => setMode(null)} className="px-2 text-xs font-semibold text-slate-600">
-                Cancel
-              </button>
-            </div>
-          </td>
-        </tr>
-      )}
-    </>
+    <tr className="align-top hover:bg-slate-50">
+      <td className="px-4 py-3 font-mono font-semibold text-slate-700">{ticketNumber(ticket)}</td>
+      <td className="px-4 py-3">
+        <p className="font-semibold text-slate-700">{ticket.requested_by_name ?? ticket.requested_for}</p>
+        {ticket.raised_by_name && ticket.raised_by_name !== ticket.requested_by_name && (
+          <p className="text-[11px] text-slate-500">Raised by {ticket.raised_by_name}</p>
+        )}
+      </td>
+      <td className="px-4 py-3 text-slate-600">
+        {ticket.category_name ?? "—"}
+        {ticket.department_name && <p className="text-[11px] text-slate-400">{ticket.department_name}</p>}
+      </td>
+      <td className="max-w-xs px-4 py-3 text-slate-600">
+        {ticket.reason}
+        {ticket.rejection_reason && <p className="mt-1 text-[11px] text-rose-600">Rejected: {ticket.rejection_reason}</p>}
+        {ticket.assigned_asset_tag && <p className="mt-1 text-[11px] text-emerald-700">Assigned {ticket.assigned_asset_tag}</p>}
+        {handler && <p className="mt-1 text-[11px] text-slate-400">{handler}</p>}
+      </td>
+      <td className="px-4 py-3">
+        <TicketProgress status={ticket.status} />
+      </td>
+      <td className="whitespace-nowrap px-4 py-3 text-slate-500">{timeAgo(ticket.created_at)}</td>
+      <td className="px-4 py-3 text-right">
+        <TicketActions ticket={ticket} stock={stock} onDone={onDone} onError={onError} />
+      </td>
+    </tr>
   );
 }
 

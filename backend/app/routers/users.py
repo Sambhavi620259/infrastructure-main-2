@@ -13,6 +13,7 @@ from app.models.models import (
     AssetAssignment, AssetRequest, AuditLog, Company, Department, PlatformRole, RequestStatusEnum, Subscription, User,
 )
 from app.schemas.schemas import UserCreate, UserResponse, UserUpdate
+from app.routers.asset_requests import OPEN_TICKET_STATUSES
 from app.services.agent_id_service import new_agent_id
 from app.services.audit_service import log_audit_event
 from app.services.usage_alerts import check_usage_limits
@@ -52,6 +53,7 @@ def _check_user_fields(db: Session, company_id: Optional[str], role: Optional[Pl
 class ActivitySummary(BaseModel):
     tickets_raised: int
     tickets_raised_pending: int
+    tickets_in_progress: int
     tickets_approved: int
     tickets_rejected: int
     assets_assigned: int
@@ -404,11 +406,16 @@ def get_user_activity(
     tickets = db.query(AssetRequest).filter(AssetRequest.company_id == user.company_id)
     summary = ActivitySummary(
         tickets_raised=tickets.filter(AssetRequest.raised_by == user.id).count(),
+        # Still open: pending, in progress or approved and waiting for stock.
         tickets_raised_pending=tickets.filter(
-            AssetRequest.raised_by == user.id, AssetRequest.status == RequestStatusEnum.PENDING
+            AssetRequest.raised_by == user.id, AssetRequest.status.in_(OPEN_TICKET_STATUSES)
+        ).count(),
+        tickets_in_progress=tickets.filter(
+            AssetRequest.processed_by == user.id, AssetRequest.status == RequestStatusEnum.IN_PROGRESS
         ).count(),
         tickets_approved=tickets.filter(
-            AssetRequest.processed_by == user.id, AssetRequest.status == RequestStatusEnum.APPROVED
+            AssetRequest.processed_by == user.id,
+            AssetRequest.status.in_([RequestStatusEnum.APPROVED, RequestStatusEnum.FULFILLED]),
         ).count(),
         tickets_rejected=tickets.filter(
             AssetRequest.processed_by == user.id, AssetRequest.status == RequestStatusEnum.REJECTED

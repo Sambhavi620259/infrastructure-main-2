@@ -488,16 +488,46 @@ async def run_checks():
               code == 200 and {t["id"] for t in body} >= {ticket_id, reject_id}
               and all(t["status"] == "PENDING" for t in body), body)
 
+        # Ticket workflow: pending -> in progress -> (released) -> fulfilled.
+        code, body = call("PUT", f"/asset-requests/{ticket_id}", {"status": "IN_PROGRESS"})
+        check("agent starts work: ticket is in progress with them",
+              code == 200 and body.get("status") == "IN_PROGRESS" and body.get("processed_by") == rahul_id, body)
+        code, body = call("GET", "/asset-requests/counts")
+        check("counts show the in-progress ticket as open",
+              code == 200 and body.get("in_progress") == 1 and body.get("open") == 2, body)
+        code, body = call("PUT", f"/asset-requests/{ticket_id}", {"status": "PENDING"})
+        check("releasing puts it back in the queue with no handler",
+              code == 200 and body.get("status") == "PENDING" and body.get("processed_by") is None, body)
+        call("PUT", f"/asset-requests/{ticket_id}", {"status": "IN_PROGRESS"})
+        code, body = call("PUT", f"/asset-requests/{ticket_id}", {"status": "FULFILLED"})
+        check("fulfilling needs an asset", code == 400, body)
+
         code, body = call("PUT", f"/asset-requests/{ticket_id}", {"status": "APPROVED", "assigned_asset_id": stock_asset_id})
-        check("agent approves a ticket, assigning an in-stock asset to the requester",
-              code == 200 and body.get("status") == "APPROVED" and body.get("assigned_asset_tag") == "AGT-1", body)
+        check("approving with an asset hands it over: ticket is fulfilled",
+              code == 200 and body.get("status") == "FULFILLED" and body.get("assigned_asset_tag") == "AGT-1", body)
+        code, body = call("PUT", f"/asset-requests/{ticket_id}", {"status": "CANCELLED"})
+        check("a fulfilled ticket is final", code == 400, body)
         code, body = call("GET", f"/assets/{stock_asset_id}")
         check("approved asset is now with that user",
               code == 200 and body.get("status") == "ASSIGNED" and body.get("assigned_to_id") == neha_id, body)
 
+        code, body = call("PUT", f"/asset-requests/{reject_id}", {"status": "REJECTED", "rejection_reason": "  "})
+        check("rejecting needs a reason", code == 400, body)
         code, body = call("PUT", f"/asset-requests/{reject_id}", {"status": "REJECTED", "rejection_reason": "No budget"})
         check("agent rejects a ticket with a reason",
               code == 200 and body.get("status") == "REJECTED" and body.get("rejection_reason") == "No budget", body)
+
+        # Approved while nothing is in stock: waits, then can be cancelled but not rejected.
+        code, body = call("POST", "/asset-requests", {"asset_category_id": category_id, "reason": "Monitor"})
+        wait_id = body.get("id", "")
+        code, body = call("PUT", f"/asset-requests/{wait_id}", {"status": "APPROVED"})
+        check("approving without an asset leaves it awaiting stock", code == 200 and body.get("status") == "APPROVED", body)
+        code, body = call("GET", "/asset-requests/counts")
+        check("counts show it awaiting stock", code == 200 and body.get("approved") == 1 and body.get("fulfilled") == 1, body)
+        code, body = call("PUT", f"/asset-requests/{wait_id}", {"status": "REJECTED", "rejection_reason": "x"})
+        check("an approved ticket cannot be rejected", code == 400, body)
+        code, body = call("PUT", f"/asset-requests/{wait_id}", {"status": "CANCELLED"})
+        check("an approved ticket can be cancelled", code == 200 and body.get("status") == "CANCELLED", body)
 
         code, body = call("POST", f"/assets/{stock_asset_id}/unassign")
         check("agent unassigns an asset", code == 200 and body.get("status") == "IN_STOCK", body)
@@ -546,7 +576,7 @@ async def run_checks():
     code, body = call("GET", f"/users/{rahul_id}/activity")
     summary = body.get("summary", {}) if code == 200 else {}
     check("activity summary counts the agent's work",
-          code == 200 and summary.get("tickets_raised") == 2 and summary.get("tickets_approved") == 1
+          code == 200 and summary.get("tickets_raised") == 3 and summary.get("tickets_approved") == 1
           and summary.get("tickets_rejected") == 1 and summary.get("assets_assigned") == 1
           and summary.get("assets_unassigned") == 1 and summary.get("stock_adjustments") == 2
           and summary.get("reports_generated") == 1, summary)
@@ -556,7 +586,7 @@ async def run_checks():
           and "USER_LOGIN" not in actions, actions)
     code, body = call("GET", f"/asset-requests?processed_by={rahul_id}")
     check("tickets processed by the agent, with processor name",
-          code == 200 and len(body) == 2 and all(t["processed_by_name"] == "Rahul Sharma" for t in body), body)
+          code == 200 and len(body) == 3 and all(t["processed_by_name"] == "Rahul Sharma" for t in body), body)
     ACTING["user_id"] = rahul_id
     call("POST", "/asset-requests", {"asset_category_id": category_id, "reason": "Second monitor"})
     ACTING["user_id"] = None
@@ -651,7 +681,8 @@ async def run_checks():
     ACTING["user_id"] = None
     neha_titles = [n["title"] for n in body] if code == 200 else []
     check("requester is told the ticket was approved and the asset assigned (link to their workspace)",
-          "Your ticket was approved" in neha_titles and any("was assigned to you" in t for t in neha_titles)
+          "Your ticket is fulfilled" in neha_titles and "Your ticket is being worked on" in neha_titles
+          and any("was assigned to you" in t for t in neha_titles)
           and body[0]["link"] in ("/agent/assets", "/agent/tickets"), body[:3])
     ACTING["user_id"] = rahul_id
     code, body = call("GET", "/notifications?limit=100")

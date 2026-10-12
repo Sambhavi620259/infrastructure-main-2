@@ -4,7 +4,14 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { getUserActivity, resetUserPassword, type ActivityEntry, type UserActivity } from "@/lib/users";
-import { approveAssetRequest, listAssetRequests, rejectAssetRequest, type AssetRequest } from "@/lib/tickets";
+import { isOpenTicket, listAssetRequests, type AssetRequest } from "@/lib/tickets";
+import {
+  TicketActions,
+  TicketProgress,
+  TicketStatusBadge,
+  ticketHandler,
+  ticketNumber,
+} from "@/components/tickets/ticket-actions";
 import { listAssets } from "@/lib/assets";
 import { assetStatusLabel, assetStatusStyle, formatDate, type Asset } from "@/types/asset";
 import { initialsOf, roleBadgeClass, roleLabel, statusBadgeClass } from "@/types/user";
@@ -33,10 +40,6 @@ function describe(entry: ActivityEntry): string {
   return entry.new_value ?? entry.old_value ?? entry.entity;
 }
 
-function ticketNumber(ticket: AssetRequest): string {
-  return `#${ticket.id.slice(0, 6).toUpperCase()}`;
-}
-
 export default function UserWorkPage() {
   const params = useParams<{ id: string }>();
   const userId = typeof params.id === "string" ? params.id : "";
@@ -54,7 +57,7 @@ export default function UserWorkPage() {
     let cancelled = false;
     Promise.all([
       getUserActivity(userId),
-      listAssetRequests({ raised_by: userId, status: "PENDING", limit: 100 }),
+      listAssetRequests({ raised_by: userId, limit: 200 }),
       listAssetRequests({ processed_by: userId, limit: 20 }),
       listAssets({ assigned_to: userId, limit: 100 }),
       listAssets({ status: "IN_STOCK", limit: 200 }),
@@ -62,7 +65,7 @@ export default function UserWorkPage() {
       .then(([activityData, pendingData, processedData, heldData, stockData]) => {
         if (cancelled) return;
         setActivity(activityData);
-        setPending(pendingData);
+        setPending(pendingData.filter((ticket) => isOpenTicket(ticket.status)));
         setProcessed(processedData);
         setHeld(heldData);
         setStock(stockData);
@@ -104,8 +107,9 @@ export default function UserWorkPage() {
 
   const { user, summary } = activity;
   const tiles: [string, number][] = [
-    ["Pending tickets raised", summary.tickets_raised_pending],
-    ["Tickets approved", summary.tickets_approved],
+    ["Open tickets raised", summary.tickets_raised_pending],
+    ["Tickets in progress", summary.tickets_in_progress],
+    ["Tickets approved / fulfilled", summary.tickets_approved],
     ["Tickets rejected", summary.tickets_rejected],
     ["Assets assigned", summary.assets_assigned],
     ["Assets returned", summary.assets_unassigned],
@@ -174,15 +178,17 @@ export default function UserWorkPage() {
 
       <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-100 px-5 py-4">
-          <h2 className="font-semibold text-slate-900">Pending tickets raised by {user.full_name}</h2>
-          <p className="mt-1 text-sm text-slate-500">Approve (handing over an in-stock asset) or reject each one.</p>
+          <h2 className="font-semibold text-slate-900">Open tickets raised by {user.full_name}</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Each ticket shows where it is: pending, in progress, or approved and waiting for stock. Move it on from here.
+          </p>
         </div>
         {pending.length === 0 ? (
-          <p className="px-5 py-8 text-center text-sm text-slate-500">Nothing pending.</p>
+          <p className="px-5 py-8 text-center text-sm text-slate-500">No open tickets.</p>
         ) : (
           <ul className="divide-y divide-slate-100">
             {pending.map((ticket) => (
-              <PendingTicket key={ticket.id} ticket={ticket} stock={stock} onDone={done} onError={setError} />
+              <OpenTicket key={ticket.id} ticket={ticket} stock={stock} onDone={done} onError={setError} />
             ))}
           </ul>
         )}
@@ -191,7 +197,7 @@ export default function UserWorkPage() {
       <section className="grid gap-5 lg:grid-cols-2">
         <article className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-100 px-5 py-4">
-            <h2 className="font-semibold text-slate-900">Tickets they processed</h2>
+            <h2 className="font-semibold text-slate-900">Tickets they handled</h2>
           </div>
           {processed.length === 0 ? (
             <p className="px-5 py-8 text-center text-sm text-slate-500">None yet.</p>
@@ -203,13 +209,7 @@ export default function UserWorkPage() {
                     <span className="font-semibold text-slate-800">
                       {ticketNumber(ticket)} · {ticket.category_name ?? "Asset request"}
                     </span>
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                        ticket.status === "APPROVED" ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"
-                      }`}
-                    >
-                      {ticket.status}
-                    </span>
+                    <TicketStatusBadge status={ticket.status} />
                   </div>
                   <p className="text-xs text-slate-500">
                     For {ticket.requested_by_name ?? ticket.requested_for}
@@ -272,7 +272,7 @@ export default function UserWorkPage() {
   );
 }
 
-function PendingTicket({
+function OpenTicket({
   ticket,
   stock,
   onDone,
@@ -283,31 +283,11 @@ function PendingTicket({
   onDone: (message: string) => void;
   onError: (message: string) => void;
 }) {
-  const [mode, setMode] = useState<"approve" | "reject" | null>(null);
-  const [assetId, setAssetId] = useState("");
-  const [reason, setReason] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  const act = async () => {
-    setBusy(true);
-    try {
-      if (mode === "approve") {
-        const updated = await approveAssetRequest(ticket.id, assetId);
-        onDone(`${ticketNumber(ticket)} approved: ${updated.assigned_asset_tag} assigned to ${updated.requested_by_name}.`);
-      } else {
-        await rejectAssetRequest(ticket.id, reason.trim());
-        onDone(`${ticketNumber(ticket)} rejected.`);
-      }
-    } catch (caught) {
-      onError(caught instanceof Error ? caught.message : "Update failed.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
+  const handler = ticketHandler(ticket);
   return (
-    <li className="px-5 py-3 text-sm">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+    <li className="flex flex-col gap-3 px-5 py-3 text-sm lg:flex-row lg:items-start lg:justify-between">
+      <div className="flex gap-4">
+        <TicketProgress status={ticket.status} />
         <div>
           <p className="font-semibold text-slate-800">
             {ticketNumber(ticket)} · {ticket.category_name ?? "Asset request"}
@@ -316,67 +296,13 @@ function PendingTicket({
           <p className="text-slate-500">{ticket.reason}</p>
           <p className="text-xs text-slate-400">
             For {ticket.requested_by_name ?? ticket.requested_for} · raised {formatDateTime(ticket.created_at)}
+            {handler ? ` · ${handler}` : ""}
           </p>
         </div>
-        {!mode && (
-          <span className="flex shrink-0 gap-3 font-semibold">
-            <button type="button" onClick={() => setMode("approve")} className="text-emerald-700 hover:text-emerald-800">
-              Approve
-            </button>
-            <button type="button" onClick={() => setMode("reject")} className="text-rose-600 hover:text-rose-700">
-              Reject
-            </button>
-          </span>
-        )}
       </div>
-      {mode && (
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          {mode === "approve" ? (
-            stock.length === 0 ? (
-              <span className="text-xs text-amber-700">No assets are in stock to hand over.</span>
-            ) : (
-              <label>
-                <span className="sr-only">Asset to hand over</span>
-                <select
-                  value={assetId}
-                  onChange={(event) => setAssetId(event.target.value)}
-                  className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs"
-                >
-                  <option value="">Choose an in-stock asset…</option>
-                  {stock.map((asset) => (
-                    <option key={asset.id} value={asset.id}>
-                      {asset.asset_tag} · {asset.name} ({asset.category})
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )
-          ) : (
-            <label>
-              <span className="sr-only">Reason for rejecting</span>
-              <input
-                value={reason}
-                onChange={(event) => setReason(event.target.value)}
-                placeholder="Reason for rejecting"
-                className="w-72 rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
-              />
-            </label>
-          )}
-          <button
-            type="button"
-            disabled={busy || (mode === "approve" ? !assetId : !reason.trim())}
-            onClick={act}
-            className={`rounded-lg px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50 ${
-              mode === "approve" ? "bg-emerald-600 hover:bg-emerald-700" : "bg-rose-600 hover:bg-rose-700"
-            }`}
-          >
-            {busy ? "Saving…" : mode === "approve" ? "Approve & assign" : "Reject ticket"}
-          </button>
-          <button type="button" onClick={() => setMode(null)} className="px-2 text-xs font-semibold text-slate-600">
-            Cancel
-          </button>
-        </div>
-      )}
+      <div className="shrink-0">
+        <TicketActions ticket={ticket} stock={stock} onDone={onDone} onError={onError} />
+      </div>
     </li>
   );
 }

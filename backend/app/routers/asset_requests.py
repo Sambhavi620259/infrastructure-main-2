@@ -181,10 +181,15 @@ def get_ticket_counts(
 
     return {
         "pending": base.filter(AssetRequest.status == RequestStatusEnum.PENDING).count(),
-        "open": base.filter(AssetRequest.status == RequestStatusEnum.APPROVED).count(),
+        "in_progress": base.filter(AssetRequest.status == RequestStatusEnum.IN_PROGRESS).count(),
+        # Approved but waiting for stock.
+        "approved": base.filter(AssetRequest.status == RequestStatusEnum.APPROVED).count(),
+        "fulfilled": base.filter(AssetRequest.status == RequestStatusEnum.FULFILLED).count(),
+        # Every ticket still being worked: pending, in progress or approved.
+        "open": base.filter(AssetRequest.status.in_(OPEN_TICKET_STATUSES)).count(),
         "my_open": base.filter(
             AssetRequest.requested_by == current_user.id,
-            AssetRequest.status.in_([RequestStatusEnum.PENDING, RequestStatusEnum.APPROVED])
+            AssetRequest.status.in_(OPEN_TICKET_STATUSES)
         ).count(),
     }
 
@@ -210,6 +215,59 @@ def get_asset_request(
     return _with_names(db, [req])[0]
 
 
+# Where a ticket may go next. FULFILLED, REJECTED and CANCELLED are final.
+_NEXT_STATUS = {
+    RequestStatusEnum.PENDING: {
+        RequestStatusEnum.IN_PROGRESS, RequestStatusEnum.APPROVED, RequestStatusEnum.FULFILLED,
+        RequestStatusEnum.REJECTED, RequestStatusEnum.CANCELLED,
+    },
+    RequestStatusEnum.IN_PROGRESS: {
+        RequestStatusEnum.PENDING, RequestStatusEnum.APPROVED, RequestStatusEnum.FULFILLED,
+        RequestStatusEnum.REJECTED, RequestStatusEnum.CANCELLED,
+    },
+    RequestStatusEnum.APPROVED: {RequestStatusEnum.FULFILLED, RequestStatusEnum.CANCELLED},
+}
+OPEN_TICKET_STATUSES = list(_NEXT_STATUS)
+
+# What the requester is told at each step: (title, message, notification type).
+_REQUESTER_NOTICE = {
+    RequestStatusEnum.IN_PROGRESS: ("Your ticket is being worked on", "{actor} has started working on it.", "INFO"),
+    RequestStatusEnum.APPROVED: ("Your ticket was approved", "{actor} approved it. The asset will be assigned when stock is available.", "SUCCESS"),
+    RequestStatusEnum.FULFILLED: ("Your ticket is fulfilled", "{actor} assigned you {asset}.", "SUCCESS"),
+    RequestStatusEnum.REJECTED: ("Your ticket was rejected", "{actor}: {reason}", "WARNING"),
+    RequestStatusEnum.CANCELLED: ("Your ticket was cancelled", "{actor} cancelled it.", "INFO"),
+}
+
+
+def _hand_over_asset(db: Session, asset_req: AssetRequest, asset_id: Optional[str], actor: User) -> Asset:
+    """Assign an in-stock asset to the ticket's requester and record it in the asset history."""
+    if not asset_id:
+        raise HTTPException(status_code=400, detail="Choose the asset to hand over.")
+    asset = db.query(Asset).filter(Asset.id == asset_id, Asset.company_id == asset_req.company_id).first()
+    if not asset or asset.status not in (AssetStatusEnum.IN_STOCK, AssetStatusEnum.REQUESTED):
+        raise HTTPException(status_code=400, detail="That asset is not available in stock.")
+
+    previous_status = asset.status.value
+    asset.status = AssetStatusEnum.ASSIGNED
+    asset_req.assigned_asset_id = asset.id
+    db.query(AssetAssignment).filter(
+        AssetAssignment.asset_id == asset.id, AssetAssignment.is_active == True
+    ).update({"is_active": False})
+    db.add(AssetAssignment(
+        company_id=asset_req.company_id, asset_id=asset.id, user_id=asset_req.requested_by, is_active=True,
+    ))
+    db.add(AssetLifecycle(
+        company_id=asset_req.company_id,
+        asset_id=asset.id,
+        action="ASSIGNED_VIA_REQUEST",
+        previous_status=previous_status,
+        new_status=AssetStatusEnum.ASSIGNED.value,
+        performed_by=actor.id,
+        remarks=f"Assigned to fulfil ticket #{asset_req.id[:6].upper()}.",
+    ))
+    return asset
+
+
 @router.put("/{request_id}", response_model=AssetRequestResponse)
 def update_asset_request_status(
     request_id: str,
@@ -219,7 +277,11 @@ def update_asset_request_status(
     tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
 ):
     """
-    Approve or reject an asset request and automatically link assigned hardware if approved.
+    Move a ticket along as it is worked:
+    PENDING -> IN_PROGRESS (someone picks it up; PENDING again releases it)
+    -> APPROVED (agreed, waiting for stock) -> FULFILLED (asset handed over).
+    REJECTED (needs a reason) and CANCELLED close it early.
+    Approving with an asset hands it over at once, so the ticket is FULFILLED.
     """
     query = db.query(AssetRequest).filter(AssetRequest.id == request_id)
     if current_user.role != PlatformRole.SUPER_ADMIN:
@@ -229,76 +291,50 @@ def update_asset_request_status(
     if not asset_req:
         raise HTTPException(status_code=404, detail="Asset request not found.")
 
-    if asset_req.status != RequestStatusEnum.PENDING:
-        raise HTTPException(status_code=400, detail="Request has already been processed.")
+    new_status = update_in.status
+    if new_status == RequestStatusEnum.APPROVED and update_in.assigned_asset_id:
+        new_status = RequestStatusEnum.FULFILLED
 
-    old_status = asset_req.status.value
-    asset_req.status = update_in.status
-    asset_req.processed_by = current_user.id
-    asset_req.processed_at = datetime.utcnow()
-
-    if update_in.status == RequestStatusEnum.APPROVED:
-        if not update_in.assigned_asset_id:
-            raise HTTPException(
-                status_code=400,
-                detail="Assigned asset ID is required when approving a request."
-            )
-        
-        asset = db.query(Asset).filter(
-            Asset.id == update_in.assigned_asset_id,
-            Asset.company_id == asset_req.company_id
-        ).first()
-
-        if not asset or asset.status != AssetStatusEnum.IN_STOCK:
-            raise HTTPException(
-                status_code=400,
-                detail="Target asset is not available in stock for assignment."
-            )
-
-        asset.status = AssetStatusEnum.ASSIGNED
-        asset_req.assigned_asset_id = asset.id
-
-        # Deactivate older assignments and create new user assignment
-        db.query(AssetAssignment).filter(
-            AssetAssignment.asset_id == asset.id, 
-            AssetAssignment.is_active == True
-        ).update({"is_active": False})
-
-        new_assignment = AssetAssignment(
-            company_id=asset_req.company_id,
-            asset_id=asset.id,
-            user_id=asset_req.requested_by,
-            is_active=True
+    old_status = asset_req.status
+    if new_status not in _NEXT_STATUS.get(old_status, set()):
+        if old_status not in _NEXT_STATUS:
+            raise HTTPException(status_code=400, detail=f"This ticket is already {old_status.value.lower()}.")
+        raise HTTPException(
+            status_code=400,
+            detail=f"A {old_status.value.lower().replace('_', ' ')} ticket cannot be moved to {new_status.value.lower().replace('_', ' ')}.",
         )
-        db.add(new_assignment)
+    if new_status == RequestStatusEnum.REJECTED and not (update_in.rejection_reason or "").strip():
+        raise HTTPException(status_code=400, detail="Give a reason for rejecting the ticket.")
 
-        # Record Lifecycle history
-        lifecycle = AssetLifecycle(
-            company_id=asset_req.company_id,
-            asset_id=asset.id,
-            action="ASSIGNED_VIA_REQUEST",
-            previous_status=AssetStatusEnum.IN_STOCK.value,
-            new_status=AssetStatusEnum.ASSIGNED.value,
-            performed_by=current_user.id,
-            remarks=f"Assigned upon request approval ({asset_req.id})."
-        )
-        db.add(lifecycle)
+    asset = None
+    if new_status == RequestStatusEnum.FULFILLED:
+        asset = _hand_over_asset(db, asset_req, update_in.assigned_asset_id, current_user)
+    if new_status == RequestStatusEnum.REJECTED:
+        asset_req.rejection_reason = update_in.rejection_reason.strip()
 
-    elif update_in.status == RequestStatusEnum.REJECTED:
-        asset_req.rejection_reason = update_in.rejection_reason or "Request rejected by administrator."
+    asset_req.status = new_status
+    if new_status == RequestStatusEnum.PENDING:
+        # Released back to the queue: nobody is handling it now.
+        asset_req.processed_by = None
+        asset_req.processed_at = None
+    else:
+        asset_req.processed_by = current_user.id
+        asset_req.processed_at = datetime.utcnow()
 
     requester = db.query(User).filter(User.id == asset_req.requested_by).first()
-    if requester and requester.id != current_user.id:
-        approved = asset_req.status == RequestStatusEnum.APPROVED
+    notice = _REQUESTER_NOTICE.get(new_status)
+    if requester and notice and requester.id != current_user.id:
+        title, message, kind = notice
         notify(
             db, requester,
-            title=f"Your ticket was {'approved' if approved else 'rejected'}",
-            message=(
-                f"{current_user.full_name} approved it and assigned you an asset." if approved
-                else f"{current_user.full_name}: {asset_req.rejection_reason}"
-            ),
+            title=title,
+            message=message.format(
+                actor=current_user.full_name,
+                asset=f"{asset.asset_tag} ({asset.name})" if asset else "an asset",
+                reason=asset_req.rejection_reason,
+            )[:300],
             link=home_link(requester, "/tickets/mine", "/agent/tickets"),
-            type="SUCCESS" if approved else "WARNING",
+            type=kind,
         )
     db.commit()
     db.refresh(asset_req)
@@ -310,8 +346,8 @@ def update_asset_request_status(
         company_id=asset_req.company_id,
         user_id=current_user.id,
         entity_id=asset_req.id,
-        old_value=f"Status: {old_status}",
-        new_value=f"Ticket #{asset_req.id[:6].upper()} {asset_req.status.value.lower()}"
+        old_value=f"Status: {old_status.value}",
+        new_value=f"Ticket #{asset_req.id[:6].upper()} {new_status.value.lower().replace('_', ' ')}"
     )
 
     return _with_names(db, [asset_req])[0]
