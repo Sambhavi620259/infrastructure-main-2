@@ -109,7 +109,7 @@ export default function CompaniesPage() {
         />
       )}
 
-      <section className="grid gap-3 sm:grid-cols-3">
+      <section className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         {[
           ["Shown", companies.length],
           ["Active", active],

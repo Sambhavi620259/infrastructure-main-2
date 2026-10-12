@@ -95,7 +95,7 @@ export default function CloudPage() {
         </div>
       )}
 
-      <section className="grid gap-4 sm:grid-cols-3">
+      <section className="grid grid-cols-2 gap-4 sm:grid-cols-3">
         <article className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-2xl font-bold text-slate-950">{loading ? "—" : money(monthly)}</p>
           <p className="mt-1 text-sm text-slate-600">Monthly cost (active resources)</p>

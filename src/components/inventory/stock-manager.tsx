@@ -88,7 +88,7 @@ export function StockManager({ eyebrow, addHref }: { eyebrow: string; addHref?: 
         </div>
       )}
 
-      <section className="grid gap-3 sm:grid-cols-3">
+      <section className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         {[
           ["Items", items.length, "text-slate-900"],
           ["Low stock", lowCount, "text-amber-600"],

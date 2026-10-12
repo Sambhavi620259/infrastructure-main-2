@@ -73,7 +73,7 @@ export default function HardwareInventoryPage() {
         </div>
       )}
 
-      <section className="grid gap-4 sm:grid-cols-3">
+      <section className="grid grid-cols-2 gap-4 sm:grid-cols-3">
         {[
           ["Hardware assets", totals.total.toLocaleString()],
           ["Free to deploy", totals.inStock.toLocaleString()],

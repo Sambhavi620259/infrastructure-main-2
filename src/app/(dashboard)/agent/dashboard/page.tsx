@@ -91,7 +91,7 @@ export default function AgentDashboardPage() {
         </div>
       )}
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <section className="grid grid-cols-2 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {metrics.map(([label, value, color]) => (
           <Link key={label} href="/agent/assets" className="ui-surface p-4 transition hover:border-brand-200">
             <p className="text-[10px] text-slate-500">{label}</p>
@@ -100,7 +100,7 @@ export default function AgentDashboardPage() {
         ))}
       </section>
 
-      <section className="grid gap-3 sm:grid-cols-3">
+      <section className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <Link href="/agent/tickets" className="ui-surface flex items-center gap-3 p-4 transition hover:border-brand-200">
           <TicketIcon className="h-6 w-6 text-amber-500" aria-hidden="true" />
           <div>

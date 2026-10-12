@@ -190,7 +190,7 @@ export function TicketQueue({
           </label>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1000px] text-left text-xs">
+          <table className="w-full min-w-[900px] text-left text-xs">
             <thead className="bg-slate-50 text-[10px] uppercase text-slate-400">
               <tr>
                 {["Ticket", "Requester", "Category / dept.", "Reason", "Status", "Raised", ""].map((heading) => (
@@ -250,7 +250,7 @@ function TicketRow({
         <TicketProgress status={ticket.status} />
       </td>
       <td className="whitespace-nowrap px-4 py-3 text-slate-500">{timeAgo(ticket.created_at)}</td>
-      <td className="px-4 py-3 text-right">
+      <td className="w-60 px-4 py-3 text-right">
         <TicketActions ticket={ticket} stock={stock} onDone={onDone} onError={onError} />
       </td>
     </tr>

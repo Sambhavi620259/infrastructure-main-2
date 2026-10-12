@@ -69,7 +69,7 @@ export default function SubscriptionsPage() {
         </div>
       )}
 
-      <section className="grid gap-3 sm:grid-cols-4">
+      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {byPlan.map(([plan, count]) => (
           <article key={plan} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
             <p className="text-xl font-extrabold text-slate-950">{loading ? "—" : count}</p>

@@ -211,7 +211,7 @@ export default function AuditSessionPage() {
       )}
 
       {/* Quick Stats */}
-      <section className="grid gap-4 sm:grid-cols-3">
+      <section className="grid grid-cols-2 gap-4 sm:grid-cols-3">
         <article className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-slate-500">Verified</p>
           <p className="mt-1 text-3xl font-bold text-emerald-700">{session.verified_count}</p>

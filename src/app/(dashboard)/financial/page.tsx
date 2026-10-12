@@ -82,7 +82,7 @@ export default function FinancialPage() {
         </div>
       )}
 
-      <section className="grid gap-4 sm:grid-cols-3">
+      <section className="grid grid-cols-2 gap-4 sm:grid-cols-3">
         {[
           ["Purchase cost", summary ? money(summary.total_asset_cost) : "—", "Everything registered"],
           ["Book value today", summary ? money(summary.net_book_value) : "—", "After depreciation"],

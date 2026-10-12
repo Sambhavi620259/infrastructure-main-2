@@ -137,7 +137,7 @@ export default function LoginPage() {
           }
         />
 
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <label className="flex items-center gap-2 text-sm text-slate-600">
             <input
               type="checkbox"

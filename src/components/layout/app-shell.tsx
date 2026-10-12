@@ -36,6 +36,7 @@ import { getDashboardCounts, type DashboardCounts } from "@/lib/dashboard";
 import { NotificationBell } from "@/components/layout/notification-bell";
 import { PROFILE_UPDATED_EVENT } from "@/lib/profile";
 import { LABEL_SECTION, sectionForPath, sectionsFor } from "@/lib/access";
+import { useResponsiveTables } from "@/lib/responsive-tables";
 
 type NavigationItem = readonly [label: string, href: string, countKey: string, icon: React.ComponentType<{ className?: string }>];
 
@@ -121,6 +122,19 @@ export function AppShell({ children }: { children: ReactNode }) {
   const sections = useMemo(() => sectionsFor(authenticatedUser?.role ?? "", modules), [authenticatedUser, modules]);
   const [sessionAttempt, setSessionAttempt] = useState(0);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [mainEl, setMainEl] = useState<HTMLDivElement | null>(null);
+  useResponsiveTables(mainEl);
+
+  // Close the phone menu on navigation and on Escape.
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [pathname]);
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    const onKey = (event: KeyboardEvent) => event.key === "Escape" && setMobileNavOpen(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [mobileNavOpen]);
   const [search, setSearch] = useState("");
   const [profileOpen, setProfileOpen] = useState(false);
   const [assetsOpen, setAssetsOpen] = useState(pathname.startsWith("/assets"));
@@ -357,44 +371,27 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen bg-[#f7f9fc] text-slate-900 md:grid md:grid-cols-[15.5rem_1fr]">
-      <div className="md:hidden">
-        <div className="sticky top-0 z-50 flex h-16 items-center justify-between border-b border-slate-200 bg-white px-4">
-          <Link
-            href={
-              workspace === "super"
-                ? routes.superAdmin
-                : workspace === "agent"
-                  ? routes.agentDashboard
-                  : routes.dashboard
-            }
-            className="flex items-center gap-2.5"
-            aria-label="Bold And Wise Ventures home"
-          >
-            <span className="grid h-9 w-9 place-items-center rounded-xl bg-brand-600 text-sm font-black text-white shadow-sm">
-              B
-            </span>
-            <span>
-              <span className="block text-[13px] font-extrabold tracking-tight text-slate-900">
-                Bold And Wise
-              </span>
-              <span className="block text-[9px] font-semibold text-brand-600">Ventures Pvt Ltd</span>
-            </span>
-          </Link>
-          <button
-            type="button"
-            aria-label={mobileNavOpen ? "Close navigation" : "Open navigation"}
-            aria-expanded={mobileNavOpen}
-            onClick={() => setMobileNavOpen((open) => !open)}
-            className="grid h-9 w-9 place-items-center rounded-lg text-slate-600 hover:bg-slate-100"
-          >
-            {mobileNavOpen ? <XMarkIcon className="h-5 w-5" /> : <Bars3Icon className="h-5 w-5" />}
-          </button>
-        </div>
-      </div>
+      {/* Phone menu: a drawer over a dimmed page. */}
+      {mobileNavOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-slate-900/40 md:hidden"
+          aria-hidden="true"
+          onClick={() => setMobileNavOpen(false)}
+        />
+      )}
 
       <aside
-        className={`${mobileNavOpen ? "fixed inset-x-0 top-16 z-40 block max-h-[calc(100vh-4rem)] overflow-y-auto" : "hidden"} border-r border-slate-200 bg-white p-4 text-slate-600 md:sticky md:top-0 md:block md:h-screen md:overflow-y-auto`}
+        className={`fixed inset-y-0 left-0 z-50 w-72 max-w-[85vw] overflow-y-auto border-r border-slate-200 bg-white p-4 text-slate-600 shadow-xl transition-transform duration-200 md:sticky md:top-0 md:z-auto md:block md:h-screen md:w-auto md:max-w-none md:translate-x-0 md:shadow-none ${mobileNavOpen ? "translate-x-0" : "-translate-x-full"}`}
+        aria-label="Main menu"
       >
+        <button
+          type="button"
+          aria-label="Close navigation"
+          onClick={() => setMobileNavOpen(false)}
+          className="absolute right-3 top-4 grid h-9 w-9 place-items-center rounded-lg text-slate-500 hover:bg-slate-100 md:hidden"
+        >
+          <XMarkIcon className="h-5 w-5" />
+        </button>
         <Link
           href={
             workspace === "super"
@@ -403,7 +400,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                 ? routes.agentDashboard
                 : routes.dashboard
           }
-          className="mb-5 hidden items-center gap-2.5 px-2 md:flex"
+          onClick={() => setMobileNavOpen(false)}
+          className="mb-5 flex items-center gap-2.5 px-2"
           aria-label="Bold And Wise Ventures home"
         >
           <span className="grid h-9 w-9 place-items-center rounded-xl bg-brand-600 text-sm font-black text-white shadow-sm">
@@ -654,7 +652,26 @@ export function AppShell({ children }: { children: ReactNode }) {
       </aside>
 
       <section className="min-w-0">
-        <header className="sticky top-0 z-30 flex h-[68px] items-center justify-between border-b border-slate-200 bg-white/95 px-4 backdrop-blur md:px-7">
+        <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-2 border-b border-slate-200 bg-white/95 px-3 backdrop-blur md:h-[68px] md:px-7">
+          <div className="flex min-w-0 items-center gap-2 md:hidden">
+            <button
+              type="button"
+              aria-label="Open navigation"
+              aria-expanded={mobileNavOpen}
+              onClick={() => setMobileNavOpen(true)}
+              className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-slate-600 hover:bg-slate-100"
+            >
+              <Bars3Icon className="h-6 w-6" />
+            </button>
+            <Link href={workspace === "super"
+              ? routes.superAdmin
+              : workspace === "agent"
+                ? routes.agentDashboard
+                : routes.dashboard} className="flex min-w-0 items-center gap-2" aria-label="Home">
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-brand-600 text-xs font-black text-white">B</span>
+              <span className="truncate text-[13px] font-extrabold tracking-tight text-slate-900">Bold And Wise</span>
+            </Link>
+          </div>
           <div className="relative hidden w-full max-w-md md:block">
             <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <input
@@ -731,7 +748,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           </div>
         </header>
-        <div className="p-4 sm:p-5 md:p-7">{children}</div>
+        <div ref={setMainEl} className="app-main p-3 sm:p-5 md:p-7">
+          {children}
+        </div>
       </section>
     </div>
   );

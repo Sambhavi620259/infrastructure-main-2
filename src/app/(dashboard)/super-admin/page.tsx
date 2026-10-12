@@ -80,7 +80,7 @@ export default function SuperAdminOverviewPage() {
         </div>
       )}
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <section className="grid grid-cols-2 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {stats.map(([label, value, hint, Icon]) => (
           <article key={label} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex items-start justify-between">

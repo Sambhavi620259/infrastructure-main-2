@@ -55,13 +55,13 @@ export function AuthLayout({ children }: { children: ReactNode }) {
         <p className="text-sm text-slate-400">© {new Date().getFullYear()} Bold and Wise Ventures Pvt. Ltd.</p>
       </aside>
 
-      <main className="flex flex-1 items-center justify-center px-4 py-10 sm:px-8">
+      <main className="flex min-w-0 flex-1 items-center justify-center px-3 py-8 min-[360px]:px-4 sm:px-8 sm:py-10">
         <div className="w-full max-w-md">
           {/* The brand panel is hidden on small screens, so show the name above the card. */}
           <p className="mb-6 text-center text-lg font-extrabold text-slate-900 lg:hidden">
             IT Asset Management Portal
           </p>
-          <section className="rounded-3xl bg-white p-7 shadow-xl shadow-slate-200/70 sm:p-9">{children}</section>
+          <section className="rounded-3xl bg-white p-5 shadow-xl shadow-slate-200/70 min-[360px]:p-7 sm:p-9">{children}</section>
         </div>
       </main>
     </div>

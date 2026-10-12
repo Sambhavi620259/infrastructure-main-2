@@ -130,17 +130,17 @@ export default function DashboardPage() {
         </div>
       )}
 
-      <section className="grid overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm sm:grid-cols-3">
+      <section className="grid grid-cols-3 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         {tiles.map(([label, value, Icon, style]) => (
           <article
             key={label}
-            className="flex items-center gap-4 border-b border-slate-200 px-5 py-5 last:border-b-0 sm:border-b-0 sm:border-r sm:last:border-r-0"
+            className="flex flex-col items-start gap-2 border-r border-slate-200 px-3 py-4 last:border-r-0 sm:flex-row sm:items-center sm:gap-4 sm:px-5 sm:py-5"
           >
-            <span className={`grid h-11 w-11 place-items-center rounded-full ${style}`}>
+            <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full sm:h-11 sm:w-11 ${style}`}>
               <Icon className="h-5 w-5" />
             </span>
             <div>
-              <p className="text-xs font-semibold text-slate-500">{label}</p>
+              <p className="text-[11px] font-semibold leading-tight text-slate-500 sm:text-xs">{label}</p>
               <p className="mt-0.5 text-2xl font-extrabold text-slate-950">{value}</p>
             </div>
           </article>
@@ -182,7 +182,7 @@ export default function DashboardPage() {
                 const Icon = categoryIcon[asset.category] ?? CubeIcon;
                 return (
                   <tr key={asset.id} className="text-sm hover:bg-slate-50">
-                    <td className="px-5 py-3 text-slate-500">
+                    <td className="px-5 py-3 text-slate-500 max-sm:!hidden">
                       <Icon className="h-4 w-4" />
                     </td>
                     <td className="px-5 py-3 font-bold text-slate-700">

@@ -81,3 +81,85 @@ button:disabled {
     background: var(--canvas);
   }
 }
+
+/*
+ * Phones: tables in the app become one card per row, two fields across, each
+ * with its column name (data-label, set by useResponsiveTables). The first
+ * cell is the card title; cells without a heading (actions) span the card.
+ * Add data-keep-table to a <table> to keep it as a scrolling table.
+ */
+@media (max-width: 639px) {
+  .app-main table:not([data-keep-table]) {
+    display: block;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+  .app-main table:not([data-keep-table]) thead {
+    display: none;
+  }
+  .app-main table:not([data-keep-table]) tbody {
+    display: block;
+  }
+  .app-main table:not([data-keep-table]) tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem 1rem;
+    padding: 0.875rem 1rem;
+    border-bottom: 1px solid rgb(241 245 249);
+  }
+  .app-main table:not([data-keep-table]) td {
+    display: block;
+    min-width: 0;
+    max-width: none !important;
+    padding: 0 !important;
+    text-align: left !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+  }
+  .app-main table:not([data-keep-table]) td:first-child,
+  .app-main table:not([data-keep-table]) td:not([data-label]),
+  .app-main table:not([data-keep-table]) td[colspan] {
+    grid-column: 1 / -1;
+  }
+  .app-main table:not([data-keep-table]) td:empty {
+    display: none;
+  }
+  .app-main table:not([data-keep-table]) td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 0.125rem;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: rgb(148 163 184);
+  }
+  .app-main table:not([data-keep-table]) td:first-child[data-label]::before {
+    display: none;
+  }
+  /* Action links inside a card line up from the left. */
+  .app-main table:not([data-keep-table]) td .justify-end {
+    justify-content: flex-start;
+  }
+}
+
+/* iPhones zoom into inputs with text under 16px; keep form fields at 16px on phones. */
+@media (max-width: 639px) {
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
+/*
+ * Keep wide content inside its scroll area: absolutely positioned bits in a
+ * table (e.g. sr-only labels) would otherwise escape .overflow-x-auto and widen
+ * the page, and grid items must be allowed to shrink below a table's min width.
+ */
+.app-main .overflow-x-auto {
+  position: relative;
+}
+.app-main .grid > * {
+  min-width: 0;
+}

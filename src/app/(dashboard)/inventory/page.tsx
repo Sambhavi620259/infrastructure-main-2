@@ -80,7 +80,7 @@ export default function InventoryPage() {
       )}
 
       {counts && (
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
           <article className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
             <p className="text-xs font-semibold text-slate-500">Total Items</p>
             <p className="mt-1 text-2xl font-extrabold text-slate-900">{counts.total}</p>

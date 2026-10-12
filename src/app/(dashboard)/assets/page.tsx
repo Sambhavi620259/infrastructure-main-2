@@ -104,7 +104,7 @@ export default function AssetsPage() {
         </div>
       )}
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <section className="grid grid-cols-2 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {tiles.map(([value, label, hint]) => (
           <article key={label} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
             <p className="text-2xl font-bold tracking-tight text-slate-950">{value}</p>

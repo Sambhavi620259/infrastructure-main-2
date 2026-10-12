@@ -91,7 +91,7 @@ export default function TenantsPage() {
         </div>
       )}
 
-      <section className="grid gap-3 sm:grid-cols-4">
+      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {(Object.keys(counts) as Health[]).map((label) => (
           <article key={label} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
             <p className="text-xl font-extrabold text-slate-950">{loading ? "—" : counts[label]}</p>

@@ -225,7 +225,7 @@ export default function AssetDetailPage() {
       <section className="grid gap-6 lg:grid-cols-[1.5fr_1fr]">
         <article className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
           <h2 className="font-semibold text-slate-900">Asset details</h2>
-          <dl className="mt-6 grid gap-x-8 gap-y-5 sm:grid-cols-2">
+          <dl className="mt-6 grid grid-cols-2 gap-x-4 gap-y-5 sm:gap-x-8">
             {details.map(([label, value]) => (
               <div key={label}>
                 <dt className="text-sm text-slate-500">{label}</dt>
