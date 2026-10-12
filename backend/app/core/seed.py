@@ -3,6 +3,7 @@ import logging
 
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.database import SessionLocal
 from app.core.security import get_password_hash
 from app.models.models import User, PlatformRole
@@ -12,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 def seed_initial_users():
     """
-    Ensure a Super Admin account exists.
+    Create the first Super Admin from environment settings, if configured.
 
     Re-raises on failure. A server that has not seeded its only administrator
     account has not started successfully, and must not report that it has.
@@ -24,10 +25,19 @@ def seed_initial_users():
             logger.info("Super Admin already exists; skipping seed.")
             return
 
-        logger.info("Seeding default Super Admin\u2026")
+        if not (settings.SEED_SUPER_ADMIN_EMAIL and settings.SEED_SUPER_ADMIN_PASSWORD):
+            logger.info(
+                "No Super Admin yet. Register one at /register (Super Admin), or set "
+                "SEED_SUPER_ADMIN_EMAIL and SEED_SUPER_ADMIN_PASSWORD."
+            )
+            return
+        if len(settings.SEED_SUPER_ADMIN_PASSWORD) < 12:
+            raise RuntimeError("SEED_SUPER_ADMIN_PASSWORD must be at least 12 characters.")
+
+        logger.info("Seeding the first Super Admin from SEED_SUPER_ADMIN_EMAIL\u2026")
         admin_user = User(
-            email="superadmin@boldandwise.com",
-            hashed_password=get_password_hash("AdminPassword123!"),
+            email=settings.SEED_SUPER_ADMIN_EMAIL.strip().lower(),
+            hashed_password=get_password_hash(settings.SEED_SUPER_ADMIN_PASSWORD),
             full_name="Super Administrator",
             role=PlatformRole.SUPER_ADMIN,
             status="ACTIVE",

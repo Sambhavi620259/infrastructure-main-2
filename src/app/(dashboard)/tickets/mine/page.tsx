@@ -1,16 +1,5 @@
-import { ModuleListPage } from "@/components/shared/module-list-page";
+import { TicketQueue } from "@/components/tickets/ticket-queue";
+
 export default function MyTicketsPage() {
-  return (
-    <ModuleListPage
-      eyebrow="Tickets · My tickets"
-      title="My Tickets"
-      description="Review requests assigned to you and track their latest updates."
-      action="Create ticket"
-      items={[
-        ["IT-128 · Laptop replacement", "Assigned to you · Updated 20 min ago", "In progress"],
-        ["IT-131 · VPN access request", "Assigned to you · Updated 35 min ago", "Open"],
-        ["IT-119 · Printer issue", "Assigned to you · Updated yesterday", "Resolved"],
-      ]}
-    />
-  );
+  return <TicketQueue eyebrow="Tickets · Mine" title="My Tickets" initialMine />;
 }

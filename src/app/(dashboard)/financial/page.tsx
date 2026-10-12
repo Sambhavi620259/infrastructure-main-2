@@ -1,205 +1,151 @@
-const contracts = [
-  {
-    vendor: "Microsoft",
-    contract: "Enterprise Agreement",
-    value: "₹42.8L",
-    renewal: "16 Nov 2026",
-    owner: "N. Verma",
-    status: "Active",
-  },
-  {
-    vendor: "Dell Technologies",
-    contract: "Premier Support",
-    value: "₹18.2L",
-    renewal: "02 Sep 2026",
-    owner: "R. Kapoor",
-    status: "Renew soon",
-  },
-  {
-    vendor: "Adobe",
-    contract: "VIP Marketplace",
-    value: "₹12.6L",
-    renewal: "28 Sep 2026",
-    owner: "N. Verma",
-    status: "Renew soon",
-  },
-  {
-    vendor: "Atlassian",
-    contract: "Cloud annual plan",
-    value: "₹9.7L",
-    renewal: "14 Dec 2026",
-    owner: "P. Sharma",
-    status: "Active",
-  },
-] as const;
+"use client";
 
-const purchaseOrders = [
-  ["PO-2026-184", "Apple India", "MacBook Pro fleet refresh", "₹26.4L", "Approved"],
-  ["PO-2026-177", "Dell Technologies", "Monitor deployment · Mumbai", "₹8.1L", "Received"],
-  ["PO-2026-169", "CDW", "Network hardware", "₹14.8L", "In review"],
-] as const;
+import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import {
+  getDepartmentFinance,
+  getFinancialSummary,
+  money,
+  recalculateAllDepreciation,
+  type DepartmentFinance,
+  type FinancialSummary,
+} from "@/lib/operations";
 
 export default function FinancialPage() {
+  const [summary, setSummary] = useState<FinancialSummary | null>(null);
+  const [departments, setDepartments] = useState<DepartmentFinance[]>([]);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(() => {
+    Promise.all([getFinancialSummary(), getDepartmentFinance()])
+      .then(([summaryData, departmentData]) => {
+        setSummary(summaryData);
+        setDepartments(departmentData.sort((a, b) => b.total_cost - a.total_cost));
+        setError("");
+      })
+      .catch((caught) => setError(caught instanceof Error ? caught.message : "Unable to load financial data."));
+  }, []);
+
+  useEffect(load, [load]);
+
+  const recalculate = async () => {
+    setBusy(true);
+    try {
+      const result = await recalculateAllDepreciation();
+      setNotice(`Depreciation recalculated for ${result.assets_updated} asset(s) with a purchase date and price.`);
+      load();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Recalculation failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const depreciatedPct =
+    summary && summary.total_asset_cost > 0
+      ? Math.round((summary.accumulated_depreciation / summary.total_asset_cost) * 100)
+      : 0;
+
   return (
-    <main className="mx-auto max-w-7xl space-y-8">
-      <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+    <main className="mx-auto max-w-7xl space-y-5">
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-sm font-medium text-brand-600">Financial & contract management</p>
-          <h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-950">Financials</h1>
-          <p className="mt-2 text-slate-500">
-            Understand asset value, depreciation, purchasing, and vendor commitments.
+          <p className="text-[11px] font-bold uppercase tracking-wider text-brand-600">Finance</p>
+          <h1 className="mt-1 text-2xl font-extrabold tracking-tight text-slate-950">Asset finance</h1>
+          <p className="mt-1 text-sm text-slate-500">
+            What your hardware cost, what it is worth now, and where the money sits by department.
           </p>
         </div>
-        <button className="rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700">
-          + Add purchase order
+        <button
+          type="button"
+          onClick={recalculate}
+          disabled={busy}
+          className="rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
+        >
+          {busy ? "Recalculating…" : "Recalculate depreciation"}
         </button>
       </header>
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+
+      {error && (
+        <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          {error}
+        </div>
+      )}
+      {notice && (
+        <div role="status" className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          <span>{notice}</span>
+          <button type="button" onClick={() => setNotice("")} aria-label="Dismiss">
+            ×
+          </button>
+        </div>
+      )}
+
+      <section className="grid gap-4 sm:grid-cols-3">
         {[
-          ["₹8.46Cr", "Asset portfolio value", "Book value across all assets"],
-          ["₹1.24Cr", "Annual depreciation", "Forecast for FY 2026–27"],
-          ["₹72.1L", "Open purchase orders", "9 orders in progress"],
-          ["₹30.8L", "Renewals in 90 days", "6 contracts require review"],
-        ].map(([value, label, hint], index) => (
+          ["Purchase cost", summary ? money(summary.total_asset_cost) : "—", "Everything registered"],
+          ["Book value today", summary ? money(summary.net_book_value) : "—", "After depreciation"],
+          ["Depreciated", summary ? `${money(summary.accumulated_depreciation)} (${depreciatedPct}%)` : "—", "Value written off so far"],
+        ].map(([label, value, hint]) => (
           <article key={label} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p
-              className={`text-2xl font-bold tracking-tight ${index === 3 ? "text-amber-600" : "text-slate-950"}`}
-            >
-              {value}
-            </p>
+            <p className="text-2xl font-bold text-slate-950">{value}</p>
             <p className="mt-1 text-sm font-medium text-slate-700">{label}</p>
-            <p className="mt-2 text-xs text-slate-500">{hint}</p>
+            <p className="mt-1 text-xs text-slate-500">{hint}</p>
           </article>
         ))}
       </section>
-      <section className="grid gap-6 lg:grid-cols-[1.5fr_1fr]">
-        <article className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="font-semibold text-slate-900">Asset value over time</h2>
-              <p className="mt-1 text-sm text-slate-500">Portfolio book value after depreciation</p>
-            </div>
-            <select
-              aria-label="Chart period"
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600"
-            >
-              <option>FY 2026–27</option>
-            </select>
-          </div>
-          <div className="mt-8 flex h-52 items-end justify-between gap-3 border-b border-l border-slate-200 px-5 pt-5">
-            {[82, 75, 68, 63, 57, 52, 47, 42, 38, 33, 29, 24].map((height, index) => (
-              <div key={index} className="group flex h-full flex-1 items-end">
-                <div
-                  className={`w-full rounded-t-md transition ${index === 7 ? "bg-brand-600" : "bg-brand-100 group-hover:bg-brand-300"}`}
-                  style={{ height: `${height}%` }}
-                />
-              </div>
-            ))}
-          </div>
-          <div className="mt-3 flex justify-between text-xs text-slate-400">
-            <span>Apr</span>
-            <span>Jul</span>
-            <span>Oct</span>
-            <span>Jan</span>
-            <span>Mar</span>
-          </div>
-        </article>
-        <article className="rounded-xl bg-slate-950 p-6 text-white shadow-sm">
-          <p className="text-sm font-medium text-slate-400">Depreciation forecast</p>
-          <p className="mt-3 text-4xl font-bold">₹1.24Cr</p>
-          <p className="mt-2 text-sm leading-6 text-slate-400">
-            Expected expense in the current financial year using straight-line calculations.
+
+      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-100 px-5 py-4">
+          <h2 className="font-semibold text-slate-900">By department</h2>
+          <p className="mt-1 text-xs text-slate-500">
+            Assets with a department set. Assign departments on the asset record to fill this in.
           </p>
-          <div className="mt-8 border-t border-white/10 pt-4">
-            <div className="flex justify-between text-sm">
-              <span className="text-slate-400">This month</span>
-              <span className="font-semibold">₹10.3L</span>
-            </div>
-            <button className="mt-5 text-sm font-semibold text-brand-400 hover:text-brand-300">
-              View depreciation schedule →
-            </button>
-          </div>
-        </article>
-      </section>
-      <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-5">
-          <div>
-            <h2 className="font-semibold text-slate-900">Vendor contracts</h2>
-            <p className="mt-1 text-sm text-slate-500">
-              Service agreements, subscriptions, and renewal milestones.
-            </p>
-          </div>
-          <button className="text-sm font-semibold text-brand-600 hover:text-brand-700">
-            View contracts →
-          </button>
         </div>
         <div className="overflow-x-auto">
-          <table className="min-w-[800px] w-full text-left">
-            <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+          <table className="min-w-[640px] w-full text-left">
+            <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-600">
               <tr>
-                <th className="px-6 py-3 font-semibold">Vendor</th>
-                <th className="px-6 py-3 font-semibold">Contract</th>
-                <th className="px-6 py-3 font-semibold">Annual value</th>
-                <th className="px-6 py-3 font-semibold">Renewal</th>
-                <th className="px-6 py-3 font-semibold">Owner</th>
-                <th className="px-6 py-3" />
+                {["Department", "Assets", "Purchase cost", "Book value", "Share of spend"].map((h) => (
+                  <th key={h} className="px-5 py-3">
+                    {h}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {contracts.map((item) => (
-                <tr key={item.vendor} className="hover:bg-slate-50">
-                  <td className="px-6 py-4 font-semibold text-slate-800">{item.vendor}</td>
-                  <td className="px-6 py-4 text-sm text-slate-600">{item.contract}</td>
-                  <td className="px-6 py-4 text-sm font-semibold text-slate-700">{item.value}</td>
-                  <td className="px-6 py-4">
-                    <p className="text-sm text-slate-700">{item.renewal}</p>
-                    <span
-                      className={`text-xs font-semibold ${item.status === "Renew soon" ? "text-amber-600" : "text-emerald-600"}`}
-                    >
-                      {item.status}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-sm text-slate-600">{item.owner}</td>
-                  <td className="px-6 py-4 text-right">
-                    <button className="text-sm font-semibold text-brand-600 hover:text-brand-700">
-                      View
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {departments.map((row) => {
+                const share = summary && summary.total_asset_cost > 0 ? (row.total_cost / summary.total_asset_cost) * 100 : 0;
+                return (
+                  <tr key={row.department_id} className="text-sm">
+                    <td className="px-5 py-3 font-semibold text-slate-800">{row.department_name}</td>
+                    <td className="px-5 py-3 text-slate-600">{row.asset_count}</td>
+                    <td className="px-5 py-3 text-slate-700">{money(row.total_cost)}</td>
+                    <td className="px-5 py-3 text-slate-700">{money(row.current_value)}</td>
+                    <td className="px-5 py-3">
+                      <div className="flex items-center gap-2">
+                        <div className="h-2 w-28 overflow-hidden rounded-full bg-slate-100" role="presentation">
+                          <div className="h-full rounded-full bg-brand-600" style={{ width: `${Math.min(100, share)}%` }} />
+                        </div>
+                        <span className="text-xs text-slate-500">{share.toFixed(0)}%</span>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
-      </section>
-      <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-5">
-          <div>
-            <h2 className="font-semibold text-slate-900">Recent purchase orders</h2>
-            <p className="mt-1 text-sm text-slate-500">
-              Latest procurement activity across the organization.
-            </p>
-          </div>
-          <button className="text-sm font-semibold text-brand-600 hover:text-brand-700">
-            All purchase orders →
-          </button>
-        </div>
-        <div className="divide-y divide-slate-100">
-          {purchaseOrders.map(([id, vendor, description, value, status]) => (
-            <div key={id} className="flex flex-col gap-2 px-6 py-4 sm:flex-row sm:items-center sm:gap-5">
-              <div className="min-w-28 text-sm font-semibold text-brand-600">{id}</div>
-              <div className="min-w-0 flex-1">
-                <p className="font-medium text-slate-800">{vendor}</p>
-                <p className="truncate text-sm text-slate-500">{description}</p>
-              </div>
-              <p className="text-sm font-semibold text-slate-700">{value}</p>
-              <span
-                className={`text-xs font-semibold ${status === "In review" ? "text-amber-600" : "text-emerald-600"}`}
-              >
-                {status}
-              </span>
-            </div>
-          ))}
-        </div>
+        {departments.length === 0 && !error && (
+          <p className="p-8 text-center text-sm text-slate-500">
+            No departments yet. Add them under{" "}
+            <Link href="/users/departments" className="font-semibold text-brand-600">
+              Users → Departments
+            </Link>
+            .
+          </p>
+        )}
       </section>
     </main>
   );

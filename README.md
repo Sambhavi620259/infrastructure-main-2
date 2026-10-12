@@ -49,31 +49,59 @@ The UI covers the requested centralized asset repository, lifecycle management, 
 
 See `docs/PRODUCTION_REQUIREMENTS.md` for the detailed requirement-to-route mapping and the backend security contract.
 
+## Architecture
+
+- **Frontend** (`/`, Next.js 15): all browser API calls go to `/api/*` on the same origin; `src/app/api/[...path]/route.ts` forwards them to the backend (`BACKEND_API_URL`). Live updates use WebSockets straight to the backend.
+- **Backend** (`backend/`, FastAPI + SQLAlchemy + PostgreSQL): JWT auth, role checks and tenant isolation on every endpoint. The schema is owned by Alembic migrations in `backend/migrations`.
+
 ## Run locally
 
-Node.js 20.9+ is required.
+Requirements: Node.js 20.9+, Python 3.11+, PostgreSQL 15+.
 
 ```bash
+# 1. Database (or use your own PostgreSQL)
+docker compose -f backend/docker-compose.yml up -d db
+
+# 2. Backend
+cd backend
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env            # then edit values
+alembic upgrade head            # create / update the schema
+uvicorn app.main:app --reload --port 8000
+
+# 3. Frontend (new terminal, project root)
 npm ci
-npm run lint
-npm run typecheck
-npm run verify
-npm run build
-npm run start
+cp .env.example .env.local
+npm run dev                     # http://localhost:3000
 ```
 
-`npm run verify` is a dependency-free structural verification of required files, routes and package configuration.
+First run: open `/register`, choose **Super Admin** and create the Super Admin key, or **IT Admin** to get an organization.
 
-## Production boundary
+## Checks
 
-This repository is the frontend/admin UI layer. Fixture records are intentionally local. Before production exposure, connect the UI to an authenticated API and enforce RBAC/ABAC and tenant isolation server-side. Never treat the workspace switcher or `tenant` query parameter as a security boundary.
+```bash
+npm run lint && npm run typecheck && npm run build      # frontend
+cd backend && .venv/bin/python scripts/smoke_test_assets_api.py   # API: ~180 end-to-end checks on a throwaway SQLite DB
+```
 
-## IT Agent workspace
+## Production (Docker Compose)
 
-A dedicated operational IT Agent workspace is included for **Bold And Wise Ventures Pvt Ltd**, matching the supplied bright IT-operations reference. It includes dashboard, assets, tickets, users, inventory, reports and settings, with an explicit `IT_AGENT` least-privilege role and workspace switching alongside IT Admin and Super Admin.
+```bash
+cp .env.production.example .env   # set POSTGRES_PASSWORD, JWT_SECRET, PUBLIC_APP_URL …
+docker compose up -d --build      # db + backend (runs migrations) + frontend
+```
 
-See `VERIFICATION_REPORT.md` for the verification scope and environment limitation.
+- The backend runs with `ENVIRONMENT=production` and **refuses to start** with the default JWT secret, the example database password, or `CORS_ORIGINS=*`.
+- Put both services behind HTTPS (a reverse proxy or load balancer). Expose the frontend (port 3000) and the backend port 8000 for WebSockets, or route `wss://` to the backend and set `PUBLIC_WS_URL`.
+- Run **one backend worker** (the default): live-update connections live in process memory. Scaling out needs a shared message broker (e.g. Redis pub/sub).
+- Sign-in and registration are rate limited per client address (`AUTH_RATE_LIMIT_PER_MINUTE`, in memory, per process).
+- `GET /api/health` checks the database; Docker uses it as the backend health check.
+- Back up the `postgres_data` volume.
 
-# infrastructure
+## Security notes
 
-# infrastructure-main-2
+- No default accounts: the first Super Admin registers (creating the Super Admin key) or is seeded from `SEED_SUPER_ADMIN_EMAIL` / `SEED_SUPER_ADMIN_PASSWORD`.
+- Passwords and the Super Admin key are stored as bcrypt hashes.
+- Suspending an organization (Super Admin → Companies) locks out all its users immediately.
+- IT Agents get operational permissions only (tickets, asset hand-over, stock moves, maintenance, reports) and see colleagues' names only, never contact details.

@@ -1,191 +1,272 @@
 """Implementation file: app/routers/reports.py"""
-from typing import Dict, Any, List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+import json
+import re
+from datetime import datetime
+from typing import Dict, List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from pydantic import ValidationError
 from sqlalchemy import func
+from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.deps import get_current_user, require_roles, get_tenant_company_id
-from app.models.models import (
-    Asset, AssetCategory, Software, InventoryItem, Maintenance, 
-    AssetStatusEnum, PlatformRole, User
+from app.core.deps import get_tenant_company_id, require_roles
+from app.models.models import PlatformRole, ReportConfig, ReportRun, User
+from app.schemas.schemas import (
+    ReportConfigResponse, ReportRunCreate, ReportRunResponse, ReportSummaryResponse, ReportTypeResponse,
 )
-from app.schemas.schemas import ExecutiveDashboardSummary, AssetCategoryReport
+from app.services.audit_service import log_audit_event
+from app.services.report_service import REPORT_TYPES, ReportFilters, render_csv
 
 router = APIRouter(prefix="/reports", tags=["Reporting & Analytics"])
 
+# IT Agents (stored as EMPLOYEE) generate operational reports too.
+_report_users = require_roles([
+    PlatformRole.SUPER_ADMIN, PlatformRole.IT_ADMIN, PlatformRole.SUB_ADMIN, PlatformRole.REPORTING_USER,
+    PlatformRole.EMPLOYEE,
+])
 
-@router.get("/dashboard-summary", response_model=ExecutiveDashboardSummary)
-def get_executive_dashboard_summary(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
-):
-    """
-    Retrieve high-level KPIs and metrics for executive and IT admin dashboards.
-    """
+
+def _company(current_user: User, tenant_company_id: Optional[str]) -> str:
+    """Reports are always for one company; a Super Admin needs one on their account."""
     company_id = tenant_company_id or current_user.company_id
-    if not company_id and current_user.role != PlatformRole.SUPER_ADMIN:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Company context required."
-        )
+    if not company_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company context required for reports.")
+    return company_id
 
-    asset_query = db.query(Asset)
-    software_query = db.query(Software)
-    inventory_query = db.query(InventoryItem)
 
-    if current_user.role != PlatformRole.SUPER_ADMIN:
-        asset_query = asset_query.filter(Asset.company_id == company_id)
-        software_query = software_query.filter(Software.company_id == company_id)
-        inventory_query = inventory_query.filter(InventoryItem.company_id == company_id)
+def _parse_filters(report_type: str, raw: Dict) -> ReportFilters:
+    """Keep only the filters this report type uses, then validate them."""
+    allowed = REPORT_TYPES[report_type].filters
+    relevant = {key: value for key, value in raw.items() if key in allowed and value not in (None, "")}
+    try:
+        return ReportFilters(**relevant)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors(include_url=False)) from exc
 
-    total_assets = asset_query.count()
-    assigned_assets = asset_query.filter(Asset.status == AssetStatusEnum.ASSIGNED).count()
-    in_stock_assets = asset_query.filter(Asset.status == AssetStatusEnum.IN_STOCK).count()
-    maintenance_assets = asset_query.filter(Asset.status == AssetStatusEnum.UNDER_MAINTENANCE).count()
 
-    total_asset_value_query = db.query(func.coalesce(func.sum(Asset.current_value), 0.0))
-    if current_user.role != PlatformRole.SUPER_ADMIN:
-        total_asset_value_query = total_asset_value_query.filter(Asset.company_id == company_id)
-    total_asset_value = total_asset_value_query.scalar() or 0.0
+def _filters_dict(filters: ReportFilters) -> Dict:
+    return json.loads(filters.model_dump_json(exclude_none=True, exclude_defaults=True))
 
-    total_software_licenses_query = db.query(func.coalesce(func.sum(Software.total_licenses), 0))
-    if current_user.role != PlatformRole.SUPER_ADMIN:
-        total_software_licenses_query = total_software_licenses_query.filter(Software.company_id == company_id)
-    total_software_licenses = total_software_licenses_query.scalar() or 0
 
-    used_software_licenses_query = db.query(func.coalesce(func.sum(Software.used_licenses), 0))
-    if current_user.role != PlatformRole.SUPER_ADMIN:
-        used_software_licenses_query = used_software_licenses_query.filter(Software.company_id == company_id)
-    used_software_licenses = used_software_licenses_query.scalar() or 0
-
-    low_stock_items = inventory_query.filter(InventoryItem.status == "LOW_STOCK").count()
-
-    return ExecutiveDashboardSummary(
-        total_assets=total_assets,
-        assigned_assets=assigned_assets,
-        in_stock_assets=in_stock_assets,
-        under_maintenance_assets=maintenance_assets,
-        total_asset_value=round(float(total_asset_value), 2),
-        total_software_licenses=int(total_software_licenses),
-        used_software_licenses=int(used_software_licenses),
-        low_stock_inventory_alerts=low_stock_items
+def _run_response(run: ReportRun, generated_by_name: Optional[str]) -> ReportRunResponse:
+    return ReportRunResponse(
+        id=run.id,
+        name=run.name,
+        report_type=run.report_type,
+        report_config_id=run.report_config_id,
+        filters=json.loads(run.filters_json or "{}"),
+        format=run.format,
+        row_count=run.row_count,
+        generated_by=run.generated_by,
+        generated_by_name=generated_by_name,
+        created_at=run.created_at,
     )
 
 
-@router.get("/assets-by-category", response_model=List[AssetCategoryReport])
-def get_assets_by_category_report(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
-):
-    """
-    Get breakdown of hardware assets grouped by category with total valuation.
-    """
-    company_id = tenant_company_id or current_user.company_id
-    if not company_id and current_user.role != PlatformRole.SUPER_ADMIN:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Company context required."
-        )
+def _generate(
+    db: Session,
+    company_id: str,
+    user: User,
+    report_type: str,
+    name: str,
+    filters: ReportFilters,
+    config_id: Optional[str],
+) -> ReportRun:
+    table = REPORT_TYPES[report_type].build(db, company_id, filters)
+    run = ReportRun(
+        company_id=company_id,
+        report_config_id=config_id,
+        name=name,
+        report_type=report_type,
+        filters_json=json.dumps(_filters_dict(filters)),
+        format="CSV",
+        row_count=len(table.rows),
+        content=render_csv(table),
+        generated_by=user.id,
+    )
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    log_audit_event(
+        db=db,
+        action="GENERATE_REPORT",
+        entity="ReportRun",
+        company_id=company_id,
+        user_id=user.id,
+        entity_id=run.id,
+        new_value=f"{report_type}: {run.row_count} rows",
+    )
+    return run
 
-    query = db.query(
-        AssetCategory.id.label("category_id"),
-        AssetCategory.name.label("category_name"),
-        func.count(Asset.id).label("total_count"),
-        func.coalesce(func.sum(Asset.current_value), 0.0).label("total_value")
-    ).outerjoin(Asset, Asset.category_id == AssetCategory.id)
 
-    if current_user.role != PlatformRole.SUPER_ADMIN:
-        query = query.filter(AssetCategory.company_id == company_id)
-
-    results = query.group_by(AssetCategory.id, AssetCategory.name).all()
-
+@router.get("/types", response_model=List[ReportTypeResponse])
+def list_report_types(current_user: User = Depends(_report_users)):
+    """Report types and the filters each one accepts."""
     return [
-        AssetCategoryReport(
-            category_id=r.category_id,
-            category_name=r.category_name,
-            total_count=int(r.total_count or 0),
-            total_value=round(float(r.total_value or 0.0), 2)
-        )
-        for r in results
+        ReportTypeResponse(key=t.key, label=t.label, description=t.description, filters=list(t.filters))
+        for t in REPORT_TYPES.values()
     ]
 
 
-@router.get("/maintenance-cost-analysis")
-def get_maintenance_cost_analysis(
+@router.get("/summary", response_model=ReportSummaryResponse)
+def get_report_summary(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles([PlatformRole.SUPER_ADMIN, PlatformRole.IT_ADMIN, PlatformRole.SUB_ADMIN])),
-    tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
+    current_user: User = Depends(_report_users),
+    tenant_company_id: Optional[str] = Depends(get_tenant_company_id),
 ):
-    """
-    Generate cost and frequency breakdown for asset repairs and preventive maintenance.
-    """
-    company_id = tenant_company_id or current_user.company_id
-    if not company_id and current_user.role != PlatformRole.SUPER_ADMIN:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Company context required."
-        )
-
-    query = db.query(
-        MaintenanceLog.maintenance_type,
-        func.count(MaintenanceLog.id).label("total_records"),
-        func.coalesce(func.sum(MaintenanceLog.cost), 0.0).label("total_cost")
+    company_id = _company(current_user, tenant_company_id)
+    month_start = datetime.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    runs = db.query(ReportRun).filter(ReportRun.company_id == company_id)
+    return ReportSummaryResponse(
+        generated_this_month=runs.filter(ReportRun.created_at >= month_start).count(),
+        saved_reports=db.query(ReportConfig).filter(ReportConfig.company_id == company_id).count(),
+        last_generated_at=db.query(func.max(ReportRun.created_at)).filter(ReportRun.company_id == company_id).scalar(),
     )
 
-    if current_user.role != PlatformRole.SUPER_ADMIN:
-        query = query.filter(MaintenanceLog.company_id == company_id)
 
-    results = query.group_by(MaintenanceLog.maintenance_type).all()
-
-    return {
-        "summary": [
-            {
-                "maintenance_type": r.maintenance_type,
-                "total_records": int(r.total_records or 0),
-                "total_cost": round(float(r.total_cost or 0.0), 2)
-            }
-            for r in results
-        ]
-    }
-
-
-@router.get("/license-utilization")
-def get_license_utilization_report(
+@router.post("/runs", response_model=ReportRunResponse, status_code=status.HTTP_201_CREATED)
+def create_report(
+    run_in: ReportRunCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
+    current_user: User = Depends(_report_users),
+    tenant_company_id: Optional[str] = Depends(get_tenant_company_id),
 ):
     """
-    Report software license allocation efficiency and unused seat metrics.
+    Generate a report now. The CSV is stored and listed under recent exports;
+    with save=true the settings are also kept as a saved report.
     """
-    company_id = tenant_company_id or current_user.company_id
-    if not company_id and current_user.role != PlatformRole.SUPER_ADMIN:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Company context required."
+    company_id = _company(current_user, tenant_company_id)
+    if run_in.report_type not in REPORT_TYPES:
+        raise HTTPException(status_code=400, detail=f"Unknown report type '{run_in.report_type}'.")
+    filters = _parse_filters(run_in.report_type, run_in.filters)
+    name = (run_in.name or "").strip() or REPORT_TYPES[run_in.report_type].label
+
+    config_id = None
+    if run_in.save:
+        config = ReportConfig(
+            company_id=company_id,
+            name=name,
+            report_type=run_in.report_type,
+            config_json=json.dumps(_filters_dict(filters)),
+            created_by=current_user.id,
         )
+        db.add(config)
+        db.flush()
+        config_id = config.id
 
-    query = db.query(Software)
-    if current_user.role != PlatformRole.SUPER_ADMIN:
-        query = query.filter(Software.company_id == company_id)
+    run = _generate(db, company_id, current_user, run_in.report_type, name, filters, config_id)
+    return _run_response(run, current_user.full_name)
 
-    software_items = query.all()
 
-    report_data = []
-    for sw in software_items:
-        utilization_rate = (sw.used_licenses / sw.total_licenses * 100) if sw.total_licenses > 0 else 0.0
-        report_data.append({
-            "software_id": sw.id,
-            "name": sw.name,
-            "vendor": sw.vendor,
-            "total_licenses": sw.total_licenses,
-            "used_licenses": sw.used_licenses,
-            "available_licenses": sw.total_licenses - sw.used_licenses,
-            "utilization_rate_pct": round(utilization_rate, 2),
-            "total_cost": round(float(sw.cost or 0.0), 2)
-        })
+@router.get("/runs", response_model=List[ReportRunResponse])
+def list_report_runs(
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(_report_users),
+    tenant_company_id: Optional[str] = Depends(get_tenant_company_id),
+):
+    """Recently generated reports, newest first."""
+    company_id = _company(current_user, tenant_company_id)
+    rows = (
+        db.query(ReportRun, User.full_name)
+        .outerjoin(User, User.id == ReportRun.generated_by)
+        .filter(ReportRun.company_id == company_id)
+        .order_by(ReportRun.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [_run_response(run, name) for run, name in rows]
 
-    return {"license_utilization": report_data}
+
+@router.get("/runs/{run_id}/download")
+def download_report(
+    run_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(_report_users),
+    tenant_company_id: Optional[str] = Depends(get_tenant_company_id),
+):
+    """The stored CSV for a generated report."""
+    company_id = _company(current_user, tenant_company_id)
+    run = db.query(ReportRun).filter(ReportRun.id == run_id, ReportRun.company_id == company_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Report not found.")
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", run.name).strip("-").lower() or "report"
+    filename = f"{slug}-{run.created_at:%Y-%m-%d}.csv"
+    return Response(
+        content=run.content,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/saved", response_model=List[ReportConfigResponse])
+def list_saved_reports(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(_report_users),
+    tenant_company_id: Optional[str] = Depends(get_tenant_company_id),
+):
+    """Saved report settings, with when each was last generated."""
+    company_id = _company(current_user, tenant_company_id)
+    last_runs = (
+        db.query(ReportRun.report_config_id, func.max(ReportRun.created_at).label("last_run_at"))
+        .filter(ReportRun.company_id == company_id, ReportRun.report_config_id.isnot(None))
+        .group_by(ReportRun.report_config_id)
+        .subquery()
+    )
+    rows = (
+        db.query(ReportConfig, last_runs.c.last_run_at)
+        .outerjoin(last_runs, last_runs.c.report_config_id == ReportConfig.id)
+        .filter(ReportConfig.company_id == company_id)
+        .order_by(ReportConfig.created_at.desc())
+        .all()
+    )
+    return [
+        ReportConfigResponse(
+            id=config.id,
+            name=config.name,
+            report_type=config.report_type,
+            filters=json.loads(config.config_json or "{}"),
+            created_by=config.created_by,
+            created_at=config.created_at,
+            last_run_at=last_run_at,
+        )
+        for config, last_run_at in rows
+    ]
+
+
+@router.post("/saved/{config_id}/run", response_model=ReportRunResponse, status_code=status.HTTP_201_CREATED)
+def run_saved_report(
+    config_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(_report_users),
+    tenant_company_id: Optional[str] = Depends(get_tenant_company_id),
+):
+    """Generate a fresh copy of a saved report with its stored settings."""
+    company_id = _company(current_user, tenant_company_id)
+    config = db.query(ReportConfig).filter(ReportConfig.id == config_id, ReportConfig.company_id == company_id).first()
+    if not config:
+        raise HTTPException(status_code=404, detail="Saved report not found.")
+    if config.report_type not in REPORT_TYPES:
+        raise HTTPException(status_code=400, detail=f"Report type '{config.report_type}' is no longer available.")
+    filters = _parse_filters(config.report_type, json.loads(config.config_json or "{}"))
+    run = _generate(db, company_id, current_user, config.report_type, config.name, filters, config.id)
+    return _run_response(run, current_user.full_name)
+
+
+@router.delete("/saved/{config_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_saved_report(
+    config_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(_report_users),
+    tenant_company_id: Optional[str] = Depends(get_tenant_company_id),
+):
+    """Delete saved settings. Reports already generated from them are kept."""
+    company_id = _company(current_user, tenant_company_id)
+    config = db.query(ReportConfig).filter(ReportConfig.id == config_id, ReportConfig.company_id == company_id).first()
+    if not config:
+        raise HTTPException(status_code=404, detail="Saved report not found.")
+    db.query(ReportRun).filter(ReportRun.report_config_id == config.id).update({"report_config_id": None})
+    db.delete(config)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

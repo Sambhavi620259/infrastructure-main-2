@@ -14,6 +14,7 @@ const roleProfiles: Record<Role, DemoSession> = {
   SUPER_ADMIN: { name: "Alex Verma", initials: "AV", role: roles.SUPER_ADMIN },
   IT_ADMIN: { name: "Priya Sharma", initials: "PS", role: roles.IT_ADMIN },
   IT_AGENT: { name: "Sandeep Malik", initials: "SM", role: roles.IT_AGENT },
+  SUB_ADMIN: { name: "Sub-admin", initials: "SA", role: roles.SUB_ADMIN },
   HAM_ADMIN: { name: "Priya Sharma", initials: "PS", role: roles.HAM_ADMIN },
   SAM_ADMIN: { name: "Priya Sharma", initials: "PS", role: roles.SAM_ADMIN },
   CLOUD_ADMIN: { name: "Priya Sharma", initials: "PS", role: roles.CLOUD_ADMIN },

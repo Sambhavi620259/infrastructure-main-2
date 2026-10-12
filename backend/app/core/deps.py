@@ -14,33 +14,50 @@ oauth2_scheme = OAuth2PasswordBearer(
 )
 
 
+def user_from_token(token: Optional[str], db: Session) -> Optional[User]:
+    """
+    Resolve a JWT access token to its active user, or None if the token is
+    missing, invalid, expired, or belongs to an inactive account.
+    """
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(
+            token,
+            settings.SECRET_KEY,
+            algorithms=[settings.ALGORITHM]
+        )
+    except JWTError:
+        return None
+    user_id = payload.get("sub")
+    if user_id is None:
+        return None
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user or user.status != "ACTIVE" or organization_suspended(user):
+        return None
+    return user
+
+
+def organization_suspended(user: User) -> bool:
+    """A Super Admin can suspend an organization; its users are then locked out."""
+    return user.role != PlatformRole.SUPER_ADMIN and user.company is not None and user.company.status != "ACTIVE"
+
+
 def get_current_user(
-    token: str = Depends(oauth2_scheme), 
+    token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db)
 ) -> User:
     """
     Validates JWT access token, verifies session integrity, and fetches active user context.
     """
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    try:
-        payload = jwt.decode(
-            token, 
-            settings.SECRET_KEY, 
-            algorithms=[settings.ALGORITHM]
+    user = user_from_token(token, db)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
         )
-        user_id: str = payload.get("sub")
-        if user_id is None:
-            raise credentials_exception
-    except JWTError:
-        raise credentials_exception
-
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user or user.status != "ACTIVE":
-        raise credentials_exception
     return user
 
 
@@ -74,3 +91,8 @@ def get_tenant_company_id(
             detail="Authenticated user context is not associated with any active company tenant."
         )
     return current_user.company_id
+
+
+def profile_role(role: PlatformRole) -> str:
+    """Role name the frontend uses: IT Agents are stored as EMPLOYEE."""
+    return "IT_AGENT" if role == PlatformRole.EMPLOYEE else role.value

@@ -1,233 +1,265 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  CLOUD_PROVIDERS,
+  createCloudResource,
+  listCloudResources,
+  money,
+  updateCloudResource,
+  type CloudProvider,
+  type CloudResource,
+  type CloudStatus,
+} from "@/lib/operations";
 
-type ResourceState = "healthy" | "attention" | "unmanaged";
-type CloudResource = {
-  name: string;
-  provider: string;
-  type: string;
-  account: string;
-  region: string;
-  monthlyCost: string;
-  state: ResourceState;
-};
-
-const resources: CloudResource[] = [
-  {
-    name: "prod-web-cluster",
-    provider: "AWS",
-    type: "EKS cluster",
-    account: "Production",
-    region: "ap-south-1",
-    monthlyCost: "₹3.42L",
-    state: "healthy",
-  },
-  {
-    name: "billing-api-prod",
-    provider: "AWS",
-    type: "EC2 instance",
-    account: "Production",
-    region: "ap-south-1",
-    monthlyCost: "₹72,800",
-    state: "healthy",
-  },
-  {
-    name: "analytics-dwh",
-    provider: "Google Cloud",
-    type: "BigQuery dataset",
-    account: "Data platform",
-    region: "asia-south1",
-    monthlyCost: "₹1.18L",
-    state: "attention",
-  },
-  {
-    name: "fileshare-archive",
-    provider: "Azure",
-    type: "Storage account",
-    account: "Corporate IT",
-    region: "Central India",
-    monthlyCost: "₹24,600",
-    state: "unmanaged",
-  },
-  {
-    name: "staging-api-01",
-    provider: "AWS",
-    type: "EC2 instance",
-    account: "Engineering",
-    region: "ap-south-1",
-    monthlyCost: "₹18,200",
-    state: "attention",
-  },
-];
-
-const stateStyle: Record<ResourceState, string> = {
-  healthy: "bg-emerald-50 text-emerald-700",
-  attention: "bg-amber-50 text-amber-700",
-  unmanaged: "bg-rose-50 text-rose-700",
+const STATUS_STYLE: Record<CloudStatus, string> = {
+  RUNNING: "bg-emerald-50 text-emerald-700",
+  STOPPED: "bg-amber-50 text-amber-700",
+  TERMINATED: "bg-slate-100 text-slate-600",
 };
 
 export default function CloudPage() {
-  const [query, setQuery] = useState("");
-  const [provider, setProvider] = useState("all");
-  const visible = useMemo(
-    () =>
-      resources.filter(
-        (resource) =>
-          (provider === "all" || resource.provider === provider) &&
-          `${resource.name} ${resource.provider} ${resource.account}`
-            .toLowerCase()
-            .includes(query.toLowerCase()),
-      ),
-    [provider, query],
-  );
+  const [resources, setResources] = useState<CloudResource[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [formOpen, setFormOpen] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    listCloudResources()
+      .then((data) => {
+        if (!cancelled) setResources(data);
+      })
+      .catch((caught) => {
+        if (!cancelled) setError(caught instanceof Error ? caught.message : "Unable to load cloud resources.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshKey]);
+
+  const byProvider = useMemo(() => {
+    const totals = new Map<string, number>();
+    for (const r of resources) {
+      if (r.status === "TERMINATED") continue;
+      totals.set(r.provider, (totals.get(r.provider) ?? 0) + Number(r.monthly_cost));
+    }
+    return [...totals.entries()].sort((a, b) => b[1] - a[1]);
+  }, [resources]);
+  const monthly = byProvider.reduce((sum, [, cost]) => sum + cost, 0);
+
+  const setStatus = async (resource: CloudResource, status: CloudStatus) => {
+    try {
+      await updateCloudResource(resource.id, { status, ...(status === "TERMINATED" ? { monthly_cost: 0 } : {}) });
+      setNotice(`${resource.resource_id} marked ${status.toLowerCase()}.`);
+      setRefreshKey((key) => key + 1);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Update failed.");
+    }
+  };
+
   return (
-    <main className="mx-auto max-w-7xl space-y-8">
-      <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+    <main className="mx-auto max-w-7xl space-y-5">
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-sm font-medium text-brand-600">Cloud resource management</p>
-          <h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-950">Cloud resources</h1>
-          <p className="mt-2 text-slate-500">
-            Track infrastructure, ownership, cost, and compliance across cloud providers.
-          </p>
+          <p className="text-[11px] font-bold uppercase tracking-wider text-brand-600">Cloud</p>
+          <h1 className="mt-1 text-2xl font-extrabold tracking-tight text-slate-950">Cloud resources</h1>
+          <p className="mt-1 text-sm text-slate-500">VMs, databases and storage you pay for, with their monthly cost.</p>
         </div>
-        <button className="rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700">
-          + Connect cloud account
+        <button
+          type="button"
+          onClick={() => setFormOpen(true)}
+          disabled={formOpen}
+          className="rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-brand-700 disabled:opacity-60"
+        >
+          Add resource
         </button>
       </header>
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {[
-          ["1,842", "Cloud resources", "Across 8 connected accounts"],
-          ["₹12.7L", "Monthly cloud spend", "+6.4% vs last month"],
-          ["23", "Cost anomalies", "Require owner review"],
-          ["17", "Unmanaged resources", "Missing owner or cost center"],
-        ].map(([value, label, hint], index) => (
-          <article key={label} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p
-              className={`text-2xl font-bold tracking-tight ${index > 1 ? "text-amber-600" : "text-slate-950"}`}
-            >
-              {value}
-            </p>
-            <p className="mt-1 text-sm font-medium text-slate-700">{label}</p>
-            <p className="mt-2 text-xs text-slate-500">{hint}</p>
-          </article>
-        ))}
-      </section>
-      <section className="grid gap-6 lg:grid-cols-[1.5fr_1fr]">
-        <article className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="font-semibold text-slate-900">Spend by provider</h2>
-              <p className="mt-1 text-sm text-slate-500">Current month cloud infrastructure cost.</p>
-            </div>
-            <button className="text-sm font-semibold text-brand-600 hover:text-brand-700">
-              View spend →
-            </button>
-          </div>
-          <div className="mt-8 space-y-5">
-            {[
-              ["AWS", "₹8.26L", 65, "bg-amber-500"],
-              ["Google Cloud", "₹2.88L", 23, "bg-blue-500"],
-              ["Azure", "₹1.56L", 12, "bg-sky-500"],
-            ].map(([label, value, percentage, color]) => (
-              <div key={label as string}>
-                <div className="mb-2 flex justify-between text-sm">
-                  <span className="font-medium text-slate-700">{label}</span>
-                  <span className="text-slate-500">{value}</span>
-                </div>
-                <div className="h-3 overflow-hidden rounded-full bg-slate-100">
-                  <div className={`h-full rounded-full ${color}`} style={{ width: `${percentage}%` }} />
-                </div>
-              </div>
-            ))}
-          </div>
-        </article>
-        <article className="rounded-xl bg-slate-950 p-6 text-white shadow-sm">
-          <p className="text-sm font-medium text-slate-400">Optimization opportunity</p>
-          <p className="mt-3 text-4xl font-bold">₹1.86L</p>
-          <p className="mt-2 text-sm leading-6 text-slate-400">
-            Estimated monthly savings from idle, over-sized, or unattached resources.
-          </p>
-          <div className="mt-8 border-t border-white/10 pt-4">
-            <p className="text-sm font-semibold">23 flagged resources</p>
-            <button className="mt-3 text-sm font-semibold text-brand-400 hover:text-brand-300">
-              Review recommendations →
-            </button>
-          </div>
-        </article>
-      </section>
-      <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex flex-col gap-4 border-b border-slate-100 p-5 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <h2 className="font-semibold text-slate-900">Cloud inventory</h2>
-            <p className="mt-1 text-sm text-slate-500">{visible.length} resources shown of 1,842 total.</p>
-          </div>
-          <div className="flex flex-col gap-3 sm:flex-row">
-            <input
-              aria-label="Search cloud resources"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search resource or account"
-              className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-100 sm:w-60"
-            />
-            <select
-              aria-label="Filter by cloud provider"
-              value={provider}
-              onChange={(event) => setProvider(event.target.value)}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 outline-none focus:border-brand-500"
-            >
-              <option value="all">All providers</option>
-              <option value="AWS">AWS</option>
-              <option value="Google Cloud">Google Cloud</option>
-              <option value="Azure">Azure</option>
-            </select>
-          </div>
+
+      {error && (
+        <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          {error}
         </div>
+      )}
+      {notice && (
+        <div role="status" className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          <span>{notice}</span>
+          <button type="button" onClick={() => setNotice("")} aria-label="Dismiss">
+            ×
+          </button>
+        </div>
+      )}
+
+      <section className="grid gap-4 sm:grid-cols-3">
+        <article className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <p className="text-2xl font-bold text-slate-950">{loading ? "—" : money(monthly)}</p>
+          <p className="mt-1 text-sm text-slate-600">Monthly cost (active resources)</p>
+        </article>
+        <article className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <p className="text-2xl font-bold text-slate-950">{loading ? "—" : resources.filter((r) => r.status === "RUNNING").length}</p>
+          <p className="mt-1 text-sm text-slate-600">Running</p>
+        </article>
+        <article className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <p className="text-sm font-semibold text-slate-700">By provider</p>
+          <ul className="mt-2 space-y-1 text-xs text-slate-600">
+            {byProvider.length === 0 ? <li>—</li> : byProvider.map(([provider, cost]) => <li key={provider}>{provider}: {money(cost)}</li>)}
+          </ul>
+        </article>
+      </section>
+
+      {formOpen && (
+        <ResourceForm
+          onCancel={() => setFormOpen(false)}
+          onSaved={(resource) => {
+            setFormOpen(false);
+            setNotice(`${resource.provider} ${resource.resource_type} ${resource.resource_id} added.`);
+            setError("");
+            setRefreshKey((key) => key + 1);
+          }}
+        />
+      )}
+
+      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="overflow-x-auto">
-          <table className="min-w-[880px] w-full text-left">
-            <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+          <table className="min-w-[860px] w-full text-left">
+            <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-600">
               <tr>
-                <th className="px-6 py-3 font-semibold">Resource</th>
-                <th className="px-6 py-3 font-semibold">Account</th>
-                <th className="px-6 py-3 font-semibold">Region</th>
-                <th className="px-6 py-3 font-semibold">Monthly cost</th>
-                <th className="px-6 py-3 font-semibold">Status</th>
-                <th className="px-6 py-3" />
+                {["Resource", "Provider", "Account", "Region", "Monthly cost", "Status", ""].map((h) => (
+                  <th key={h} className="px-5 py-3">
+                    {h}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {visible.map((resource) => (
-                <tr key={resource.name} className="hover:bg-slate-50">
-                  <td className="px-6 py-4">
-                    <p className="font-semibold text-slate-800">{resource.name}</p>
-                    <p className="mt-0.5 text-sm text-slate-500">
-                      {resource.provider} · {resource.type}
-                    </p>
+              {resources.map((r) => (
+                <tr key={r.id} className="text-sm">
+                  <td className="px-5 py-3">
+                    <p className="font-mono font-semibold text-slate-800">{r.resource_id}</p>
+                    <p className="text-xs text-slate-500">{r.resource_type}</p>
                   </td>
-                  <td className="px-6 py-4 text-sm text-slate-600">{resource.account}</td>
-                  <td className="px-6 py-4 text-sm text-slate-600">{resource.region}</td>
-                  <td className="px-6 py-4 text-sm font-semibold text-slate-700">{resource.monthlyCost}</td>
-                  <td className="px-6 py-4">
-                    <span
-                      className={`rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${stateStyle[resource.state]}`}
-                    >
-                      {resource.state}
-                    </span>
+                  <td className="px-5 py-3 text-slate-600">{r.provider}</td>
+                  <td className="px-5 py-3 font-mono text-xs text-slate-600">{r.account_id}</td>
+                  <td className="px-5 py-3 text-slate-600">{r.region ?? "—"}</td>
+                  <td className="px-5 py-3 text-slate-700">{money(r.monthly_cost)}</td>
+                  <td className="px-5 py-3">
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${STATUS_STYLE[r.status]}`}>{r.status}</span>
                   </td>
-                  <td className="px-6 py-4 text-right">
-                    <button className="text-sm font-semibold text-brand-600 hover:text-brand-700">
-                      View
-                    </button>
+                  <td className="whitespace-nowrap px-5 py-3 text-right text-xs font-semibold">
+                    {r.status === "RUNNING" && (
+                      <button type="button" onClick={() => setStatus(r, "STOPPED")} className="mr-3 text-amber-700">
+                        Mark stopped
+                      </button>
+                    )}
+                    {r.status === "STOPPED" && (
+                      <button type="button" onClick={() => setStatus(r, "RUNNING")} className="mr-3 text-emerald-700">
+                        Mark running
+                      </button>
+                    )}
+                    {r.status !== "TERMINATED" && (
+                      <button type="button" onClick={() => setStatus(r, "TERMINATED")} className="text-rose-600">
+                        Terminated
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-        {visible.length === 0 && (
-          <div className="p-10 text-center text-sm text-slate-500">No cloud resources match your search.</div>
+        {!loading && resources.length === 0 && !error && (
+          <p className="p-10 text-center text-sm text-slate-500">No cloud resources tracked yet.</p>
         )}
       </section>
     </main>
+  );
+}
+
+function ResourceForm({ onCancel, onSaved }: { onCancel: () => void; onSaved: (resource: CloudResource) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const text = (key: string) => String(form.get(key) ?? "").trim();
+    if (!text("account_id") || !text("resource_id") || !text("resource_type")) {
+      return setError("Account, resource ID and type are required.");
+    }
+    setBusy(true);
+    try {
+      onSaved(
+        await createCloudResource({
+          provider: text("provider") as CloudProvider,
+          account_id: text("account_id"),
+          resource_id: text("resource_id"),
+          resource_type: text("resource_type"),
+          region: text("region") || undefined,
+          monthly_cost: Number(form.get("monthly_cost")) || 0,
+        }),
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not add the resource.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const inputClass = "mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal";
+
+  return (
+    <form onSubmit={submit} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm" noValidate>
+      <h2 className="text-base font-extrabold text-slate-900">Add cloud resource</h2>
+      <div className="mt-4 grid gap-4 sm:grid-cols-3">
+        <label className="block text-xs font-semibold text-slate-600">
+          Provider
+          <select name="provider" defaultValue="AWS" className={inputClass}>
+            {CLOUD_PROVIDERS.map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block text-xs font-semibold text-slate-600">
+          Account / subscription ID
+          <input name="account_id" className={inputClass} />
+        </label>
+        <label className="block text-xs font-semibold text-slate-600">
+          Resource ID
+          <input name="resource_id" placeholder="e.g. i-0abc123" className={inputClass} />
+        </label>
+        <label className="block text-xs font-semibold text-slate-600">
+          Type
+          <input name="resource_type" placeholder="e.g. EC2, RDS, Blob storage" className={inputClass} />
+        </label>
+        <label className="block text-xs font-semibold text-slate-600">
+          Region
+          <input name="region" placeholder="e.g. ap-south-1" className={inputClass} />
+        </label>
+        <label className="block text-xs font-semibold text-slate-600">
+          Monthly cost
+          <input name="monthly_cost" type="number" min={0} step="0.01" className={inputClass} />
+        </label>
+      </div>
+      {error && (
+        <p role="alert" className="mt-3 text-sm text-red-700">
+          {error}
+        </p>
+      )}
+      <div className="mt-4 flex gap-2">
+        <button type="submit" disabled={busy} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-bold text-white hover:bg-brand-700 disabled:opacity-50">
+          {busy ? "Saving…" : "Save resource"}
+        </button>
+        <button type="button" onClick={onCancel} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700">
+          Cancel
+        </button>
+      </div>
+    </form>
   );
 }

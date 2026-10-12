@@ -14,7 +14,10 @@ def calculate_asset_depreciation(
     Calculate asset current valuation and accumulated depreciation.
     Supports STRAIGHT_LINE and DECLINING_BALANCE algorithms.
     """
-    if purchase_cost <= 0:
+    # Prices arrive as Decimal from the database; the maths below is float.
+    purchase_cost = float(purchase_cost or 0)
+    salvage_value = float(salvage_value or 0)
+    if purchase_cost <= 0 or purchase_date is None:
         return {
             "current_value": 0.0,
             "total_depreciated": 0.0,

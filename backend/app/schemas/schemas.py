@@ -1,7 +1,7 @@
 """Implementation file: app/schemas/schemas.py"""
 from datetime import datetime
 from decimal import Decimal
-from typing import List, Optional
+from typing import Dict, List, Optional
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from app.models.models import AssetStatusEnum, PlatformRole, RequestStatusEnum
@@ -12,7 +12,8 @@ from app.models.models import AssetStatusEnum, PlatformRole, RequestStatusEnum
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
-    role: PlatformRole
+    # Frontend role name (IT Agents are stored as EMPLOYEE, sent as IT_AGENT).
+    role: str
     company_id: Optional[str] = None
 
 
@@ -24,7 +25,9 @@ class TokenData(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
-    role: Optional[PlatformRole] = None
+    # The role picked on the login page. Informational only: the account's
+    # own role decides the workspace. Accepts frontend names such as IT_AGENT.
+    role: Optional[str] = None
 
 
 class RegisterRequest(BaseModel):
@@ -32,8 +35,9 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=8)
     role: str = Field(..., pattern="^(IT_ADMIN|IT_AGENT|SUPER_ADMIN)$")
-    invitationToken: Optional[str] = None
-    registrationKey: Optional[str] = None
+    # Super Admin only: the platform key, or (if none exists yet) the key to create.
+    registrationKey: Optional[str] = Field(None, max_length=128)
+    registrationKeyConfirm: Optional[str] = Field(None, max_length=128)
 
 
 # --- Company & Subscription Schemas ---
@@ -122,6 +126,7 @@ class UserUpdate(BaseModel):
 
 class UserResponse(UserBase):
     id: str
+    agent_id: Optional[str] = None
     company_id: Optional[str] = None
     status: str
     created_at: datetime
@@ -133,9 +138,18 @@ class UserProfile(BaseModel):
     id: str
     name: str
     email: str
-    role: PlatformRole
+    # Frontend role name: EMPLOYEE is presented as IT_AGENT (see profile_role).
+    role: str
     department: Optional[str] = None
     companyId: Optional[str] = None
+    companyName: Optional[str] = None
+    agentId: Optional[str] = None
+    location: Optional[str] = None
+    # Sub-admin modules (HAM, SAM, CLOUD, SCAN, REPORTS); empty for other roles.
+    modules: List[str] = []
+    memberSince: Optional[datetime] = None
+    # The sign-in before the current one, so people can spot one they did not make.
+    previousLoginAt: Optional[datetime] = None
     avatarUrl: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
@@ -170,7 +184,7 @@ class AssetBase(BaseModel):
     brand: Optional[str] = None
     model: Optional[str] = None
     purchase_date: Optional[datetime] = None
-    purchase_price: Decimal = Decimal("0.00")
+    purchase_price: Decimal = Field(Decimal("0.00"), ge=0)
     vendor_id: Optional[str] = None
     warranty_start: Optional[datetime] = None
     warranty_end: Optional[datetime] = None
@@ -191,7 +205,7 @@ class AssetUpdate(BaseModel):
     brand: Optional[str] = None
     model: Optional[str] = None
     purchase_date: Optional[datetime] = None
-    purchase_price: Optional[Decimal] = None
+    purchase_price: Optional[Decimal] = Field(None, ge=0)
     vendor_id: Optional[str] = None
     warranty_start: Optional[datetime] = None
     warranty_end: Optional[datetime] = None
@@ -200,6 +214,8 @@ class AssetUpdate(BaseModel):
     status: Optional[AssetStatusEnum] = None
     condition: Optional[str] = None
     description: Optional[str] = None
+    # Not an asset field: recorded on the lifecycle entry when status changes.
+    status_remarks: Optional[str] = Field(None, max_length=500)
 
 
 class AssetResponse(AssetBase):
@@ -226,6 +242,10 @@ class AssetAssignRequest(BaseModel):
 class AssetRequestCreate(BaseModel):
     asset_category_id: str
     requested_for: Optional[str] = None
+    # Raise the ticket on behalf of this user (same organization); the asset
+    # is assigned to them on approval. Defaults to the caller.
+    requested_for_user_id: Optional[str] = None
+    department_id: Optional[str] = None
     reason: str
 
 
@@ -240,12 +260,23 @@ class AssetRequestResponse(BaseModel):
     company_id: str
     requested_by: str
     asset_category_id: str
+    department_id: Optional[str] = None
     requested_for: Optional[str] = None
     reason: str
     status: RequestStatusEnum
     assigned_asset_id: Optional[str] = None
     rejection_reason: Optional[str] = None
     created_at: datetime
+    # Display names joined in by the tickets endpoints.
+    requested_by_name: Optional[str] = None
+    raised_by: Optional[str] = None
+    raised_by_name: Optional[str] = None
+    category_name: Optional[str] = None
+    department_name: Optional[str] = None
+    assigned_asset_tag: Optional[str] = None
+    processed_by: Optional[str] = None
+    processed_by_name: Optional[str] = None
+    processed_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -269,14 +300,29 @@ class AssetLifecycleResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class AssetEventResponse(AssetLifecycleResponse):
+    """A lifecycle entry joined with the asset and the user who performed it."""
+    asset_tag: str
+    asset_name: str
+    performed_by_name: Optional[str] = None
+
+
+class AssetCountsResponse(BaseModel):
+    total: int
+    in_stock: int
+    assigned: int
+    in_repair: int
+    by_status: Dict[str, int]
+
+
 # --- Inventory & Consumables Schemas ---
 
 class InventoryItemBase(BaseModel):
     name: str = Field(..., max_length=150)
     category: str = Field(..., max_length=100)
-    quantity: int = 0
-    reorder_level: int = 10
-    unit_cost: Decimal = Decimal("0.00")
+    quantity: int = Field(0, ge=0)
+    reorder_level: int = Field(10, ge=0)
+    unit_cost: Decimal = Field(Decimal("0.00"), ge=0)
     location: Optional[str] = None
 
 
@@ -285,9 +331,9 @@ class InventoryItemCreate(InventoryItemBase):
 
 
 class InventoryItemUpdate(BaseModel):
-    quantity: Optional[int] = None
-    reorder_level: Optional[int] = None
-    unit_cost: Optional[Decimal] = None
+    quantity: Optional[int] = Field(None, ge=0)
+    reorder_level: Optional[int] = Field(None, ge=0)
+    unit_cost: Optional[Decimal] = Field(None, ge=0)
     location: Optional[str] = None
 
 
@@ -327,38 +373,32 @@ class LicenseAssignRequest(BaseModel):
 # --- Vendors, PO & Maintenance Schemas ---
 
 class VendorCreate(BaseModel):
-    name: str = Field(..., max_length=150)
-    contact_person: Optional[str] = None
-    contact: Optional[str] = None
+    name: str = Field(..., min_length=1, max_length=150)
+    contact: Optional[str] = Field(None, max_length=100)
     email: Optional[EmailStr] = None
-    phone: Optional[str] = None
+    phone: Optional[str] = Field(None, max_length=50)
     address: Optional[str] = None
-    website: Optional[str] = None
-    notes: Optional[str] = None
-    gst: Optional[str] = None
+    gst: Optional[str] = Field(None, max_length=50)
 
 
 class VendorResponse(VendorCreate):
     id: str
     company_id: str
     status: str
+    # Plain str on the way out: stored values predate email validation.
+    email: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class VendorUpdate(BaseModel):
-    name: Optional[str] = None
-    contact_person: Optional[str] = None
-    contact: Optional[str] = None
+    name: Optional[str] = Field(None, min_length=1, max_length=150)
+    contact: Optional[str] = Field(None, max_length=100)
     email: Optional[EmailStr] = None
-    phone: Optional[str] = None
+    phone: Optional[str] = Field(None, max_length=50)
     address: Optional[str] = None
-    website: Optional[str] = None
-    notes: Optional[str] = None
-    gst: Optional[str] = None
-    status: Optional[str] = None
-
-    model_config = ConfigDict(from_attributes=True)
+    gst: Optional[str] = Field(None, max_length=50)
+    status: Optional[str] = Field(None, pattern="^(ACTIVE|INACTIVE)$")
 
 
 class PurchaseOrderCreate(BaseModel):
@@ -378,16 +418,26 @@ class PurchaseOrderResponse(PurchaseOrderCreate):
 
 class MaintenanceCreate(BaseModel):
     asset_id: str
-    issue: str
+    issue: str = Field(..., min_length=1)
     vendor_id: Optional[str] = None
-    cost: Decimal = Decimal("0.00")
+    cost: Decimal = Field(Decimal("0.00"), ge=0)
+    # SCHEDULED leaves the asset as it is; IN_PROGRESS moves it to IN_REPAIR.
+    status: str = Field("IN_PROGRESS", pattern="^(SCHEDULED|IN_PROGRESS)$")
 
 
-class MaintenanceResponse(MaintenanceCreate):
+class MaintenanceResponse(BaseModel):
     id: str
     company_id: str
+    asset_id: str
+    asset_tag: Optional[str] = None
+    asset_name: Optional[str] = None
+    issue: str
+    vendor_id: Optional[str] = None
+    vendor_name: Optional[str] = None
+    cost: Decimal
     reported_by: str
-    start_date: datetime
+    reported_by_name: Optional[str] = None
+    start_date: Optional[datetime] = None
     completion_date: Optional[datetime] = None
     status: str
 
@@ -395,11 +445,10 @@ class MaintenanceResponse(MaintenanceCreate):
 
 
 class MaintenanceUpdate(BaseModel):
-    issue: Optional[str] = None
+    issue: Optional[str] = Field(None, min_length=1)
     vendor_id: Optional[str] = None
-    cost: Optional[Decimal] = None
-    completion_date: Optional[datetime] = None
-    status: Optional[str] = None
+    cost: Optional[Decimal] = Field(None, ge=0)
+    status: Optional[str] = Field(None, pattern="^(SCHEDULED|IN_PROGRESS|COMPLETED|CANCELLED)$")
 
 
 # --- Discovery & Cloud Schemas ---
@@ -476,19 +525,49 @@ class AssetCategoryReport(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class ReportConfigCreate(BaseModel):
+class ReportTypeResponse(BaseModel):
+    key: str
+    label: str
+    description: str
+    filters: List[str]
+
+
+class ReportRunCreate(BaseModel):
+    report_type: str
+    name: Optional[str] = Field(None, max_length=150)
+    # Validated against ReportFilters in the report service.
+    filters: Dict[str, Optional[str | int]] = Field(default_factory=dict)
+    # Also keep these settings as a saved report that can be re-run.
+    save: bool = False
+
+
+class ReportRunResponse(BaseModel):
+    id: str
     name: str
     report_type: str
-    config_json: Optional[str] = None
-
-
-class ReportConfigResponse(ReportConfigCreate):
-    id: str
-    company_id: str
-    created_by: str
+    report_config_id: Optional[str] = None
+    filters: Dict[str, Optional[str | int]] = Field(default_factory=dict)
+    format: str
+    row_count: int
+    generated_by: str
+    generated_by_name: Optional[str] = None
     created_at: datetime
 
-    model_config = ConfigDict(from_attributes=True)
+
+class ReportConfigResponse(BaseModel):
+    id: str
+    name: str
+    report_type: str
+    filters: Dict[str, Optional[str | int]] = Field(default_factory=dict)
+    created_by: str
+    created_at: datetime
+    last_run_at: Optional[datetime] = None
+
+
+class ReportSummaryResponse(BaseModel):
+    generated_this_month: int
+    saved_reports: int
+    last_generated_at: Optional[datetime] = None
 
 
 class AuditLogResponse(BaseModel):
@@ -521,9 +600,10 @@ class DashboardSummaryResponse(BaseModel):
 
 
 class DepreciationCalculateRequest(BaseModel):
-    method: Optional[str] = None
-    useful_life_years: Optional[int] = None
-    salvage_value: Optional[float] = None
+    """Optional overrides; when given they are saved on the asset for later runs."""
+    method: Optional[str] = Field(None, pattern="^(STRAIGHT_LINE|DECLINING_BALANCE)$")
+    useful_life_years: Optional[int] = Field(None, ge=1, le=50)
+    salvage_value: Optional[float] = Field(None, ge=0)
 
 
 class DepreciationResponse(BaseModel):
@@ -535,5 +615,17 @@ class DepreciationResponse(BaseModel):
     annual_depreciation: float
     method: str
     years_in_service: float
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class NotificationResponse(BaseModel):
+    id: str
+    title: str
+    message: Optional[str] = None
+    type: str
+    link: Optional[str] = None
+    is_read: bool
+    created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

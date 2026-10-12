@@ -1,6 +1,7 @@
 export const roles = {
   SUPER_ADMIN: "SUPER_ADMIN",
   IT_ADMIN: "IT_ADMIN",
+  SUB_ADMIN: "SUB_ADMIN",
   HAM_ADMIN: "HAM_ADMIN",
   SAM_ADMIN: "SAM_ADMIN",
   CLOUD_ADMIN: "CLOUD_ADMIN",
@@ -93,6 +94,12 @@ export const roleDefinitions: Record<
       "reports:read",
       "reports:export",
     ],
+  },
+  SUB_ADMIN: {
+    label: "Sub-admin",
+    description: "Administers the ITAM modules assigned to the account.",
+    scope: "Assigned modules",
+    permissions: ["reports:read"],
   },
   HAM_ADMIN: {
     label: "HAM Sub-Admin",

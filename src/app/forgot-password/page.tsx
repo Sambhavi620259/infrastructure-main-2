@@ -23,7 +23,7 @@ export default function ForgotPasswordPage() {
         method: "POST",
         body: JSON.stringify({ email }),
       });
-      setSuccess("If the email exists, a password reset link has been sent.");
+      setSuccess("Done. If that account exists, your IT Admin has been notified and will give you a temporary password.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to process request.");
     } finally {
@@ -45,7 +45,7 @@ export default function ForgotPasswordPage() {
         </div>
 
         <h1 className="mt-8 text-2xl font-extrabold tracking-tight text-slate-950">Reset your password</h1>
-        <p className="mt-2 text-sm text-slate-500">Enter your email and we&rsquo;ll send you a reset link.</p>
+        <p className="mt-2 text-sm text-slate-500">Enter your email and we&rsquo;ll ask your IT Admin to reset your password.</p>
 
         <form className="mt-6 space-y-4" onSubmit={submit} noValidate>
           <label className="block text-sm font-semibold text-slate-700">

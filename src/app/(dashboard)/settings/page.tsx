@@ -1,222 +1,262 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
+import Link from "next/link";
+import { apiFetch } from "@/lib/api";
+import { createAssetCategory, listAssetCategories, type AssetCategory } from "@/lib/tickets";
 
-type ToggleSetter = (value: boolean | ((previous: boolean) => boolean)) => void;
+/** Mirrors OrganizationResponse in backend/app/routers/organization.py. */
+interface Organization {
+  id: string;
+  name: string;
+  code: string;
+  status: string;
+  created_at: string | null;
+  plan: string | null;
+  user_limit: number | null;
+  asset_limit: number | null;
+  active_users: number;
+  assets: number;
+  departments: number;
+  asset_categories: number;
+  users_by_role: Record<string, number>;
+}
 
-const roles = [
-  ["Super Admin", "Full platform access, organization subscription, and company provisioning.", "2 users"],
-  ["IT Admin", "Organization settings, users, roles, and all ITAM modules.", "5 users"],
-  ["Hardware Admin", "Hardware inventory, assignment, lifecycle, and maintenance.", "12 users"],
-  ["Reporting User", "Read-only access to reporting and approved exports.", "38 users"],
-] as const;
+const ROLE_ROWS: [string, string, string][] = [
+  ["IT_ADMIN", "IT Admin", "Organization settings, users, and every ITAM module."],
+  ["SUB_ADMIN", "Sub-admin", "Administers the modules assigned to them."],
+  ["IT_AGENT", "IT Agent", "Tickets, asset hand-over, stock moves and reports."],
+  ["REPORTING_USER", "Reporting User", "Read-only access to reports and exports."],
+];
 
-const integrations = [
-  ["Microsoft Entra ID", "Directory sync", "Connected", "2,186 users synced"],
-  ["Okta", "Single sign-on", "Connected", "SAML 2.0 enabled"],
-  ["ServiceNow", "Service desk", "Not connected", "Link incidents and assets"],
-  ["Jira Service Management", "Service desk", "Not connected", "Link requests and assets"],
-] as const;
+function formatDay(value: string | null): string {
+  if (!value) return "—";
+  return new Date(value).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
+}
+
+function UsageBar({ used, limit }: { used: number; limit: number | null }) {
+  const percent = limit ? Math.min(100, Math.round((used / limit) * 100)) : 0;
+  return (
+    <div>
+      <div className="flex justify-between text-sm">
+        <span className="font-semibold text-slate-800">{used.toLocaleString()}</span>
+        <span className="text-slate-500">{limit ? `of ${limit.toLocaleString()}` : "No limit"}</span>
+      </div>
+      {limit ? (
+        <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-slate-100" role="presentation">
+          <div className={`h-full rounded-full ${percent >= 90 ? "bg-rose-500" : "bg-brand-600"}`} style={{ width: `${percent}%` }} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 export default function SettingsPage() {
-  const [saved, setSaved] = useState(false);
-  const [auditLog, setAuditLog] = useState(true);
-  const [mfa, setMfa] = useState(true);
+  const [org, setOrg] = useState<Organization | null>(null);
+  const [name, setName] = useState("");
+  const [categories, setCategories] = useState<AssetCategory[]>([]);
+  const [newCategory, setNewCategory] = useState("");
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    apiFetch<Organization>("/api/organization")
+      .then((data) => {
+        setOrg(data);
+        setName(data.name);
+      })
+      .catch((caught) => setError(caught instanceof Error ? caught.message : "Unable to load organization settings."));
+    listAssetCategories()
+      .then(setCategories)
+      .catch(() => undefined);
+  }, []);
+
+  const saveName = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!org || name.trim() === org.name) return;
+    setSaving(true);
+    try {
+      const updated = await apiFetch<Organization>("/api/organization", {
+        method: "PUT",
+        body: JSON.stringify({ name: name.trim() }),
+      });
+      setOrg(updated);
+      setName(updated.name);
+      setNotice("Organization name saved.");
+      setError("");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not save the name.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const addCategory = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!newCategory.trim()) return;
+    try {
+      const created = await createAssetCategory(newCategory.trim());
+      setCategories((current) => [...current, created].sort((a, b) => a.name.localeCompare(b.name)));
+      setNewCategory("");
+      setNotice(`Category "${created.name}" added.`);
+      setError("");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not add the category.");
+    }
+  };
+
+  const inputClass =
+    "mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-normal outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100";
+
   return (
-    <main className="mx-auto max-w-7xl space-y-8">
-      <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-        <div>
-          <p className="text-sm font-medium text-brand-600">IT administration</p>
-          <h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-950">Organization settings</h1>
-          <p className="mt-2 text-slate-500">
-            Configure company details, access control, security, and integrations.
-          </p>
-        </div>
-        <button
-          onClick={() => setSaved(true)}
-          className="rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700"
-        >
-          Save changes
-        </button>
+    <main className="mx-auto max-w-7xl space-y-6">
+      <header>
+        <p className="text-sm font-medium text-brand-600">IT administration</p>
+        <h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-950">Organization settings</h1>
+        <p className="mt-2 text-slate-500">Your organization&rsquo;s profile, plan usage, people and asset catalog.</p>
       </header>
-      {saved && (
-        <div
-          role="status"
-          className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-900"
-        >
-          <span>
-            Settings saved locally. Connect these controls to your configuration API to persist them.
-          </span>
-          <button onClick={() => setSaved(false)} className="ml-4 font-semibold">
+
+      {error && (
+        <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800">
+          {error}
+        </div>
+      )}
+      {notice && (
+        <div role="status" className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-900">
+          <span>{notice}</span>
+          <button type="button" onClick={() => setNotice("")} className="ml-4 font-semibold">
             Dismiss
           </button>
         </div>
       )}
+
       <section className="grid gap-6 lg:grid-cols-[1.15fr_1fr]">
-        <article className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="mb-6">
-            <h2 className="font-semibold text-slate-900">Organization profile</h2>
-            <p className="mt-1 text-sm text-slate-500">
-              Details shown across your Bold And Wise ITAM workspace.
-            </p>
-          </div>
-          <div className="grid gap-5 sm:grid-cols-2">
-            <label className="text-sm font-medium text-slate-700">
+        <form onSubmit={saveName} className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="font-semibold text-slate-900">Organization profile</h2>
+          <div className="mt-5 grid gap-5 sm:grid-cols-2">
+            <label className="text-sm font-medium text-slate-700 sm:col-span-2">
               Organization name
-              <input
-                defaultValue="Acme Technologies India"
-                className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-              />
+              <input value={name} onChange={(event) => setName(event.target.value)} maxLength={150} className={inputClass} />
             </label>
-            <label className="text-sm font-medium text-slate-700">
-              Primary domain
-              <input
-                defaultValue="acme.example"
-                className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-              />
-            </label>
-            <label className="text-sm font-medium text-slate-700">
-              Default timezone
-              <select
-                defaultValue="Asia/Kolkata"
-                className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-brand-500"
-              >
-                <option value="Asia/Kolkata">India Standard Time</option>
-                <option value="Europe/London">Greenwich Mean Time</option>
-                <option value="America/New_York">Eastern Time</option>
-              </select>
-            </label>
-            <label className="text-sm font-medium text-slate-700">
-              Asset tag prefix
-              <input
-                defaultValue="AST"
-                className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-              />
-            </label>
-          </div>
-        </article>
-        <article className="rounded-xl bg-slate-950 p-6 text-white shadow-sm">
-          <p className="text-sm font-medium text-slate-400">Workspace plan</p>
-          <h2 className="mt-2 text-2xl font-bold">Enterprise</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-400">
-            Your subscription supports up to 100,000 managed endpoints and advanced discovery.
-          </p>
-          <div className="mt-8 space-y-4 border-t border-white/10 pt-5 text-sm">
-            <div className="flex justify-between">
-              <span className="text-slate-400">Managed endpoints</span>
-              <span className="font-semibold">12,486 / 100,000</span>
+            <div className="text-sm">
+              <p className="font-medium text-slate-700">Organization code</p>
+              <p className="mt-1.5 font-mono text-slate-600">{org?.code ?? "—"}</p>
             </div>
-            <div className="h-2 overflow-hidden rounded-full bg-white/10">
-              <div className="h-full w-[12.5%] rounded-full bg-brand-500" />
+            <div className="text-sm">
+              <p className="font-medium text-slate-700">Created</p>
+              <p className="mt-1.5 text-slate-600">{formatDay(org?.created_at ?? null)}</p>
             </div>
-            <button className="pt-2 font-semibold text-brand-400 hover:text-brand-300">
-              Manage subscription →
-            </button>
           </div>
+          <button
+            type="submit"
+            disabled={saving || !org || name.trim() === org.name || name.trim().length < 2}
+            className="mt-6 rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
+          >
+            {saving ? "Saving…" : "Save name"}
+          </button>
+        </form>
+
+        <article className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex items-center justify-between">
+            <h2 className="font-semibold text-slate-900">Plan &amp; usage</h2>
+            {org?.plan && (
+              <span className="rounded-full bg-brand-50 px-2.5 py-1 text-xs font-bold text-brand-700">{org.plan}</span>
+            )}
+          </div>
+          <div className="mt-5 space-y-5">
+            <div>
+              <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Active users</p>
+              <UsageBar used={org?.active_users ?? 0} limit={org?.user_limit ?? null} />
+            </div>
+            <div>
+              <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Assets</p>
+              <UsageBar used={org?.assets ?? 0} limit={org?.asset_limit ?? null} />
+            </div>
+          </div>
+          <p className="mt-5 text-xs text-slate-500">Plan limits are managed by the platform Super Admin.</p>
         </article>
       </section>
-      <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
+
+      <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="flex items-center justify-between border-b border-slate-100 px-6 py-5">
           <div>
-            <h2 className="font-semibold text-slate-900">Roles & access</h2>
-            <p className="mt-1 text-sm text-slate-500">
-              Assign least-privilege access to your ITAM workspace.
-            </p>
+            <h2 className="font-semibold text-slate-900">Roles &amp; people</h2>
+            <p className="mt-1 text-sm text-slate-500">Active users in each role.</p>
           </div>
-          <button className="text-sm font-semibold text-brand-600 hover:text-brand-700">
+          <Link href="/users" className="text-sm font-semibold text-brand-600 hover:text-brand-700">
             Manage users →
-          </button>
+          </Link>
         </div>
-        <div className="divide-y divide-slate-100">
-          {roles.map(([title, description, users]) => (
-            <div key={title} className="flex flex-col gap-2 px-6 py-4 sm:flex-row sm:items-center sm:gap-5">
-              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-brand-50 text-sm font-bold text-brand-600">
-                {title.charAt(0)}
+        <ul className="divide-y divide-slate-100">
+          {ROLE_ROWS.map(([key, label, description]) => (
+            <li key={key} className="flex items-center justify-between gap-4 px-6 py-4">
+              <div className="flex items-center gap-4">
+                <span className="grid h-10 w-10 place-items-center rounded-lg bg-brand-50 text-sm font-bold text-brand-700">
+                  {label[0]}
+                </span>
+                <div>
+                  <p className="font-semibold text-slate-800">{label}</p>
+                  <p className="text-sm text-slate-500">{description}</p>
+                </div>
               </div>
-              <div className="flex-1">
-                <p className="font-semibold text-slate-800">{title}</p>
-                <p className="mt-0.5 text-sm text-slate-500">{description}</p>
-              </div>
-              <span className="text-sm font-medium text-slate-600">{users}</span>
-              <button className="text-left text-sm font-semibold text-brand-600 hover:text-brand-700">
-                Edit
-              </button>
-            </div>
+              <span className="whitespace-nowrap text-sm font-medium text-slate-600">
+                {org ? `${org.users_by_role[key] ?? 0} user${(org.users_by_role[key] ?? 0) === 1 ? "" : "s"}` : "—"}
+              </span>
+            </li>
           ))}
-        </div>
+        </ul>
       </section>
+
       <section className="grid gap-6 lg:grid-cols-2">
         <article className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div>
-            <h2 className="font-semibold text-slate-900">Security & audit</h2>
-            <p className="mt-1 text-sm text-slate-500">Protect account access and record critical events.</p>
-          </div>
-          <div className="mt-6 divide-y divide-slate-100 border-y border-slate-100">
-            {[
-              [
-                "Require multi-factor authentication",
-                "All administrators must verify with a second factor.",
-                mfa,
-                setMfa,
-              ],
-              [
-                "Immutable audit logging",
-                "Track asset, license, role, and configuration changes.",
-                auditLog,
-                setAuditLog,
-              ],
-            ].map(([title, description, enabled, setter]) => (
-              <div key={title as string} className="flex items-center gap-4 py-4">
-                <div className="flex-1">
-                  <p className="text-sm font-semibold text-slate-800">{title as string}</p>
-                  <p className="mt-1 text-sm leading-5 text-slate-500">{description as string}</p>
-                </div>
-                <button
-                  aria-pressed={enabled as boolean}
-                  onClick={() => (setter as ToggleSetter)(!(enabled as boolean))}
-                  className={`relative h-6 w-11 rounded-full transition ${(enabled as boolean) ? "bg-brand-600" : "bg-slate-200"}`}
-                >
-                  <span
-                    className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow transition ${(enabled as boolean) ? "left-6" : "left-1"}`}
-                  />
-                </button>
-              </div>
+          <h2 className="font-semibold text-slate-900">Asset categories ({categories.length})</h2>
+          <p className="mt-1 text-sm text-slate-500">Used when raising tickets and classifying requests.</p>
+          <form onSubmit={addCategory} className="mt-4 flex gap-2">
+            <label className="flex-1">
+              <span className="sr-only">New category</span>
+              <input
+                value={newCategory}
+                onChange={(event) => setNewCategory(event.target.value)}
+                maxLength={100}
+                placeholder="e.g. Docking Station"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+              />
+            </label>
+            <button
+              type="submit"
+              disabled={!newCategory.trim()}
+              className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+            >
+              Add
+            </button>
+          </form>
+          <ul className="mt-4 flex flex-wrap gap-2">
+            {categories.map((category) => (
+              <li key={category.id} className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
+                {category.name}
+              </li>
             ))}
-          </div>
-          <button className="mt-5 text-sm font-semibold text-brand-600 hover:text-brand-700">
-            View audit logs →
-          </button>
+          </ul>
         </article>
-        <article className="rounded-xl border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-100 px-6 py-5">
-            <h2 className="font-semibold text-slate-900">Integrations</h2>
-            <p className="mt-1 text-sm text-slate-500">
-              Connect directory, identity, and service-desk tools.
-            </p>
-          </div>
-          <div className="divide-y divide-slate-100">
-            {integrations.map(([name, type, state, detail]) => (
-              <div key={name} className="flex items-center gap-4 px-6 py-4">
-                <span className="grid h-9 w-9 place-items-center rounded-lg bg-slate-100 text-slate-600">
-                  ⌘
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="font-semibold text-slate-800">{name}</p>
-                  <p className="text-sm text-slate-500">
-                    {type} · {detail}
-                  </p>
-                </div>
-                <span
-                  className={`hidden text-xs font-semibold sm:inline ${state === "Connected" ? "text-emerald-600" : "text-slate-400"}`}
-                >
-                  {state}
-                </span>
-                <button className="text-sm font-semibold text-brand-600 hover:text-brand-700">
-                  {state === "Connected" ? "Manage" : "Connect"}
-                </button>
-              </div>
-            ))}
-          </div>
+
+        <article className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="font-semibold text-slate-900">Departments ({org?.departments ?? "—"})</h2>
+          <p className="mt-1 text-sm text-slate-500">Teams used for users, assets, tickets and report filters.</p>
+          <Link
+            href="/users/departments"
+            className="mt-4 inline-flex rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            Manage departments →
+          </Link>
+          <h3 className="mt-6 text-sm font-semibold text-slate-900">Activity &amp; audit</h3>
+          <p className="mt-1 text-sm text-slate-500">
+            Every ticket decision, asset hand-over and stock move is recorded. Open a user from{" "}
+            <Link href="/users" className="font-semibold text-brand-600 hover:text-brand-700">
+              Users
+            </Link>{" "}
+            and choose <strong>View work</strong> to review what they did.
+          </p>
         </article>
       </section>
     </main>

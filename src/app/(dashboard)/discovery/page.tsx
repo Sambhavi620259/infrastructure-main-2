@@ -1,200 +1,235 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { listAssetCategories, type AssetCategory } from "@/lib/tickets";
+import {
+  ignoreDevice,
+  listDiscoveredDevices,
+  promoteDevice,
+  type DeviceStatus,
+  type DiscoveredDevice,
+} from "@/lib/operations";
 
-const scans = [
-  {
-    name: "Mumbai HQ network",
-    range: "10.24.0.0/16",
-    method: "SNMP · WMI · ICMP",
-    devices: 842,
-    status: "Complete",
-    ran: "Today, 08:30",
-  },
-  {
-    name: "Bengaluru office",
-    range: "10.31.0.0/16",
-    method: "SNMP · SSH · ICMP",
-    devices: 616,
-    status: "Complete",
-    ran: "Today, 06:00",
-  },
-  {
-    name: "London office",
-    range: "10.47.0.0/16",
-    method: "SNMP · WMI",
-    devices: 294,
-    status: "Running",
-    ran: "Started 4 min ago",
-  },
-  {
-    name: "Cloud agents",
-    range: "Remote endpoints",
-    method: "Agent telemetry",
-    devices: 1_923,
-    status: "Complete",
-    ran: "Yesterday, 22:00",
-  },
-] as const;
+const TABS: [DeviceStatus, string][] = [
+  ["UNMANAGED", "To review"],
+  ["MANAGED", "Promoted"],
+  ["IGNORED", "Ignored"],
+];
 
-const discoveries = [
-  ["DESKTOP-4K8Q2", "Windows 11 Pro", "10.24.15.82", "Mumbai HQ", "3 min ago"],
-  ["PRN-FIN-03", "HP LaserJet M607", "10.24.8.141", "Mumbai HQ", "17 min ago"],
-  ["MAC-7D1J4", "macOS Sonoma 14.5", "10.31.3.109", "Bengaluru", "31 min ago"],
-  ["SW-CORE-01", "Cisco Catalyst 9300", "10.47.0.12", "London", "1 hr ago"],
-] as const;
+function seen(value: string | null): string {
+  return value ? new Date(value).toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—";
+}
 
 export default function DiscoveryPage() {
-  const [notice, setNotice] = useState(false);
+  const [tab, setTab] = useState<DeviceStatus>("UNMANAGED");
+  const [devices, setDevices] = useState<DiscoveredDevice[]>([]);
+  const [categories, setCategories] = useState<AssetCategory[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [promoting, setPromoting] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  useEffect(() => {
+    listAssetCategories().then(setCategories).catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    listDiscoveredDevices(tab)
+      .then((data) => {
+        if (!cancelled) setDevices(data);
+      })
+      .catch((caught) => {
+        if (!cancelled) setError(caught instanceof Error ? caught.message : "Unable to load discovered devices.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tab, refreshKey]);
+
+  const done = (message: string) => {
+    setNotice(message);
+    setError("");
+    setPromoting(null);
+    setRefreshKey((key) => key + 1);
+  };
+
   return (
-    <main className="mx-auto max-w-7xl space-y-8">
-      <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-        <div>
-          <p className="text-sm font-medium text-brand-600">Automated asset discovery</p>
-          <h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-950">Discovery & scans</h1>
-          <p className="mt-2 text-slate-500">
-            Find network-connected devices and collect endpoint telemetry.
-          </p>
-        </div>
-        <button
-          onClick={() => setNotice(true)}
-          className="rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700"
-        >
-          + Start discovery scan
-        </button>
+    <main className="mx-auto max-w-7xl space-y-5">
+      <header>
+        <p className="text-[11px] font-bold uppercase tracking-wider text-brand-600">Discovery</p>
+        <h1 className="mt-1 text-2xl font-extrabold tracking-tight text-slate-950">Network discovery</h1>
+        <p className="mt-1 text-sm text-slate-500">
+          Devices reported by scans and endpoint agents. Promote the ones you own to assets, ignore the rest.
+        </p>
       </header>
+
+      {error && (
+        <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          {error}
+        </div>
+      )}
       {notice && (
-        <div
-          role="status"
-          className="flex items-center justify-between rounded-xl border border-brand-200 bg-brand-50 px-5 py-4 text-sm text-brand-900"
-        >
-          <span>
-            A new discovery scan has been queued. Connect it to the API to run it against a real network.
-          </span>
-          <button onClick={() => setNotice(false)} className="ml-4 font-semibold">
-            Dismiss
+        <div role="status" className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          <span>{notice}</span>
+          <button type="button" onClick={() => setNotice("")} aria-label="Dismiss">
+            ×
           </button>
         </div>
       )}
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {[
-          ["3,675", "Endpoints discovered", "+128 this month"],
-          ["96.8%", "Agent reporting rate", "3,558 active agents"],
-          ["1", "Scan in progress", "London office network"],
-          ["14", "Unmanaged devices", "Need owner assignment"],
-        ].map(([value, label, hint], index) => (
-          <article key={label} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p
-              className={`text-2xl font-bold tracking-tight ${index === 3 ? "text-amber-600" : "text-slate-950"}`}
+
+      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div role="tablist" aria-label="Device status" className="flex gap-2 border-b border-slate-100 p-4">
+          {TABS.map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              role="tab"
+              aria-selected={tab === value}
+              onClick={() => setTab(value)}
+              className={`rounded-full px-3 py-1.5 text-xs font-semibold ${tab === value ? "bg-brand-600 text-white" : "text-slate-600 hover:bg-slate-100"}`}
             >
-              {value}
-            </p>
-            <p className="mt-1 text-sm font-medium text-slate-700">{label}</p>
-            <p className="mt-2 text-xs text-slate-500">{hint}</p>
-          </article>
-        ))}
-      </section>
-      <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-5">
-          <div>
-            <h2 className="font-semibold text-slate-900">Scheduled discovery jobs</h2>
-            <p className="mt-1 text-sm text-slate-500">
-              Network ranges and telemetry sources monitored by Bold And Wise ITAM.
-            </p>
-          </div>
-          <button className="text-sm font-semibold text-brand-600 hover:text-brand-700">
-            Manage schedules →
-          </button>
+              {label}
+            </button>
+          ))}
         </div>
         <div className="overflow-x-auto">
-          <table className="min-w-[820px] w-full text-left">
-            <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+          <table className="min-w-[900px] w-full text-left">
+            <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-600">
               <tr>
-                <th className="px-6 py-3 font-semibold">Scan target</th>
-                <th className="px-6 py-3 font-semibold">Method</th>
-                <th className="px-6 py-3 font-semibold">Devices found</th>
-                <th className="px-6 py-3 font-semibold">Last run</th>
-                <th className="px-6 py-3 font-semibold">Status</th>
-                <th className="px-6 py-3" />
+                {["Host", "Address", "System", "Serial", "Last seen", ""].map((h) => (
+                  <th key={h} className="px-5 py-3">
+                    {h}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {scans.map((scan) => (
-                <tr key={scan.name} className="hover:bg-slate-50">
-                  <td className="px-6 py-4">
-                    <p className="font-semibold text-slate-800">{scan.name}</p>
-                    <p className="mt-0.5 text-sm text-slate-500">{scan.range}</p>
+              {devices.map((device) => (
+                <tr key={device.id} className="align-top text-sm">
+                  <td className="px-5 py-3">
+                    <p className="font-semibold text-slate-800">{device.hostname ?? "Unknown host"}</p>
+                    {device.device_type && <p className="text-xs text-slate-500">{device.device_type}</p>}
                   </td>
-                  <td className="px-6 py-4 text-sm text-slate-600">{scan.method}</td>
-                  <td className="px-6 py-4 text-sm font-semibold text-slate-700">
-                    {scan.devices.toLocaleString()}
+                  <td className="px-5 py-3 font-mono text-xs text-slate-600">
+                    {device.ip_address}
+                    <br />
+                    {device.mac_address}
                   </td>
-                  <td className="px-6 py-4 text-sm text-slate-600">{scan.ran}</td>
-                  <td className="px-6 py-4">
-                    <span
-                      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${scan.status === "Running" ? "bg-blue-50 text-blue-700" : "bg-emerald-50 text-emerald-700"}`}
-                    >
-                      {scan.status}
-                    </span>
+                  <td className="px-5 py-3 text-xs text-slate-600">
+                    {[device.os_name, device.cpu_model, device.ram_gb ? `${Number(device.ram_gb)} GB RAM` : null]
+                      .filter(Boolean)
+                      .join(" · ") || "—"}
                   </td>
-                  <td className="px-6 py-4 text-right">
-                    <button className="text-sm font-semibold text-brand-600 hover:text-brand-700">
-                      Details
-                    </button>
+                  <td className="px-5 py-3 font-mono text-xs text-slate-600">{device.serial_number ?? "—"}</td>
+                  <td className="px-5 py-3 text-xs text-slate-500">{seen(device.last_seen)}</td>
+                  <td className="px-5 py-3 text-right">
+                    {device.status === "UNMANAGED" &&
+                      (promoting === device.id ? (
+                        <PromoteForm
+                          device={device}
+                          categories={categories}
+                          onCancel={() => setPromoting(null)}
+                          onDone={(tag) => done(`${device.hostname ?? device.mac_address} is now asset ${tag}.`)}
+                          onError={setError}
+                        />
+                      ) : (
+                        <span className="inline-flex gap-3 text-sm font-semibold">
+                          <button type="button" onClick={() => setPromoting(device.id)} className="text-brand-600 hover:text-brand-700">
+                            Promote to asset
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              ignoreDevice(device.id)
+                                .then(() => done(`${device.hostname ?? device.mac_address} ignored.`))
+                                .catch((caught) => setError(caught instanceof Error ? caught.message : "Update failed."))
+                            }
+                            className="text-slate-500 hover:text-slate-700"
+                          >
+                            Ignore
+                          </button>
+                        </span>
+                      ))}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-      </section>
-      <section className="grid gap-6 lg:grid-cols-[1.5fr_1fr]">
-        <article className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-          <div className="flex items-center justify-between border-b border-slate-100 px-6 py-5">
-            <div>
-              <h2 className="font-semibold text-slate-900">Recently discovered</h2>
-              <p className="mt-1 text-sm text-slate-500">New endpoints awaiting inventory reconciliation.</p>
-            </div>
-            <button className="text-sm font-semibold text-brand-600 hover:text-brand-700">View all →</button>
-          </div>
-          <div className="divide-y divide-slate-100">
-            {discoveries.map(([name, platform, ip, location, time]) => (
-              <div key={name} className="flex items-center gap-4 px-6 py-4">
-                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-600">
-                  ●
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="font-semibold text-slate-800">{name}</p>
-                  <p className="truncate text-sm text-slate-500">
-                    {platform} · {ip}
-                  </p>
-                </div>
-                <div className="hidden text-right text-sm text-slate-500 sm:block">
-                  <p>{location}</p>
-                  <p className="mt-0.5 text-xs text-slate-400">{time}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </article>
-        <article className="rounded-xl bg-slate-950 p-6 text-white shadow-sm">
-          <p className="text-sm font-medium text-slate-400">Discovery coverage</p>
-          <p className="mt-3 text-4xl font-bold">98.2%</p>
-          <p className="mt-2 text-sm leading-6 text-slate-400">
-            Nearly all known network ranges have reported within the last 24 hours.
+        {!loading && devices.length === 0 && !error && (
+          <p className="p-10 text-center text-sm text-slate-500">
+            {tab === "UNMANAGED"
+              ? "Nothing to review. Devices appear here when a scan or agent reports them to POST /api/discovery/agent-ingest."
+              : "No devices here."}
           </p>
-          <div className="mt-8 h-2 overflow-hidden rounded-full bg-white/10">
-            <div className="h-full w-[98.2%] rounded-full bg-brand-500" />
-          </div>
-          <div className="mt-4 flex justify-between text-xs text-slate-400">
-            <span>3,675 reporting</span>
-            <span>68 not seen</span>
-          </div>
-          <button className="mt-8 text-sm font-semibold text-brand-400 hover:text-brand-300">
-            Review coverage gaps →
-          </button>
-        </article>
+        )}
       </section>
+      <p className="text-xs text-slate-500">
+        Promoted devices become assets in stock. Find them under <Link href="/assets" className="font-semibold text-brand-600">All Assets</Link>.
+      </p>
     </main>
+  );
+}
+
+function PromoteForm({
+  device,
+  categories,
+  onCancel,
+  onDone,
+  onError,
+}: {
+  device: DiscoveredDevice;
+  categories: AssetCategory[];
+  onCancel: () => void;
+  onDone: (tag: string) => void;
+  onError: (message: string) => void;
+}) {
+  const [tag, setTag] = useState("");
+  const [category, setCategory] = useState(categories[0]?.name ?? "");
+  const [busy, setBusy] = useState(false);
+
+  const save = async () => {
+    if (!tag.trim() || !category) return onError("Enter an asset tag and choose a category.");
+    setBusy(true);
+    try {
+      await promoteDevice(device.id, { asset_tag: tag.trim(), category });
+      onDone(tag.trim());
+    } catch (caught) {
+      onError(caught instanceof Error ? caught.message : "Could not promote the device.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <span className="inline-flex flex-wrap items-center justify-end gap-2">
+      <label>
+        <span className="sr-only">Asset tag</span>
+        <input value={tag} onChange={(e) => setTag(e.target.value)} placeholder="Asset tag" className="w-28 rounded-lg border border-slate-200 px-2 py-1.5 text-xs" />
+      </label>
+      <label>
+        <span className="sr-only">Category</span>
+        <select value={category} onChange={(e) => setCategory(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs">
+          {categories.map((c) => (
+            <option key={c.id} value={c.name}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <button type="button" disabled={busy} onClick={save} className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50">
+        {busy ? "Saving…" : "Create asset"}
+      </button>
+      <button type="button" onClick={onCancel} className="text-xs font-semibold text-slate-500">
+        Cancel
+      </button>
+    </span>
   );
 }

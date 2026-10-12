@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import type { ComponentType, ReactNode, SVGProps } from "react";
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
-  BellIcon,
+  BanknotesIcon,
+  CloudIcon,
+  SignalIcon,
   ArrowPathRoundedSquareIcon,
   ArrowRightStartOnRectangleIcon,
   BuildingOffice2Icon,
@@ -31,69 +32,75 @@ import { endDemoSession, type DemoSession } from "@/lib/demo-session";
 import { apiFetch, ApiRequestError, clearAuth } from "@/lib/api";
 import { canAccessPath, defaultRouteForRole, roles, workspaceForRole, type Workspace } from "@/lib/roles";
 import { routes } from "@/lib/routes";
+import { getDashboardCounts, type DashboardCounts } from "@/lib/dashboard";
+import { NotificationBell } from "@/components/layout/notification-bell";
+import { PROFILE_UPDATED_EVENT } from "@/lib/profile";
+import { LABEL_SECTION, sectionForPath, sectionsFor } from "@/lib/access";
 
-type NavigationItem = readonly [label: string, href: string, icon: ComponentType<SVGProps<SVGSVGElement>>];
+type NavigationItem = readonly [label: string, href: string, countKey: string, icon: React.ComponentType<{ className?: string }>];
 
 const itNavigation: readonly NavigationItem[] = [
-  ["Dashboard", routes.dashboard, Squares2X2Icon],
-  ["Tickets", routes.tickets, TicketIcon],
-  ["Users", routes.users, UserGroupIcon],
-  ["Inventory", routes.inventory, FolderIcon],
-  ["Reports", routes.reports, FolderIcon],
-  ["Settings", routes.settings, Cog6ToothIcon],
+  ["Dashboard", routes.dashboard, "", Squares2X2Icon],
+  ["Tickets", routes.tickets, "tickets", TicketIcon],
+  ["Users", routes.users, "users", UserGroupIcon],
+  ["Inventory", routes.inventory, "inventory", FolderIcon],
+  ["Finance", routes.financial, "", BanknotesIcon],
+  ["Discovery", routes.discovery, "", SignalIcon],
+  ["Cloud", routes.cloud, "", CloudIcon],
+  ["Reports", routes.reports, "", FolderIcon],
+  ["Settings", routes.settings, "", Cog6ToothIcon],
 ] as const;
 
 const assetNavigation: readonly NavigationItem[] = [
-  ["All Assets", routes.assets, CubeIcon],
-  ["Add New Asset", routes.assetNew, CubeIcon],
-  ["Asset Assignment", routes.assetAssignment, UserGroupIcon],
-  ["Asset Audit", routes.assetAudit, ClipboardDocumentCheckIcon],
-  ["Asset Lifecycle", routes.assetLifecycle, ArrowPathRoundedSquareIcon],
-  ["Warranty / AMC", routes.assetWarranty, ShieldCheckIcon],
-  ["Asset History", routes.assetHistory, ClockIcon],
-  ["Asset Status", routes.assetStatus, CheckCircleIcon],
+  ["All Assets", routes.assets, "assets", CubeIcon],
+  ["Add New Asset", routes.assetNew, "", CubeIcon],
+  ["Asset Assignment", routes.assetAssignment, "", UserGroupIcon],
+  ["Asset Audit", routes.assetAudit, "", ClipboardDocumentCheckIcon],
+  ["Asset Lifecycle", routes.assetLifecycle, "", ArrowPathRoundedSquareIcon],
+  ["Warranty / AMC", routes.assetWarranty, "", ShieldCheckIcon],
+  ["Asset History", routes.assetHistory, "", ClockIcon],
+  ["Asset Status", routes.assetStatus, "", CheckCircleIcon],
 ] as const;
 
 const ticketNavigation: readonly NavigationItem[] = [
-  ["Ticket Dashboard", routes.ticketDashboard, Squares2X2Icon],
-  ["All Tickets", routes.tickets, TicketIcon],
-  ["My Tickets", routes.ticketMine, TicketIcon],
-  ["Create New Ticket", routes.ticketNew, TicketIcon],
+  ["Ticket Dashboard", routes.ticketDashboard, "", Squares2X2Icon],
+  ["All Tickets", routes.tickets, "", TicketIcon],
+  ["My Tickets", routes.ticketMine, "", TicketIcon],
+  ["Create New Ticket", routes.ticketNew, "", TicketIcon],
 ] as const;
 
 const userNavigation: readonly NavigationItem[] = [
-  ["All Users", routes.users, UserGroupIcon],
-  ["Add User", routes.userNew, UserGroupIcon],
-  ["Departments / Teams", routes.userDepartments, BuildingOffice2Icon],
+  ["All Users", routes.users, "", UserGroupIcon],
+  ["Add User", routes.userNew, "", UserGroupIcon],
+  ["Departments / Teams", routes.userDepartments, "", BuildingOffice2Icon],
 ] as const;
 
 const inventoryNavigation: readonly NavigationItem[] = [
-  ["Inventory Dashboard", routes.inventory, Squares2X2Icon],
-  ["Hardware Inventory", routes.inventoryHardware, CubeIcon],
-  ["Software Inventory", routes.inventorySoftware, ComputerDesktopIcon],
-  ["Stock / Available Items", routes.inventoryStock, FolderIcon],
-  ["Purchase Orders", routes.inventoryPurchaseOrders, DocumentChartBarIcon],
-  ["Vendors", routes.inventoryVendors, BuildingOffice2Icon],
+  ["Inventory Dashboard", routes.inventory, "", Squares2X2Icon],
+  ["Hardware Inventory", routes.inventoryHardware, "", CubeIcon],
+  ["Software Inventory", routes.inventorySoftware, "", ComputerDesktopIcon],
+  ["Stock / Available Items", routes.inventoryStock, "", FolderIcon],
+  ["Purchase Orders", routes.inventoryPurchaseOrders, "", DocumentChartBarIcon],
+  ["Vendors", routes.inventoryVendors, "", BuildingOffice2Icon],
 ] as const;
 
 const agentNavigation: readonly NavigationItem[] = [
-  ["Dashboard", routes.agentDashboard, Squares2X2Icon],
-  ["Assets", routes.agentAssets, CubeIcon],
-  ["Tickets", routes.agentTickets, TicketIcon],
-  ["Users", routes.agentUsers, UserGroupIcon],
-  ["Inventory", routes.agentInventory, FolderIcon],
-  ["Reports", routes.agentReports, DocumentChartBarIcon],
-  ["Settings", routes.agentSettings, Cog6ToothIcon],
+  ["Dashboard", routes.agentDashboard, "", Squares2X2Icon],
+  ["Assets", routes.agentAssets, "", CubeIcon],
+  ["Tickets", routes.agentTickets, "", TicketIcon],
+  ["Inventory", routes.agentInventory, "", FolderIcon],
+  ["Reports", routes.agentReports, "", DocumentChartBarIcon],
+  ["Settings", routes.agentSettings, "", Cog6ToothIcon],
 ] as const;
 
 const superNavigation: readonly NavigationItem[] = [
-  ["Overview", routes.superAdmin, Squares2X2Icon],
-  ["Companies", routes.superCompanies, BuildingOffice2Icon],
-  ["Subscriptions", routes.superSubscriptions, DocumentChartBarIcon],
-  ["Tenant management", routes.superTenants, UsersIcon],
-  ["Platform admins", routes.superAdmins, ShieldCheckIcon],
-  ["Audit logs", routes.superAudit, FolderIcon],
-  ["Platform settings", routes.superSettings, Cog6ToothIcon],
+  ["Overview", routes.superAdmin, "", Squares2X2Icon],
+  ["Companies", routes.superCompanies, "", BuildingOffice2Icon],
+  ["Subscriptions", routes.superSubscriptions, "", DocumentChartBarIcon],
+  ["Tenant management", routes.superTenants, "", UsersIcon],
+  ["Platform admins", routes.superAdmins, "", ShieldCheckIcon],
+  ["Audit logs", routes.superAudit, "", FolderIcon],
+  ["Platform settings", routes.superSettings, "", Cog6ToothIcon],
 ] as const;
 
 function isActiveRoute(pathname: string, href: string) {
@@ -108,16 +115,37 @@ export function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const [authenticatedUser, setAuthenticatedUser] = useState<DemoSession | null>(null);
   const [sessionError, setSessionError] = useState("");
+  // An IT Agent who signed up on their own has no organization until an IT Admin adds them.
+  const [awaitingOrganization, setAwaitingOrganization] = useState(false);
+  const [modules, setModules] = useState<string[]>([]);
+  const sections = useMemo(() => sectionsFor(authenticatedUser?.role ?? "", modules), [authenticatedUser, modules]);
   const [sessionAttempt, setSessionAttempt] = useState(0);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [profileOpen, setProfileOpen] = useState(false);
-  const [notificationOpen, setNotificationOpen] = useState(false);
-  const [actionMessage, setActionMessage] = useState("");
   const [assetsOpen, setAssetsOpen] = useState(pathname.startsWith("/assets"));
   const [ticketsOpen, setTicketsOpen] = useState(pathname.startsWith("/tickets"));
   const [usersOpen, setUsersOpen] = useState(pathname.startsWith("/users"));
   const [inventoryOpen, setInventoryOpen] = useState(pathname.startsWith("/inventory"));
+  // Dashboard counts for sidebar badges
+  const [counts, setCounts] = useState<DashboardCounts | null>(null);
+
+  // Sidebar badge counts. Only the IT workspace shows them, and they need an
+  // organization: an agent awaiting one would just get a 400.
+  useEffect(() => {
+    if (!authenticatedUser || awaitingOrganization || workspaceForRole(authenticatedUser.role) !== "it") return;
+    getDashboardCounts()
+      .then(setCounts)
+      // Badges are optional; a failure should not interrupt the page.
+      .catch(() => setCounts(null));
+  }, [authenticatedUser, awaitingOrganization]);
+
+  // Re-read the profile when the user edits it, so the name in the top bar updates.
+  useEffect(() => {
+    const reload = () => setSessionAttempt((attempt) => attempt + 1);
+    window.addEventListener(PROFILE_UPDATED_EVENT, reload);
+    return () => window.removeEventListener(PROFILE_UPDATED_EVENT, reload);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -127,10 +155,12 @@ export function AppShell({ children }: { children: ReactNode }) {
         return;
       }
       try {
-        const data = await apiFetch<{ user: { name: string; email: string; role: DemoSession["role"] } }>(
-          "/api/profile",
-        );
+        const data = await apiFetch<{
+          user: { name: string; email: string; role: DemoSession["role"]; companyId: string | null; modules?: string[] };
+        }>("/api/profile");
         if (cancelled) return;
+        setAwaitingOrganization(data.user.role === roles.IT_AGENT && !data.user.companyId);
+        setModules(data.user.modules ?? []);
         const name = data.user.name || data.user.email.split("@")[0];
         setAuthenticatedUser({
           name,
@@ -168,7 +198,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     setMobileNavOpen(false);
     setProfileOpen(false);
-    setNotificationOpen(false);
     if (pathname.startsWith("/assets")) setAssetsOpen(true);
     if (pathname.startsWith("/tickets")) setTicketsOpen(true);
     if (pathname.startsWith("/users")) setUsersOpen(true);
@@ -178,8 +207,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (authenticatedUser && !canAccessPath(authenticatedUser.role, pathname)) {
       router.replace(defaultRouteForRole(authenticatedUser.role));
+      return;
     }
-  }, [authenticatedUser, pathname, router]);
+    // Sub-admins and reporting users only open the sections their role allows.
+    const section = sectionForPath(pathname);
+    if (authenticatedUser && workspaceForRole(authenticatedUser.role) === "it" && section && !sections.has(section)) {
+      router.replace("/dashboard");
+    }
+  }, [authenticatedUser, pathname, router, sections]);
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -187,7 +222,6 @@ export function AppShell({ children }: { children: ReactNode }) {
         setSearch("");
         setMobileNavOpen(false);
         setProfileOpen(false);
-        setNotificationOpen(false);
       }
     };
     window.addEventListener("keydown", closeOnEscape);
@@ -206,12 +240,15 @@ export function AppShell({ children }: { children: ReactNode }) {
             ...ticketNavigation,
             ...userNavigation,
             ...inventoryNavigation,
-          ]
+          ].filter(([, href]) => {
+            const section = sectionForPath(href);
+            return !section || sections.has(section);
+          })
         : navigation
       )
         .filter(([label]) => label.toLowerCase().includes(search.trim().toLowerCase()))
         .slice(0, 8),
-    [navigation, search, workspace],
+    [navigation, search, workspace, sections],
   );
 
   const handleSearchNavigation = (href: string) => {
@@ -219,20 +256,30 @@ export function AppShell({ children }: { children: ReactNode }) {
     router.push(href);
   };
 
+  // Badge component for sidebar navigation
+  const Badge = ({ count }: { count: number }) => count > 0 ? (
+    <span className="ml-2 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1.5 text-[10px] font-bold text-white">
+      {count > 99 ? "99+" : count}
+    </span>
+  ) : null;
+
+  // Helper to get count badge for nav items
+  const getBadge = (countKey: string) => {
+    if (!counts || !countKey) return null;
+    switch (countKey) {
+      case "assets": return counts.assets.total;
+      case "tickets": return counts.tickets.pending;
+      case "inventory": return counts.inventory.low_stock;
+      case "users": return counts.users.total;
+      default: return null;
+    }
+  };
+
   const signOut = () => {
     clearAuth();
     endDemoSession();
     setAuthenticatedUser(null);
     router.replace("/login");
-  };
-
-  const handleButtonFeedback = (event: React.MouseEvent<HTMLDivElement>) => {
-    const target = event.target as HTMLElement;
-    const button = target.closest("button");
-    if (!button || button.dataset.feedback === "off") return;
-    const label = button.textContent?.replace(/\s+/g, " ").trim();
-    if (!label || /^(dismiss|close|sign out)$/i.test(label)) return;
-    setActionMessage(`${label} selected. This demo action is ready to connect to the backend.`);
   };
 
   if (sessionError) {
@@ -272,33 +319,44 @@ export function AppShell({ children }: { children: ReactNode }) {
   if (!authenticatedUser) {
     return (
       <main className="grid min-h-screen place-items-center bg-[#f7f9fc] px-4">
-        <p className="text-sm font-medium text-slate-500">Loading your workspace\u2026</p>
+        <p className="text-sm font-medium text-slate-500">Loading your workspace…</p>
+      </main>
+    );
+  }
+
+  if (awaitingOrganization) {
+    return (
+      <main className="grid min-h-screen place-items-center bg-[#f7f9fc] px-4">
+        <section className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+          <h1 className="text-xl font-extrabold text-slate-950">Waiting for your IT Admin</h1>
+          <p className="mt-3 text-sm text-slate-600">
+            Hi {authenticatedUser.name}, your IT Agent account is ready. An IT Admin needs to add you to their
+            organization before you can use the dashboard. Ask them to open <strong>Users</strong> and choose{" "}
+            <strong>Add to organization</strong> next to your name.
+          </p>
+          <div className="mt-6 flex justify-center gap-3">
+            <button
+              type="button"
+              onClick={() => setSessionAttempt((attempt) => attempt + 1)}
+              className="rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-700"
+            >
+              Check again
+            </button>
+            <button
+              type="button"
+              onClick={signOut}
+              className="rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              Sign out
+            </button>
+          </div>
+        </section>
       </main>
     );
   }
 
   return (
-    <div
-      className="min-h-screen bg-[#f7f9fc] text-slate-900 md:grid md:grid-cols-[15.5rem_1fr]"
-      onClickCapture={handleButtonFeedback}
-    >
-      {actionMessage && (
-        <div
-          role="status"
-          className="fixed bottom-4 right-4 z-[100] flex max-w-sm items-start gap-3 rounded-xl border border-blue-200 bg-white px-4 py-3 text-xs font-semibold text-slate-700 shadow-xl"
-        >
-          <span className="flex-1">{actionMessage}</span>
-          <button
-            type="button"
-            data-feedback="off"
-            aria-label="Dismiss action message"
-            onClick={() => setActionMessage("")}
-            className="text-slate-400 hover:text-slate-700"
-          >
-            ×
-          </button>
-        </div>
-      )}
+    <div className="min-h-screen bg-[#f7f9fc] text-slate-900 md:grid md:grid-cols-[15.5rem_1fr]">
       <div className="md:hidden">
         <div className="sticky top-0 z-50 flex h-16 items-center justify-between border-b border-slate-200 bg-white px-4">
           <Link
@@ -401,7 +459,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           {workspace === "it" &&
             itNavigation
               .filter(([label]) => label === "Dashboard")
-              .map(([label, href, Icon]) => (
+              .map(([label, href, countKey, Icon]) => (
                 <Link
                   className={`flex items-center gap-3 rounded-lg px-3 py-2 text-[13px] font-semibold transition ${isActiveRoute(pathname, href) ? "bg-brand-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"}`}
                   href={href}
@@ -410,9 +468,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                 >
                   <Icon className="h-[17px] w-[17px]" />
                   {label}
+                  {getBadge(countKey) && <Badge count={getBadge(countKey)!} />}
                 </Link>
               ))}
-          {workspace === "it" && (
+          {workspace === "it" && sections.has("assets") && (
             <div>
               <button
                 type="button"
@@ -422,6 +481,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-[13px] font-semibold transition ${pathname.startsWith("/assets") ? "text-brand-700" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"}`}
               >
                 <CubeIcon className="h-[17px] w-[17px]" /> <span className="flex-1 text-left">Assets</span>
+                {getBadge("assets") && <Badge count={getBadge("assets")!} />}
                 <ChevronDownIcon className={`h-4 w-4 transition ${assetsOpen ? "rotate-180" : ""}`} />
               </button>
               {assetsOpen && (
@@ -444,7 +504,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               )}
             </div>
           )}
-          {workspace === "it" && (
+          {workspace === "it" && sections.has("tickets") && (
             <div>
               <button
                 type="button"
@@ -455,11 +515,12 @@ export function AppShell({ children }: { children: ReactNode }) {
               >
                 <TicketIcon className="h-[17px] w-[17px]" />
                 <span className="flex-1 text-left">Tickets</span>
+                {getBadge("tickets") && <Badge count={getBadge("tickets")!} />}
                 <ChevronDownIcon className={`h-4 w-4 transition ${ticketsOpen ? "rotate-180" : ""}`} />
               </button>
               {ticketsOpen && (
                 <div className="mt-1 ml-4 space-y-0.5 border-l border-slate-200 pl-3">
-                  {ticketNavigation.map(([label, href]) => (
+                  {ticketNavigation.map(([label, href, countKey]) => (
                     <Link
                       key={href}
                       href={href}
@@ -467,13 +528,14 @@ export function AppShell({ children }: { children: ReactNode }) {
                       className={`block rounded-md px-3 py-1.5 text-[11px] font-semibold transition ${pathname === href ? "bg-brand-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"}`}
                     >
                       {label}
+                      {getBadge(countKey) && <Badge count={getBadge(countKey)!} />}
                     </Link>
                   ))}
                 </div>
               )}
             </div>
           )}
-          {workspace === "it" && (
+          {workspace === "it" && sections.has("users") && (
             <div>
               <button
                 type="button"
@@ -484,11 +546,12 @@ export function AppShell({ children }: { children: ReactNode }) {
               >
                 <UserGroupIcon className="h-[17px] w-[17px]" />
                 <span className="flex-1 text-left">Users</span>
+                {getBadge("users") && <Badge count={getBadge("users")!} />}
                 <ChevronDownIcon className={`h-4 w-4 transition ${usersOpen ? "rotate-180" : ""}`} />
               </button>
               {usersOpen && (
                 <div className="mt-1 ml-4 space-y-0.5 border-l border-slate-200 pl-3">
-                  {userNavigation.map(([label, href]) => (
+                  {userNavigation.map(([label, href, countKey]) => (
                     <Link
                       key={href}
                       href={href}
@@ -496,13 +559,14 @@ export function AppShell({ children }: { children: ReactNode }) {
                       className={`block rounded-md px-3 py-1.5 text-[11px] font-semibold transition ${pathname === href ? "bg-brand-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"}`}
                     >
                       {label}
+                      {getBadge(countKey) && <Badge count={getBadge(countKey)!} />}
                     </Link>
                   ))}
                 </div>
               )}
             </div>
           )}
-          {workspace === "it" && (
+          {workspace === "it" && (sections.has("inventory") || sections.has("software")) && (
             <div>
               <button
                 type="button"
@@ -513,11 +577,14 @@ export function AppShell({ children }: { children: ReactNode }) {
               >
                 <FolderIcon className="h-[17px] w-[17px]" />
                 <span className="flex-1 text-left">Inventory</span>
+                {getBadge("inventory") && <Badge count={getBadge("inventory")!} />}
                 <ChevronDownIcon className={`h-4 w-4 transition ${inventoryOpen ? "rotate-180" : ""}`} />
               </button>
               {inventoryOpen && (
                 <div className="mt-1 ml-4 space-y-0.5 border-l border-slate-200 pl-3">
-                  {inventoryNavigation.map(([label, href]) => (
+                  {inventoryNavigation
+                    .filter(([label]) => sections.has(label === "Software Inventory" ? "software" : "inventory"))
+                    .map(([label, href, countKey]) => (
                     <Link
                       key={href}
                       href={href}
@@ -525,16 +592,20 @@ export function AppShell({ children }: { children: ReactNode }) {
                       className={`block rounded-md px-3 py-1.5 text-[11px] font-semibold transition ${pathname === href ? "bg-brand-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"}`}
                     >
                       {label}
+                      {getBadge(countKey) && <Badge count={getBadge(countKey)!} />}
                     </Link>
                   ))}
-                </div>
-              )}
-            </div>
+</div>
           )}
-          {(workspace === "it"
-            ? navigation.filter(([label]) => !["Dashboard", "Tickets", "Users", "Inventory"].includes(label))
+        </div>
+      )}
+      {(workspace === "it"
+            ? navigation.filter(
+                ([label]) =>
+                  !["Dashboard", "Tickets", "Users", "Inventory"].includes(label) && sections.has(LABEL_SECTION[label]),
+              )
             : navigation
-          ).map(([label, href, Icon]) => {
+          ).map(([label, href, , Icon]) => {
             const active = isActiveRoute(pathname, href);
             return (
               <Link
@@ -562,14 +633,22 @@ export function AppShell({ children }: { children: ReactNode }) {
               ? "Super Administrator"
               : workspace === "agent"
                 ? "IT Agent"
-                : "IT Administrator"}
+                : authenticatedUser.role === roles.SUB_ADMIN
+                  ? "Sub-admin"
+                  : authenticatedUser.role === roles.REPORTING_USER
+                    ? "Reporting User"
+                    : "IT Administrator"}
           </p>
           <p className="mt-1 text-[10px] leading-4 text-slate-500">
             {workspace === "super"
               ? "Platform-wide company and subscription controls."
               : workspace === "agent"
                 ? "Ticket, asset and inventory operations."
-                : "Organization-level ITAM operations."}
+                : authenticatedUser.role === roles.SUB_ADMIN
+                  ? "Administers the modules assigned to you."
+                  : authenticatedUser.role === roles.REPORTING_USER
+                    ? "Read-only dashboards and reports."
+                    : "Organization-level ITAM operations."}
           </p>
         </div>
       </aside>
@@ -606,27 +685,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             )}
           </div>
           <div className="ml-auto flex items-center gap-2.5">
-            <div className="relative">
-              <button
-                type="button"
-                aria-label="Notifications"
-                data-feedback="off"
-                onClick={() => setNotificationOpen((open) => !open)}
-                className="relative grid h-9 w-9 place-items-center rounded-lg text-slate-500 hover:bg-slate-100"
-              >
-                <BellIcon className="h-5 w-5" />
-                <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-rose-500" />
-              </button>
-              {notificationOpen && (
-                <div className="absolute right-0 top-11 w-72 rounded-xl border border-slate-200 bg-white p-3 text-xs shadow-xl">
-                  <p className="font-bold text-slate-800">Notifications</p>
-                  <p className="mt-2 leading-5 text-slate-500">
-                    No new notifications. Operational alerts will appear here when connected to the
-                    notification service.
-                  </p>
-                </div>
-              )}
-            </div>
+            <NotificationBell />
             <div className="relative">
               <button
                 type="button"

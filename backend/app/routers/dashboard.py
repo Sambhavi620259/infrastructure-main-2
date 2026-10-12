@@ -33,20 +33,21 @@ def get_dashboard_overview(
     maint_q = db.query(Maintenance)
     inv_q = db.query(InventoryItem)
 
-    if current_user.role != PlatformRole.SUPER_ADMIN:
+    # A Super Admin acting inside an organization sees that organization only.
+    if company_id:
         asset_q = asset_q.filter(Asset.company_id == company_id)
         req_q = req_q.filter(AssetRequest.company_id == company_id)
         maint_q = maint_q.filter(Maintenance.company_id == company_id)
         inv_q = inv_q.filter(InventoryItem.company_id == company_id)
 
     total_assets = asset_q.count()
-    assigned_assets = asset_q.filter(Asset.status == AssetStatusEnum.ASSIGNED).count()
+    assigned_assets = asset_q.filter(Asset.status.in_([AssetStatusEnum.ASSIGNED, AssetStatusEnum.IN_USE])).count()
     in_stock_assets = asset_q.filter(Asset.status == AssetStatusEnum.IN_STOCK).count()
     maintenance_assets = asset_q.filter(Asset.status == AssetStatusEnum.IN_REPAIR).count()
     pending_requests = req_q.filter(AssetRequest.status == RequestStatusEnum.PENDING).count()
 
     total_valuation = db.query(func.coalesce(func.sum(Asset.purchase_price), 0.0)).filter(
-        Asset.company_id == company_id if current_user.role != PlatformRole.SUPER_ADMIN else True
+        Asset.company_id == company_id if company_id else True
     ).scalar() or 0.0
 
     low_stock_alerts = inv_q.filter(InventoryItem.quantity <= InventoryItem.reorder_level).count()

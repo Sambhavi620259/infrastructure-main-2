@@ -53,16 +53,16 @@ export default function NewUserPage() {
     <main className="mx-auto max-w-4xl space-y-5">
       <header>
         <p className="text-[11px] font-bold uppercase tracking-wider text-brand-600">
-          Users \u00b7 Provisioning
+          Users · Provisioning
         </p>
         <h1 className="mt-1 text-2xl font-extrabold">Create user</h1>
         <p className="mt-1 text-sm text-slate-500">
-          Creates the account directly with the password you set. To invite an IT Agent to register themselves
-          instead, use the invite action on the{" "}
+          Creates the account in your organization with the password you set. IT Agents can also sign up
+          themselves; they then appear on the{" "}
           <Link href="/users" className="font-semibold text-brand-600 hover:text-brand-700">
             users list
-          </Link>
-          .
+          </Link>{" "}
+          for you to add.
         </p>
       </header>
 
@@ -119,7 +119,8 @@ export default function NewUserPage() {
               onChange={(event) => setRole(event.target.value)}
               className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-brand-500"
             >
-              {BACKEND_ROLES.map((value) => (
+              {/* Super Admin accounts are only created at registration. */}
+              {BACKEND_ROLES.filter((value) => value !== "SUPER_ADMIN").map((value) => (
                 <option key={value} value={value}>
                   {roleLabel(value)}
                 </option>
@@ -150,7 +151,7 @@ export default function NewUserPage() {
             <input
               name="location"
               className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-brand-500"
-              placeholder="e.g. Mumbai \u00b7 HQ"
+              placeholder="e.g. Mumbai · HQ"
             />
           </label>
         </div>
@@ -189,7 +190,7 @@ export default function NewUserPage() {
             disabled={submitting}
             className="rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {submitting ? "Creating\u2026" : "Create user"}
+            {submitting ? "Creating…" : "Create user"}
           </button>
         </div>
       </form>

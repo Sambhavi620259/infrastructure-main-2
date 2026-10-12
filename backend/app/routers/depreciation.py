@@ -37,10 +37,19 @@ def calculate_depreciation_for_asset(
             detail="Target asset not found."
         )
 
-    method = calc_in.method if calc_in and calc_in.method else getattr(asset, "depreciation_method", "STRAIGHT_LINE")
-    useful_years = calc_in.useful_life_years if calc_in and calc_in.useful_life_years else getattr(asset, "useful_life_years", 5)
-    salvage_val = calc_in.salvage_value if calc_in and calc_in.salvage_value is not None else getattr(asset, "salvage_value", 0.0)
-    asset_cost = getattr(asset, "purchase_price", getattr(asset, "cost", 0.0))
+    if calc_in:
+        if calc_in.method:
+            asset.depreciation_method = calc_in.method
+        if calc_in.useful_life_years:
+            asset.useful_life_years = calc_in.useful_life_years
+        if calc_in.salvage_value is not None:
+            asset.salvage_value = calc_in.salvage_value
+    if not asset.purchase_date:
+        raise HTTPException(status_code=400, detail="Set the asset's purchase date before calculating depreciation.")
+    method = asset.depreciation_method or "STRAIGHT_LINE"
+    useful_years = asset.useful_life_years or 5
+    salvage_val = float(asset.salvage_value or 0)
+    asset_cost = float(asset.purchase_price or 0)
 
     depreciation_result = calculate_asset_depreciation(
         purchase_cost=asset_cost,
@@ -97,11 +106,11 @@ def batch_recalculate_depreciation(
     updated_count = 0
 
     for asset in assets:
-        asset_cost = getattr(asset, "purchase_price", getattr(asset, "cost", None))
+        asset_cost = float(asset.purchase_price or 0)
         if asset_cost and asset.purchase_date:
-            method = getattr(asset, "depreciation_method", "STRAIGHT_LINE")
-            useful_years = getattr(asset, "useful_life_years", 5)
-            salvage_val = getattr(asset, "salvage_value", 0.0)
+            method = asset.depreciation_method or "STRAIGHT_LINE"
+            useful_years = asset.useful_life_years or 5
+            salvage_val = float(asset.salvage_value or 0)
 
             result = calculate_asset_depreciation(
                 purchase_cost=asset_cost,

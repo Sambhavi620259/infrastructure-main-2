@@ -426,6 +426,10 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_asset_categories_company_id'), table_name='asset_categories')
     op.drop_table('asset_categories')
     op.drop_table('companies')
+    # Enum types outlive their tables on PostgreSQL; drop them so the schema
+    # can be recreated after a full downgrade.
+    for enum_name in ('assetstatusenum', 'platformrole', 'requeststatusenum'):
+        sa.Enum(name=enum_name).drop(op.get_bind(), checkfirst=True)
     op.drop_index(op.f('ix_audit_logs_user_id'), table_name='audit_logs')
     op.drop_index(op.f('ix_audit_logs_timestamp'), table_name='audit_logs')
     op.drop_index(op.f('ix_audit_logs_company_id'), table_name='audit_logs')

@@ -28,7 +28,8 @@ def get_financial_summary(
 
     query = db.query(
         func.coalesce(func.sum(Asset.purchase_price), 0.0).label("total_purchase_cost"),
-        func.coalesce(func.sum(Asset.current_value), 0.0).label("net_book_value")
+        # Assets never depreciated are carried at purchase price.
+        func.coalesce(func.sum(func.coalesce(Asset.current_value, Asset.purchase_price)), 0.0).label("net_book_value")
     )
 
     if current_user.role != PlatformRole.SUPER_ADMIN:
@@ -65,7 +66,7 @@ def get_department_financial_breakdown(
         Department.name.label("department_name"),
         func.count(Asset.id).label("asset_count"),
         func.coalesce(func.sum(Asset.purchase_price), 0.0).label("total_cost"),
-        func.coalesce(func.sum(Asset.current_value), 0.0).label("current_value")
+        func.coalesce(func.sum(func.coalesce(Asset.current_value, Asset.purchase_price)), 0.0).label("current_value")
     ).outerjoin(Asset, Asset.department_id == Department.id)
 
     if current_user.role != PlatformRole.SUPER_ADMIN:

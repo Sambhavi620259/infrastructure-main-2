@@ -9,6 +9,7 @@ export const ASSET_STATUSES = [
   "DAMAGED",
   "LOST",
   "RETIRED",
+  "DISPOSED",
 ] as const;
 
 export type AssetStatus = (typeof ASSET_STATUSES)[number];
@@ -59,6 +60,22 @@ export interface AssetLifecycleEntry {
   timestamp: string;
 }
 
+/** Mirrors AssetEventResponse: a lifecycle entry with asset and user names. */
+export interface AssetEvent extends AssetLifecycleEntry {
+  asset_tag: string;
+  asset_name: string;
+  performed_by_name: string | null;
+}
+
+/** Mirrors AssetCountsResponse. */
+export interface AssetCounts {
+  total: number;
+  in_stock: number;
+  assigned: number;
+  in_repair: number;
+  by_status: Record<AssetStatus, number>;
+}
+
 /** The `metrics` object returned by GET /api/dashboard/overview. */
 export interface DashboardMetrics {
   total_assets: number;
@@ -81,6 +98,7 @@ const STATUS_LABEL: Record<AssetStatus, string> = {
   DAMAGED: "Damaged",
   LOST: "Lost",
   RETIRED: "Retired",
+  DISPOSED: "Disposed",
 };
 
 const STATUS_STYLE: Record<AssetStatus, string> = {
@@ -94,6 +112,7 @@ const STATUS_STYLE: Record<AssetStatus, string> = {
   DAMAGED: "bg-rose-50 text-rose-700 ring-rose-600/20",
   LOST: "bg-rose-50 text-rose-700 ring-rose-600/20",
   RETIRED: "bg-slate-100 text-slate-600 ring-slate-500/20",
+  DISPOSED: "bg-slate-200 text-slate-700 ring-slate-500/20",
 };
 
 const UNKNOWN_STATUS_STYLE = "bg-slate-100 text-slate-600 ring-slate-500/20";
@@ -108,8 +127,8 @@ export function assetStatusStyle(status: string): string {
 }
 
 export function formatDate(value: string | null): string {
-  if (!value) return "\u2014";
+  if (!value) return "—";
   const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "\u2014";
+  if (Number.isNaN(parsed.getTime())) return "—";
   return parsed.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
 }

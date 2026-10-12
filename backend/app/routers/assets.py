@@ -1,21 +1,132 @@
 """Implementation file: app/routers/assets.py"""
 from typing import Dict, List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from datetime import datetime
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status, WebSocket, WebSocketDisconnect
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.deps import get_current_user, require_roles, get_tenant_company_id
+from app.core.deps import get_current_user, require_roles, get_tenant_company_id, user_from_token
 from app.models.models import (
-    Asset, AssetCategory, AssetAssignment, AssetLifecycle,
+    Asset, AssetCategory, AssetAssignment, AssetLifecycle, Department, Vendor,
     AssetStatusEnum, PlatformRole, User, Subscription
 )
 from app.schemas.schemas import (
     AssetCreate, AssetResponse, AssetUpdate, AssetAssignRequest,
-    AssetCategoryCreate, AssetCategoryResponse, AssetLifecycleResponse
+    AssetCategoryCreate, AssetCategoryResponse, AssetLifecycleResponse,
+    AssetCountsResponse, AssetEventResponse
 )
 from app.services.audit_service import log_audit_event
+from app.services.usage_alerts import check_usage_limits
+from app.services.notification_service import home_link, notify
 
 router = APIRouter(prefix="/assets", tags=["Asset Management"])
+
+# Day-to-day asset work (assign, unassign, status) is open to IT Agents, who
+# are stored with the EMPLOYEE role; registering and editing asset records is not.
+_operators = require_roles([
+    PlatformRole.SUPER_ADMIN, PlatformRole.IT_ADMIN, PlatformRole.SUB_ADMIN, PlatformRole.EMPLOYEE,
+])
+# Fields an IT Agent may change through PUT /assets/{id}.
+_AGENT_EDITABLE_FIELDS = {"status", "status_remarks", "condition", "location_id"}
+
+# Statuses in which someone holds the asset, so it can be unassigned.
+_HELD_STATUSES = {AssetStatusEnum.ASSIGNED, AssetStatusEnum.IN_USE, AssetStatusEnum.RETURN_REQUESTED}
+
+# Moving an asset into one of these means nobody holds it any more.
+_RELEASES_ASSIGNMENT = {
+    AssetStatusEnum.IN_STOCK,
+    AssetStatusEnum.RETURNED,
+    AssetStatusEnum.RETIRED,
+    AssetStatusEnum.DISPOSED,
+}
+
+
+# WebSocket connection manager for real-time updates
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: Dict[str, List[WebSocket]] = {}
+
+    async def connect(self, company_id: str, websocket: WebSocket):
+        await websocket.accept()
+        if company_id not in self.active_connections:
+            self.active_connections[company_id] = []
+        self.active_connections[company_id].append(websocket)
+
+    def disconnect(self, company_id: str, websocket: WebSocket):
+        if company_id in self.active_connections:
+            self.active_connections[company_id].remove(websocket)
+            if not self.active_connections[company_id]:
+                del self.active_connections[company_id]
+
+    async def broadcast_to_company(self, company_id: str, message: dict):
+        if company_id in self.active_connections:
+            disconnected = []
+            for connection in self.active_connections[company_id]:
+                try:
+                    await connection.send_json(message)
+                except:
+                    disconnected.append(connection)
+            for conn in disconnected:
+                self.disconnect(company_id, conn)
+
+
+manager = ConnectionManager()
+
+
+@router.websocket("/ws/{company_id}")
+async def asset_websocket(
+    websocket: WebSocket,
+    company_id: str,
+    token: Optional[str] = Query(None),
+    db: Session = Depends(get_db)
+):
+    """
+    WebSocket endpoint for real-time asset updates.
+    Browsers cannot set headers on a WebSocket, so the JWT comes as ?token=.
+    """
+    user = user_from_token(token, db)
+    if user is None:
+        await websocket.accept()  # so the browser receives the close code
+        await websocket.close(code=4401, reason="Not authenticated")
+        return
+    if user.role != PlatformRole.SUPER_ADMIN and user.company_id != company_id:
+        await websocket.accept()  # so the browser receives the close code
+        await websocket.close(code=4403, reason="Not allowed for this company")
+        return
+
+    await manager.connect(company_id, websocket)
+    try:
+        while True:
+            # Keep connection alive, listen for client messages (ping/pong)
+            data = await websocket.receive_text()
+            # Echo back for heartbeat
+            await websocket.send_text(f"pong: {data}")
+    except WebSocketDisconnect:
+        manager.disconnect(company_id, websocket)
+
+
+# Helper to broadcast asset changes
+async def broadcast_asset_update(company_id: str, event: str, asset_data: dict):
+    """Call this after asset mutations to notify WebSocket clients."""
+    await manager.broadcast_to_company(company_id, {
+        "event": event,
+        "asset": asset_data,
+        "timestamp": datetime.utcnow().isoformat()
+    })
+
+
+def _queue_broadcast(background_tasks: BackgroundTasks, event: str, response: AssetResponse) -> None:
+    """
+    Schedule a WebSocket broadcast to run after the response is sent.
+
+    These endpoints are sync, so FastAPI runs them in a worker thread with no
+    event loop; asyncio.create_task would raise there. BackgroundTasks runs the
+    coroutine on the main loop instead.
+    """
+    background_tasks.add_task(
+        broadcast_asset_update, response.company_id, event, response.model_dump(mode="json")
+    )
 
 
 def _active_assignees(db: Session, asset_ids: List[str]) -> Dict[str, User]:
@@ -39,6 +150,21 @@ def _active_assignees(db: Session, asset_ids: List[str]) -> Dict[str, User]:
     return {asset_id: user for asset_id, user in rows}
 
 
+def _check_references(db: Session, company_id: str, data: dict) -> None:
+    """Department and vendor must belong to the asset's organization; warranty must end after it starts."""
+    if data.get("department_id") and not db.query(Department.id).filter(
+        Department.id == data["department_id"], Department.company_id == company_id
+    ).first():
+        raise HTTPException(status_code=400, detail="Unknown department.")
+    if data.get("vendor_id") and not db.query(Vendor.id).filter(
+        Vendor.id == data["vendor_id"], Vendor.company_id == company_id
+    ).first():
+        raise HTTPException(status_code=400, detail="Unknown vendor.")
+    start, end = data.get("warranty_start"), data.get("warranty_end")
+    if start and end and end < start:
+        raise HTTPException(status_code=400, detail="Warranty end must be after warranty start.")
+
+
 def _with_assignee(asset: Asset, assignee: Optional[User]) -> AssetResponse:
     """Build the response and attach the current holder, when there is one."""
     response = AssetResponse.model_validate(asset)
@@ -55,19 +181,28 @@ def _with_assignee(asset: Asset, assignee: Optional[User]) -> AssetResponse:
 def create_asset_category(
     category_in: AssetCategoryCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles([PlatformRole.SUPER_ADMIN, PlatformRole.IT_ADMIN, PlatformRole.SUB_ADMIN])),
+    current_user: User = Depends(_operators),
     tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
 ):
     """
-    Create a new asset category for item classification.
+    Create a new asset category for item classification. IT Agents may add
+    one while raising a ticket.
     """
     company_id = tenant_company_id or current_user.company_id
     if not company_id:
         raise HTTPException(status_code=400, detail="Company context required.")
 
+    name = category_in.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Category name is required.")
+    if db.query(AssetCategory.id).filter(
+        AssetCategory.company_id == company_id, func.lower(AssetCategory.name) == name.lower()
+    ).first():
+        raise HTTPException(status_code=400, detail=f"A category named '{name}' already exists.")
+
     category = AssetCategory(
         company_id=company_id,
-        name=category_in.name,
+        name=name,
         description=category_in.description
     )
     db.add(category)
@@ -88,7 +223,7 @@ def list_asset_categories(
     query = db.query(AssetCategory)
     if current_user.role != PlatformRole.SUPER_ADMIN:
         query = query.filter(AssetCategory.company_id == tenant_company_id)
-    return query.all()
+    return query.order_by(AssetCategory.name).all()
 
 
 # --- Asset CRUD Operations ---
@@ -96,6 +231,7 @@ def list_asset_categories(
 @router.post("", response_model=AssetResponse, status_code=status.HTTP_201_CREATED)
 def create_asset(
     asset_in: AssetCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles([PlatformRole.SUPER_ADMIN, PlatformRole.IT_ADMIN, PlatformRole.SUB_ADMIN])),
     tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
@@ -116,6 +252,8 @@ def create_asset(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Asset limit ({subscription.asset_limit}) for this organization subscription has been reached."
             )
+
+    _check_references(db, company_id, asset_in.model_dump())
 
     # Check unique constraint on Tag and Serial Number
     duplicate = db.query(Asset).filter(
@@ -163,6 +301,7 @@ def create_asset(
         remarks="Initial asset creation and registration."
     )
     db.add(lifecycle)
+    check_usage_limits(db, company_id)
     db.commit()
     db.refresh(asset)
 
@@ -176,7 +315,10 @@ def create_asset(
         new_value=f"Tag: {asset.asset_tag}, Name: {asset.name}"
     )
 
-    return asset
+    # A new asset has no assignment yet.
+    response = _with_assignee(asset, None)
+    _queue_broadcast(background_tasks, "ASSET_CREATED", response)
+    return response
 
 
 @router.get("", response_model=List[AssetResponse])
@@ -187,12 +329,14 @@ def list_assets(
     category: Optional[str] = None,
     department_id: Optional[str] = None,
     search: Optional[str] = None,
+    assigned_to: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
 ):
     """
     List assets with multi-parameter filtering and search capability.
+    assigned_to limits it to assets a given user currently holds.
     """
     query = db.query(Asset)
     if current_user.role != PlatformRole.SUPER_ADMIN:
@@ -212,9 +356,89 @@ def list_assets(
             (Asset.serial_number.ilike(search_fmt))
         )
 
+    if assigned_to:
+        query = query.join(AssetAssignment, AssetAssignment.asset_id == Asset.id).filter(
+            AssetAssignment.user_id == assigned_to, AssetAssignment.is_active.is_(True)
+        )
+
     assets = query.offset(skip).limit(limit).all()
     assignees = _active_assignees(db, [asset.id for asset in assets])
     return [_with_assignee(asset, assignees.get(asset.id)) for asset in assets]
+
+
+@router.get("/counts", response_model=AssetCountsResponse)
+def get_asset_counts(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
+):
+    """
+    Get asset counts for dashboard badges, plus a count for every status.
+    """
+    company_id = tenant_company_id or current_user.company_id
+    if not company_id and current_user.role != PlatformRole.SUPER_ADMIN:
+        raise HTTPException(status_code=400, detail="Company context required")
+
+    query = db.query(Asset.status, func.count()).group_by(Asset.status)
+    if current_user.role != PlatformRole.SUPER_ADMIN:
+        query = query.filter(Asset.company_id == company_id)
+
+    by_status = {value.value: 0 for value in AssetStatusEnum}
+    for asset_status, count in query.all():
+        by_status[asset_status.value] = count
+
+    return AssetCountsResponse(
+        total=sum(by_status.values()),
+        in_stock=by_status[AssetStatusEnum.IN_STOCK.value],
+        assigned=by_status[AssetStatusEnum.ASSIGNED.value],
+        in_repair=by_status[AssetStatusEnum.IN_REPAIR.value],
+        by_status=by_status,
+    )
+
+
+@router.get("/events", response_model=List[AssetEventResponse])
+def list_asset_events(
+    search: Optional[str] = None,
+    action: Optional[str] = None,
+    date_from: Optional[datetime] = None,
+    date_to: Optional[datetime] = None,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=1000),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
+):
+    """
+    Company-wide lifecycle events (creation, assignment, status changes), newest
+    first, with the asset and performing user attached.
+    """
+    query = (
+        db.query(AssetLifecycle, Asset.asset_tag, Asset.name, User.full_name)
+        .join(Asset, Asset.id == AssetLifecycle.asset_id)
+        .outerjoin(User, User.id == AssetLifecycle.performed_by)
+    )
+    if current_user.role != PlatformRole.SUPER_ADMIN:
+        query = query.filter(AssetLifecycle.company_id == tenant_company_id)
+    if action:
+        query = query.filter(AssetLifecycle.action == action)
+    if date_from:
+        query = query.filter(AssetLifecycle.timestamp >= date_from)
+    if date_to:
+        query = query.filter(AssetLifecycle.timestamp <= date_to)
+    if search:
+        search_fmt = f"%{search}%"
+        query = query.filter(Asset.name.ilike(search_fmt) | Asset.asset_tag.ilike(search_fmt))
+
+    rows = query.order_by(AssetLifecycle.timestamp.desc()).offset(skip).limit(limit).all()
+    return [
+        AssetEventResponse(
+            **AssetLifecycleResponse.model_validate(entry).model_dump(),
+            asset_tag=asset_tag,
+            asset_name=asset_name,
+            performed_by_name=performed_by_name,
+        )
+        for entry, asset_tag, asset_name, performed_by_name in rows
+    ]
 
 
 @router.get("/{asset_id}", response_model=AssetResponse)
@@ -241,8 +465,9 @@ def get_asset(
 def update_asset(
     asset_id: str,
     asset_in: AssetUpdate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles([PlatformRole.SUPER_ADMIN, PlatformRole.IT_ADMIN, PlatformRole.SUB_ADMIN])),
+    current_user: User = Depends(_operators),
     tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
 ):
     """
@@ -257,12 +482,41 @@ def update_asset(
         raise HTTPException(status_code=404, detail="Asset not found.")
 
     old_status = asset.status.value
-    update_data = asset_in.dict(exclude_unset=True)
+    update_data = asset_in.model_dump(exclude_unset=True)
+    if current_user.role == PlatformRole.EMPLOYEE:
+        blocked = sorted(set(update_data) - _AGENT_EDITABLE_FIELDS)
+        if blocked:
+            raise HTTPException(
+                status_code=403,
+                detail=f"IT Agents can change status, condition and location only (not: {', '.join(blocked)})."
+            )
+    status_remarks = update_data.pop("status_remarks", None)
+    _check_references(db, asset.company_id, {
+        "department_id": update_data.get("department_id"),
+        "vendor_id": update_data.get("vendor_id"),
+        "warranty_start": update_data.get("warranty_start", asset.warranty_start),
+        "warranty_end": update_data.get("warranty_end", asset.warranty_end),
+    })
+    status_changed = asset_in.status is not None and asset_in.status.value != old_status
+
+    # Assignment lives in asset_assignments, so a bare status edit would claim
+    # the asset is assigned with no holder on record.
+    if status_changed and asset_in.status == AssetStatusEnum.ASSIGNED:
+        raise HTTPException(
+            status_code=400,
+            detail="Use POST /assets/{id}/assign to assign an asset to a user."
+        )
 
     for field, value in update_data.items():
         setattr(asset, field, value)
 
-    if asset_in.status and asset_in.status.value != old_status:
+    if status_changed:
+        if asset.status in _RELEASES_ASSIGNMENT:
+            db.query(AssetAssignment).filter(
+                AssetAssignment.asset_id == asset.id,
+                AssetAssignment.is_active.is_(True)
+            ).update({"is_active": False, "returned_at": datetime.utcnow()})
+
         lifecycle = AssetLifecycle(
             company_id=asset.company_id,
             asset_id=asset.id,
@@ -270,7 +524,7 @@ def update_asset(
             previous_status=old_status,
             new_status=asset.status.value,
             performed_by=current_user.id,
-            remarks=f"Asset status updated manually from {old_status} to {asset.status.value}."
+            remarks=status_remarks or f"Asset status updated manually from {old_status} to {asset.status.value}."
         )
         db.add(lifecycle)
 
@@ -284,19 +538,22 @@ def update_asset(
         company_id=asset.company_id,
         user_id=current_user.id,
         entity_id=asset.id,
-        old_value=f"Status: {old_status}",
-        new_value=f"Status: {asset.status.value}"
+        old_value=f"{asset.asset_tag} status: {old_status}",
+        new_value=f"{asset.asset_tag} status: {asset.status.value}"
     )
 
-    return asset
+    response = _with_assignee(asset, _active_assignees(db, [asset.id]).get(asset.id))
+    _queue_broadcast(background_tasks, "ASSET_UPDATED", response)
+    return response
 
 
 @router.post("/{asset_id}/assign", response_model=AssetResponse)
 def assign_asset_to_user(
     asset_id: str,
     assign_in: AssetAssignRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles([PlatformRole.SUPER_ADMIN, PlatformRole.IT_ADMIN, PlatformRole.SUB_ADMIN])),
+    current_user: User = Depends(_operators),
     tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
 ):
     """
@@ -316,7 +573,12 @@ def assign_asset_to_user(
             detail=f"Asset cannot be assigned because its status is currently {asset.status.value}."
         )
 
-    target_user = db.query(User).filter(User.id == assign_in.user_id, User.status == "ACTIVE").first()
+    # The holder must be an active user of the asset's own organization.
+    target_user = db.query(User).filter(
+        User.id == assign_in.user_id,
+        User.status == "ACTIVE",
+        User.company_id == asset.company_id,
+    ).first()
     if not target_user:
         raise HTTPException(status_code=404, detail="Target active user not found.")
 
@@ -346,6 +608,13 @@ def assign_asset_to_user(
         remarks=f"Assigned directly to user {target_user.full_name} ({target_user.email})."
     )
     db.add(lifecycle)
+    if target_user.id != current_user.id:
+        notify(
+            db, target_user,
+            title=f"{asset.name} ({asset.asset_tag}) was assigned to you",
+            message=f"Assigned by {current_user.full_name}.",
+            link=home_link(target_user, f"/assets/{asset.id}", "/agent/assets"),
+        )
 
     db.commit()
     db.refresh(asset)
@@ -357,17 +626,20 @@ def assign_asset_to_user(
         company_id=asset.company_id,
         user_id=current_user.id,
         entity_id=asset.id,
-        new_value=f"Assigned To User ID: {target_user.id}"
+        new_value=f"{asset.asset_tag} assigned to {target_user.full_name}"
     )
 
-    return _with_assignee(asset, target_user)
+    response = _with_assignee(asset, target_user)
+    _queue_broadcast(background_tasks, "ASSET_ASSIGNED", response)
+    return response
 
 
 @router.post("/{asset_id}/unassign", response_model=AssetResponse)
 def unassign_asset(
     asset_id: str,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles([PlatformRole.SUPER_ADMIN, PlatformRole.IT_ADMIN, PlatformRole.SUB_ADMIN])),
+    current_user: User = Depends(_operators),
     tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
 ):
     """
@@ -380,6 +652,12 @@ def unassign_asset(
     asset = query.first()
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found.")
+
+    held = db.query(AssetAssignment.id).filter(
+        AssetAssignment.asset_id == asset.id, AssetAssignment.is_active == True
+    ).first()
+    if not held and asset.status not in _HELD_STATUSES:
+        raise HTTPException(status_code=400, detail="This asset is not assigned to anyone.")
 
     old_status = asset.status.value
     asset.status = AssetStatusEnum.IN_STOCK
@@ -403,7 +681,20 @@ def unassign_asset(
     db.commit()
     db.refresh(asset)
 
-    return asset
+    log_audit_event(
+        db=db,
+        action="UNASSIGN_ASSET",
+        entity="Asset",
+        company_id=asset.company_id,
+        user_id=current_user.id,
+        entity_id=asset.id,
+        new_value=f"Returned to stock: {asset.asset_tag}"
+    )
+
+    # The active assignment was just closed, so there is no holder.
+    response = _with_assignee(asset, None)
+    _queue_broadcast(background_tasks, "ASSET_UNASSIGNED", response)
+    return response
 
 
 @router.get("/{asset_id}/lifecycle", response_model=List[AssetLifecycleResponse])
@@ -416,8 +707,10 @@ def get_asset_lifecycle_history(
     """
     Retrieve complete lifecycle history audit for a specific asset.
     """
-    query = db.query(AssetLifecycle).filter(AssetLifecycle.asset_id == asset_id)
+    asset_query = db.query(Asset.id).filter(Asset.id == asset_id)
     if current_user.role != PlatformRole.SUPER_ADMIN:
-        query = query.filter(AssetLifecycle.company_id == tenant_company_id)
-
+        asset_query = asset_query.filter(Asset.company_id == tenant_company_id)
+    if not asset_query.first():
+        raise HTTPException(status_code=404, detail="Asset not found.")
+    query = db.query(AssetLifecycle).filter(AssetLifecycle.asset_id == asset_id)
     return query.order_by(AssetLifecycle.timestamp.desc()).all()

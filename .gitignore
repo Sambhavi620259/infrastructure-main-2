@@ -2,6 +2,9 @@ node_modules
 .next
 .env*
 !.env.example
+!.env.production.example
+!backend/.env.example
+.next-*/
 *.tsbuildinfo
 .venv/
 __pycache__/
@@ -9,3 +12,4 @@ __pycache__/
 .DS_Store
 CHANGES-REQUESTED.md
 PRODUCTION_REQUIREMENTS.md
+backups/

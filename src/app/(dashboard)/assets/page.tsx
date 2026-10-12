@@ -73,10 +73,10 @@ export default function AssetsPage() {
   }, []);
 
   const tiles: [string, string, string][] = [
-    [metrics ? String(metrics.total_assets) : "\u2014", "Total assets", "Across your organization"],
-    [metrics ? String(metrics.assigned_assets) : "\u2014", "Assigned", "Currently with a user"],
-    [metrics ? String(metrics.in_stock_assets) : "\u2014", "In stock", "Ready for deployment"],
-    [metrics ? String(metrics.under_maintenance) : "\u2014", "Under maintenance", "Currently in repair"],
+    [metrics ? String(metrics.total_assets) : "—", "Total assets", "Across your organization"],
+    [metrics ? String(metrics.assigned_assets) : "—", "Assigned", "Currently with a user"],
+    [metrics ? String(metrics.in_stock_assets) : "—", "In stock", "Ready for deployment"],
+    [metrics ? String(metrics.under_maintenance) : "—", "Under maintenance", "Currently in repair"],
   ];
 
   return (
@@ -119,7 +119,7 @@ export default function AssetsPage() {
           <div>
             <h2 className="font-semibold text-slate-900">Asset inventory</h2>
             <p className="mt-1 text-sm text-slate-500">
-              {loading ? "Loading\u2026" : `${assets.length} shown on this page`}
+              {loading ? "Loading…" : `${assets.length} shown on this page`}
             </p>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row">
@@ -173,7 +173,7 @@ export default function AssetsPage() {
                     <p className="font-semibold text-slate-800">{asset.name}</p>
                     <p className="mt-0.5 text-sm text-slate-500">
                       {asset.asset_tag}
-                      {asset.model ? ` \u00b7 ${asset.model}` : ""}
+                      {asset.model ? ` · ${asset.model}` : ""}
                     </p>
                   </td>
                   <td className="px-6 py-4 text-sm text-slate-700">{asset.category}</td>

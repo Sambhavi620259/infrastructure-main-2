@@ -29,16 +29,7 @@ def create_vendor(
             detail="Valid company context is required."
         )
 
-    vendor = Vendor(
-        company_id=company_id,
-        name=vendor_in.name,
-        contact_person=vendor_in.contact_person,
-        email=vendor_in.email,
-        phone=vendor_in.phone,
-        address=vendor_in.address,
-        website=vendor_in.website,
-        notes=vendor_in.notes
-    )
+    vendor = Vendor(company_id=company_id, **vendor_in.model_dump())
     db.add(vendor)
     db.commit()
     db.refresh(vendor)

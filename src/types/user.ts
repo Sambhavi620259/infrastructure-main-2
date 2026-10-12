@@ -30,6 +30,8 @@ export interface AppUser {
   company_id: string | null;
   email: string;
   full_name: string;
+  /** Generated for IT Agents, e.g. RAHULSHARMA01. */
+  agent_id: string | null;
   role: string;
   location: string | null;
   department_id: string | null;
@@ -47,6 +49,8 @@ export interface Department {
   description: string | null;
   department_head: string | null;
   status: string | null;
+  user_count: number;
+  asset_count: number;
 }
 
 /**
@@ -59,7 +63,7 @@ const ROLE_LABEL: Record<string, string> = {
   IT_ADMIN: "IT Admin",
   SUB_ADMIN: "Sub Admin",
   REPORTING_USER: "Reporting User",
-  EMPLOYEE: "Employee",
+  EMPLOYEE: "IT Agent",
   HAM_ADMIN: "HAM Admin",
   SAM_ADMIN: "SAM Admin",
   CLOUD_ADMIN: "Cloud Admin",

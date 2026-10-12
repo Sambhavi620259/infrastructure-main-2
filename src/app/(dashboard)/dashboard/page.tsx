@@ -11,6 +11,8 @@ import {
   PrinterIcon,
 } from "@heroicons/react/24/outline";
 import { listAssets, getDashboardMetrics } from "@/lib/assets";
+import { sectionsFor } from "@/lib/access";
+import { getProfile } from "@/lib/profile";
 import { assetStatusLabel, assetStatusStyle, type Asset, type DashboardMetrics } from "@/types/asset";
 
 const categoryIcon: Record<string, typeof CubeIcon> = {
@@ -30,6 +32,17 @@ export default function DashboardPage() {
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [canAddAssets, setCanAddAssets] = useState(false);
+
+  useEffect(() => {
+    getProfile()
+      .then((profile) =>
+        setCanAddAssets(
+          profile.role !== "REPORTING_USER" && sectionsFor(profile.role, profile.modules).has("assets"),
+        ),
+      )
+      .catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     const timer = setTimeout(() => setSearch(query), 300);
@@ -71,21 +84,16 @@ export default function DashboardPage() {
   }, []);
 
   const tiles: [string, string, typeof CubeIcon, string][] = [
-    [
-      "Total assets",
-      metrics ? String(metrics.total_assets) : "\u2014",
-      CubeIcon,
-      "text-brand-600 bg-blue-50",
-    ],
+    ["Total assets", metrics ? String(metrics.total_assets) : "—", CubeIcon, "text-brand-600 bg-blue-50"],
     [
       "Assigned",
-      metrics ? String(metrics.assigned_assets) : "\u2014",
+      metrics ? String(metrics.assigned_assets) : "—",
       CheckCircleIcon,
       "text-emerald-600 bg-emerald-50",
     ],
     [
       "Under maintenance",
-      metrics ? String(metrics.under_maintenance) : "\u2014",
+      metrics ? String(metrics.under_maintenance) : "—",
       WrenchScrewdriverIcon,
       "text-amber-600 bg-amber-50",
     ],
@@ -96,19 +104,21 @@ export default function DashboardPage() {
       <header className="flex flex-col gap-3 border-b border-slate-200 pb-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-brand-600">
-            IT Admin \u00b7 Asset management
+            IT Admin · Asset management
           </p>
           <h1 className="mt-1 text-3xl font-extrabold tracking-tight text-slate-950">All Assets</h1>
           <p className="mt-1 text-sm text-slate-500">
             Manage and track all your organization assets in one place.
           </p>
         </div>
-        <Link
-          href="/assets/new"
-          className="inline-flex items-center justify-center rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-brand-700"
-        >
-          Add new asset
-        </Link>
+        {canAddAssets && (
+          <Link
+            href="/assets/new"
+            className="inline-flex items-center justify-center rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-brand-700"
+          >
+            Add new asset
+          </Link>
+        )}
       </header>
 
       {error && (
@@ -142,7 +152,7 @@ export default function DashboardPage() {
           <div>
             <h2 className="text-lg font-extrabold text-slate-950">Assets List</h2>
             <p className="mt-0.5 text-xs text-slate-500">
-              {loading ? "Loading\u2026" : `Showing the ${assets.length} most recent`}
+              {loading ? "Loading…" : `Showing the ${assets.length} most recent`}
             </p>
           </div>
           <input
@@ -207,7 +217,7 @@ export default function DashboardPage() {
 
         <footer className="border-t border-slate-200 px-5 py-4 text-sm text-slate-500">
           <Link href="/assets" className="font-bold text-brand-600 hover:text-brand-700">
-            View all assets \u2192
+            View all assets →
           </Link>
         </footer>
       </section>

@@ -30,7 +30,6 @@ export const routes = {
   agentDashboard: "/agent/dashboard",
   agentAssets: "/agent/assets",
   agentTickets: "/agent/tickets",
-  agentUsers: "/agent/users",
   agentInventory: "/agent/inventory",
   agentReports: "/agent/reports",
   agentSettings: "/agent/settings",

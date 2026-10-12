@@ -18,16 +18,18 @@ export default function AssetAssignmentPage() {
 
   const load = useCallback(() => {
     setLoading(true);
-    // The list endpoint takes one status at a time, so assignable stock is two calls.
+    // The list endpoint takes one status at a time, so each status is its own call.
     Promise.all([
       listAssets({ status: "IN_STOCK", limit: 200 }),
       listAssets({ status: "REQUESTED", limit: 200 }),
       listAssets({ status: "ASSIGNED", limit: 200 }),
+      listAssets({ status: "IN_USE", limit: 200 }),
+      listAssets({ status: "RETURN_REQUESTED", limit: 200 }),
       listUsers({ limit: 200 }),
     ])
-      .then(([inStock, requested, current, people]) => {
+      .then(([inStock, requested, assignedNow, inUse, returning, people]) => {
         setAssignable([...inStock, ...requested]);
-        setAssigned(current);
+        setAssigned([...assignedNow, ...inUse, ...returning]);
         setUsers(people.filter((user) => user.status.toUpperCase() === "ACTIVE"));
         setError("");
       })
@@ -79,7 +81,7 @@ export default function AssetAssignmentPage() {
     <main className="mx-auto max-w-7xl space-y-5">
       <header>
         <p className="text-[11px] font-bold uppercase tracking-wider text-brand-600">
-          Assets \u00b7 Assignment
+          Assets · Assignment
         </p>
         <h1 className="mt-1 text-2xl font-extrabold tracking-tight text-slate-950">Asset Assignment</h1>
         <p className="mt-1 text-sm text-slate-500">Hand a device to someone, or take it back into stock.</p>
@@ -101,7 +103,7 @@ export default function AssetAssignmentPage() {
         >
           <span>{notice}</span>
           <button type="button" onClick={() => setNotice("")} className="font-bold" aria-label="Dismiss">
-            \u00d7
+            ×
           </button>
         </div>
       )}
@@ -129,7 +131,7 @@ export default function AssetAssignmentPage() {
               </option>
               {assignable.map((asset) => (
                 <option key={asset.id} value={asset.id}>
-                  {asset.name} \u00b7 {asset.asset_tag}
+                  {asset.name} · {asset.asset_tag}
                 </option>
               ))}
             </select>
@@ -149,7 +151,7 @@ export default function AssetAssignmentPage() {
               </option>
               {users.map((user) => (
                 <option key={user.id} value={user.id}>
-                  {user.full_name} \u00b7 {user.email}
+                  {user.full_name} · {user.email}
                 </option>
               ))}
             </select>
@@ -160,7 +162,7 @@ export default function AssetAssignmentPage() {
             disabled={loading || busyId !== "" || assignable.length === 0 || users.length === 0}
             className="rounded-lg bg-brand-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {busyId ? "Working\u2026" : "Assign asset"}
+            {busyId ? "Working…" : "Assign asset"}
           </button>
         </form>
       </section>
@@ -170,7 +172,7 @@ export default function AssetAssignmentPage() {
           <h2 className="text-base font-extrabold text-slate-900">Currently assigned</h2>
           <p className="mt-0.5 text-xs text-slate-500">
             {loading
-              ? "Loading\u2026"
+              ? "Loading…"
               : `${assigned.length} device${assigned.length === 1 ? "" : "s"} out with someone`}
           </p>
         </div>
@@ -221,7 +223,7 @@ export default function AssetAssignmentPage() {
                       disabled={busyId !== ""}
                       className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                     >
-                      {busyId === asset.id ? "Working\u2026" : "Unassign"}
+                      {busyId === asset.id ? "Working…" : "Unassign"}
                     </button>
                   </td>
                 </tr>
@@ -237,7 +239,7 @@ export default function AssetAssignmentPage() {
 
       <p>
         <Link href="/assets" className="text-sm font-bold text-brand-600 hover:text-brand-700">
-          \u2190 Back to all assets
+          ← Back to all assets
         </Link>
       </p>
     </main>

@@ -1,208 +1,208 @@
 "use client";
 
-import { useState } from "react";
-import { PencilSquareIcon, PlusIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { useEffect, useState, type FormEvent } from "react";
+import { createSuperAdmin, formatDay, listSuperAdmins, setSuperAdminActive } from "@/lib/super-admin";
+import { getProfile } from "@/lib/profile";
+import { initialsOf, statusBadgeClass, type AppUser } from "@/types/user";
 
-type Admin = { name: string; email: string; access: string; scope: string; status: "Active" | "Invited" };
-const initialAdmins: Admin[] = [
-  {
-    name: "Alex Verma",
-    email: "alex@boldandwise.com",
-    access: "Platform Owner",
-    scope: "All tenants",
-    status: "Active",
-  },
-  {
-    name: "Riya Mehta",
-    email: "riya@boldandwise.com",
-    access: "Billing Admin",
-    scope: "All tenants",
-    status: "Active",
-  },
-  {
-    name: "Karan Singh",
-    email: "karan@boldandwise.com",
-    access: "Support Admin",
-    scope: "42 tenants",
-    status: "Active",
-  },
-  {
-    name: "Maya Shah",
-    email: "maya@boldandwise.com",
-    access: "Security Admin",
-    scope: "All tenants",
-    status: "Invited",
-  },
-];
-
-export default function AdminsPage() {
-  const [admins, setAdmins] = useState(initialAdmins);
-  const [dialogOpen, setDialogOpen] = useState(false);
+export default function PlatformAdminsPage() {
+  const [admins, setAdmins] = useState<AppUser[]>([]);
+  const [meId, setMeId] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [editing, setEditing] = useState<Admin | null>(null);
-  const closeDialog = () => {
-    setDialogOpen(false);
-    setEditing(null);
-  };
-  const saveAdmin = (formData: FormData) => {
-    const name = String(formData.get("name") || "").trim();
-    const email = String(formData.get("email") || "").trim();
-    const access = String(formData.get("access") || "Support Admin");
-    if (editing) {
-      setAdmins((current) =>
-        current.map((admin) => (admin.email === editing.email ? { ...admin, name, email, access } : admin)),
-      );
-      setNotice(`${name}'s platform access has been updated.`);
-    } else {
-      setAdmins((current) => [...current, { name, email, access, scope: "All tenants", status: "Invited" }]);
-      setNotice(`Invitation created for ${name}.`);
+  const [formOpen, setFormOpen] = useState(false);
+  const [confirming, setConfirming] = useState("");
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  useEffect(() => {
+    getProfile()
+      .then((profile) => setMeId(profile.id))
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    listSuperAdmins()
+      .then((data) => {
+        if (!cancelled) setAdmins(data);
+      })
+      .catch((caught) => {
+        if (!cancelled) setError(caught instanceof Error ? caught.message : "Unable to load platform admins.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshKey]);
+
+  const setActive = async (admin: AppUser, active: boolean) => {
+    try {
+      await setSuperAdminActive(admin.id, active);
+      setNotice(`${admin.full_name} ${active ? "can sign in again" : "can no longer sign in"}.`);
+      setError("");
+      setConfirming("");
+      setRefreshKey((key) => key + 1);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Update failed.");
     }
-    closeDialog();
   };
+
   return (
-    <main className="mx-auto max-w-7xl space-y-5">
+    <main className="mx-auto max-w-[1400px] space-y-5">
       <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-[11px] font-bold uppercase tracking-wider text-violet-600">
-            Super Admin · Access
-          </p>
+          <p className="text-[11px] font-bold uppercase tracking-wider text-violet-600">Super Admin · Platform admins</p>
           <h1 className="mt-1 text-2xl font-extrabold text-slate-950">Platform administrators</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Manage privileged access independently from tenant-level IT Admin roles.
-          </p>
+          <p className="mt-1 text-sm text-slate-500">People with full access to every organization on the platform.</p>
         </div>
         <button
           type="button"
-          onClick={() => setDialogOpen(true)}
-          className="inline-flex items-center justify-center gap-2 rounded-lg bg-brand-600 px-3.5 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-brand-700"
+          onClick={() => setFormOpen(true)}
+          disabled={formOpen}
+          className="rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-brand-700 disabled:opacity-60"
         >
-          <PlusIcon className="h-4 w-4" /> Add admin
+          + Add Super Admin
         </button>
       </header>
+
+      {error && (
+        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          {error}
+        </div>
+      )}
       {notice && (
-        <div
-          role="status"
-          className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-semibold text-emerald-800"
-        >
+        <div role="status" className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
           <span>{notice}</span>
-          <button type="button" onClick={() => setNotice("")} aria-label="Dismiss notification">
+          <button type="button" onClick={() => setNotice("")} aria-label="Dismiss">
             ×
           </button>
         </div>
       )}
-      <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="border-b border-slate-100 px-4 py-3">
-          <h2 className="text-sm font-bold">Admin directory</h2>
-        </div>
-        <div className="divide-y divide-slate-100">
-          {admins.map((admin) => (
-            <div key={admin.email} className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center">
-              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-violet-50 text-xs font-extrabold text-violet-700">
-                {admin.name
-                  .split(" ")
-                  .map((part) => part[0])
-                  .join("")}
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="text-xs font-bold text-slate-800">{admin.name}</p>
-                <p className="truncate text-[10px] text-slate-500">
-                  {admin.email} · {admin.access} · {admin.scope}
-                </p>
-              </div>
-              <span
-                className={`text-[10px] font-bold ${admin.status === "Active" ? "text-emerald-600" : "text-amber-600"}`}
-              >
-                {admin.status}
-              </span>
-              <button
-                type="button"
-                onClick={() => {
-                  setEditing(admin);
-                  setDialogOpen(true);
-                }}
-                className="inline-flex items-center gap-1 text-[11px] font-bold text-brand-600 hover:text-brand-700"
-              >
-                <PencilSquareIcon className="h-3.5 w-3.5" /> Edit access
-              </button>
-            </div>
-          ))}
-        </div>
-      </section>
-      {dialogOpen && (
-        <div className="fixed inset-0 z-[100] grid place-items-center bg-slate-950/40 p-4">
-          <form action={saveAdmin} className="w-full max-w-md rounded-2xl bg-white shadow-2xl">
-            <div className="flex items-start justify-between border-b border-slate-100 px-5 py-4">
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-wider text-violet-600">
-                  Platform access
-                </p>
-                <h2 className="mt-1 text-lg font-extrabold text-slate-950">
-                  {editing ? "Edit admin" : "Add administrator"}
-                </h2>
-              </div>
-              <button
-                type="button"
-                onClick={closeDialog}
-                aria-label="Close dialog"
-                className="rounded-lg p-1 text-slate-400 hover:bg-slate-100"
-              >
-                <XMarkIcon className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="space-y-4 p-5">
-              <label className="block text-xs font-bold text-slate-700">
-                Full name
-                <input
-                  name="name"
-                  required
-                  defaultValue={editing?.name}
-                  placeholder="e.g. Asha Kapoor"
-                  className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-brand-500"
-                />
-              </label>
-              <label className="block text-xs font-bold text-slate-700">
-                Work email
-                <input
-                  name="email"
-                  required
-                  type="email"
-                  defaultValue={editing?.email}
-                  placeholder="admin@company.com"
-                  className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-brand-500"
-                />
-              </label>
-              <label className="block text-xs font-bold text-slate-700">
-                Platform role
-                <select
-                  name="access"
-                  defaultValue={editing?.access ?? "Support Admin"}
-                  className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-brand-500"
-                >
-                  <option>Platform Owner</option>
-                  <option>Billing Admin</option>
-                  <option>Support Admin</option>
-                  <option>Security Admin</option>
-                </select>
-              </label>
-            </div>
-            <div className="flex justify-end gap-2 border-t border-slate-100 px-5 py-4">
-              <button
-                type="button"
-                onClick={closeDialog}
-                className="rounded-lg border border-slate-200 px-3.5 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="rounded-lg bg-brand-600 px-3.5 py-2 text-xs font-bold text-white hover:bg-brand-700"
-              >
-                {editing ? "Save changes" : "Send invitation"}
-              </button>
-            </div>
-          </form>
-        </div>
+
+      {formOpen && (
+        <AdminForm
+          onCancel={() => setFormOpen(false)}
+          onCreated={(admin) => {
+            setFormOpen(false);
+            setNotice(`${admin.full_name} is now a Super Admin and can sign in.`);
+            setError("");
+            setRefreshKey((key) => key + 1);
+          }}
+        />
       )}
+
+      <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        <ul className="divide-y divide-slate-100">
+          {admins.map((admin) => (
+            <li key={admin.id} className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-3">
+                <span className="grid h-10 w-10 place-items-center rounded-full bg-violet-50 text-xs font-bold text-violet-700">
+                  {initialsOf(admin.full_name)}
+                </span>
+                <div>
+                  <p className="font-bold text-slate-800">
+                    {admin.full_name}
+                    {admin.id === meId && <span className="ml-2 text-xs font-semibold text-slate-400">(you)</span>}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {admin.email} · since {formatDay(admin.created_at)}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-4">
+                <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${statusBadgeClass(admin.status)}`}>{admin.status}</span>
+                {admin.id !== meId &&
+                  (admin.status === "ACTIVE" ? (
+                    confirming === admin.id ? (
+                      <span className="inline-flex items-center gap-3 text-xs font-bold">
+                        <span className="font-normal text-slate-500">Remove platform access?</span>
+                        <button type="button" onClick={() => setActive(admin, false)} className="text-rose-600">
+                          Deactivate
+                        </button>
+                        <button type="button" onClick={() => setConfirming("")} className="text-slate-500">
+                          Cancel
+                        </button>
+                      </span>
+                    ) : (
+                      <button type="button" onClick={() => setConfirming(admin.id)} className="text-xs font-bold text-rose-600">
+                        Deactivate
+                      </button>
+                    )
+                  ) : (
+                    <button type="button" onClick={() => setActive(admin, true)} className="text-xs font-bold text-emerald-700">
+                      Reactivate
+                    </button>
+                  ))}
+              </div>
+            </li>
+          ))}
+        </ul>
+        {!loading && admins.length === 0 && !error && (
+          <p className="p-8 text-center text-sm text-slate-500">No platform admins found.</p>
+        )}
+      </section>
     </main>
+  );
+}
+
+function AdminForm({ onCancel, onCreated }: { onCancel: () => void; onCreated: (admin: AppUser) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const name = String(form.get("name") ?? "").trim();
+    const email = String(form.get("email") ?? "").trim();
+    const password = String(form.get("password") ?? "");
+    if (name.length < 2 || !email) return setError("Enter a name and email.");
+    if (password.length < 8) return setError("The temporary password needs at least 8 characters.");
+    setBusy(true);
+    try {
+      onCreated(await createSuperAdmin({ name, email, password }));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not add the Super Admin.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const inputClass = "mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-normal";
+
+  return (
+    <form onSubmit={submit} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm" noValidate>
+      <h2 className="text-sm font-bold text-slate-900">Add a Super Admin</h2>
+      <p className="mt-1 text-xs text-amber-700">They will have full control over every organization. Add only people you trust.</p>
+      <div className="mt-4 grid gap-4 sm:grid-cols-3">
+        <label className="block text-xs font-semibold text-slate-600">
+          Name
+          <input name="name" className={inputClass} />
+        </label>
+        <label className="block text-xs font-semibold text-slate-600">
+          Email
+          <input name="email" type="email" className={inputClass} />
+        </label>
+        <label className="block text-xs font-semibold text-slate-600">
+          Temporary password
+          <input name="password" type="password" autoComplete="new-password" className={inputClass} />
+        </label>
+      </div>
+      {error && (
+        <p role="alert" className="mt-3 text-sm text-red-700">
+          {error}
+        </p>
+      )}
+      <div className="mt-4 flex gap-2">
+        <button type="submit" disabled={busy} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-bold text-white hover:bg-brand-700 disabled:opacity-50">
+          {busy ? "Adding…" : "Add Super Admin"}
+        </button>
+        <button type="button" onClick={onCancel} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700">
+          Cancel
+        </button>
+      </div>
+    </form>
   );
 }

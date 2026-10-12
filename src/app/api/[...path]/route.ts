@@ -13,6 +13,10 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
   const authorization = request.headers.get("authorization");
   if (contentType) headers.set("content-type", contentType);
   if (authorization) headers.set("authorization", authorization);
+  // Pass the visitor's address on, so per-client limits (e.g. sign-in attempts)
+  // apply per person rather than to the proxy as a whole.
+  const forwardedFor = request.headers.get("x-forwarded-for") ?? request.headers.get("x-real-ip");
+  if (forwardedFor) headers.set("x-forwarded-for", forwardedFor);
 
   let body: ArrayBuffer | undefined;
   if (request.method !== "GET" && request.method !== "HEAD") {
@@ -37,7 +41,7 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
     });
   } catch {
     return NextResponse.json(
-      { detail: "Authentication API is unavailable. Make sure the FastAPI backend is running on port 8000." },
+      { detail: "The application API is unavailable. Make sure the backend is running." },
       { status: 502 },
     );
   }
