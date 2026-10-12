@@ -34,7 +34,7 @@ from sqlalchemy.orm import sessionmaker
 from app.core.database import Base, get_db
 from app.core.deps import get_current_user
 from app.core.security import create_access_token
-from app.models.models import AssetLifecycle, AuditSession, Company, PlatformRole, User
+from app.models.models import AssetAssignment, AssetLifecycle, AuditLog, AuditSession, Company, PlatformRole, User
 from app.routers import (
     asset_requests, assets, audit, auth, departments, inventory, organization, purchase_orders, reports, software,
     super_admin, users, vendors,
@@ -236,6 +236,30 @@ async def run_checks():
             code, body = call("GET", "/assets/counts")
             check("GET /assets/counts has every status", code == 200 and body["by_status"]["IN_STOCK"] == 1
                   and "DISPOSED" in body["by_status"] and body["total"] == 1, body)
+
+            # Removing an asset: refused while held, then gone with its own records.
+            code, body = call("POST", "/assets", {"asset_tag": "SMK-DEL", "serial_number": "SN-DEL",
+                                                  "name": "Mistake", "category": "Laptop"})
+            del_id = body["id"]
+            await expect_message(ws, "asset", "ASSET_CREATED")
+            call("POST", f"/assets/{del_id}/assign", {"user_id": EMPLOYEE_ID})
+            await expect_message(ws, "asset", "ASSET_ASSIGNED")
+            code, body = call("DELETE", f"/assets/{del_id}")
+            check("removing an assigned asset is refused", code == 400, body)
+            call("POST", f"/assets/{del_id}/unassign")
+            await expect_message(ws, "asset", "ASSET_UNASSIGNED")
+            code, body = call("DELETE", f"/assets/{del_id}")
+            check("DELETE /assets/{id} returns 204", code == 204, body)
+            msg = await expect_message(ws, "asset", "ASSET_DELETED")
+            check("ASSET_DELETED broadcast names the asset", msg["id"] == del_id, msg)
+            code, body = call("GET", f"/assets/{del_id}")
+            check("removed asset is gone", code == 404, body)
+            with TestSession() as db:
+                leftovers = db.query(AssetLifecycle).filter(AssetLifecycle.asset_id == del_id).count() \
+                    + db.query(AssetAssignment).filter(AssetAssignment.asset_id == del_id).count()
+                logged = db.query(AuditLog).filter(AuditLog.action == "DELETE_ASSET", AuditLog.entity_id == del_id).count()
+            check("its history and assignments are removed, the audit log keeps a record",
+                  leftovers == 0 and logged == 1, (leftovers, logged))
 
             with TestSession() as db:
                 actions = [row.action for row in db.query(AssetLifecycle)

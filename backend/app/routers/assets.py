@@ -8,8 +8,8 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_roles, get_tenant_company_id, user_from_token
 from app.models.models import (
-    Asset, AssetCategory, AssetAssignment, AssetLifecycle, Department, Vendor,
-    AssetStatusEnum, PlatformRole, User, Subscription
+    Asset, AssetCategory, AssetAssignment, AssetLifecycle, AssetRequest, AssetReturnRequest, AuditScanRecord,
+    Department, Maintenance, Vendor, WarrantyClaim, AssetStatusEnum, PlatformRole, User, Subscription
 )
 from app.schemas.schemas import (
     AssetCreate, AssetResponse, AssetUpdate, AssetAssignRequest,
@@ -695,6 +695,58 @@ def unassign_asset(
     response = _with_assignee(asset, None)
     _queue_broadcast(background_tasks, "ASSET_UNASSIGNED", response)
     return response
+
+
+@router.delete("/{asset_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_asset(
+    asset_id: str,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles([PlatformRole.SUPER_ADMIN, PlatformRole.IT_ADMIN, PlatformRole.SUB_ADMIN])),
+    tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
+):
+    """
+    Permanently remove an asset registered by mistake or no longer tracked.
+    Its own records (history, assignments, maintenance, warranty claims, return
+    requests) go with it; tickets and audit scans that mention it are kept with
+    the link cleared. The audit log keeps a record of the removal.
+    """
+    query = db.query(Asset).filter(Asset.id == asset_id)
+    if current_user.role != PlatformRole.SUPER_ADMIN:
+        query = query.filter(Asset.company_id == tenant_company_id)
+    asset = query.first()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found.")
+
+    held = db.query(AssetAssignment.id).filter(
+        AssetAssignment.asset_id == asset.id, AssetAssignment.is_active == True
+    ).first()
+    if held or asset.status in _HELD_STATUSES:
+        raise HTTPException(status_code=400, detail="This asset is assigned to someone. Unassign it before removing it.")
+
+    response = _with_assignee(asset, None)
+    for model in (AssetLifecycle, AssetAssignment, AssetReturnRequest, Maintenance, WarrantyClaim):
+        db.query(model).filter(model.asset_id == asset.id).delete(synchronize_session=False)
+    db.query(AssetRequest).filter(AssetRequest.assigned_asset_id == asset.id).update(
+        {"assigned_asset_id": None}, synchronize_session=False
+    )
+    db.query(AuditScanRecord).filter(AuditScanRecord.asset_id == asset.id).update(
+        {"asset_id": None}, synchronize_session=False
+    )
+    db.delete(asset)
+    db.commit()
+
+    log_audit_event(
+        db=db,
+        action="DELETE_ASSET",
+        entity="Asset",
+        company_id=response.company_id,
+        user_id=current_user.id,
+        entity_id=response.id,
+        old_value=f"{response.asset_tag} - {response.name} ({response.status.value})",
+    )
+    _queue_broadcast(background_tasks, "ASSET_DELETED", response)
+    return None
 
 
 @router.get("/{asset_id}/lifecycle", response_model=List[AssetLifecycleResponse])

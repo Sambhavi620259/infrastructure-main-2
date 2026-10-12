@@ -97,6 +97,11 @@ export function updateAsset(assetId: string, input: AssetUpdateInput): Promise<A
   });
 }
 
+/** DELETE /api/assets/{id}: refused while someone holds the asset; unassign it first. */
+export function deleteAsset(assetId: string): Promise<void> {
+  return apiFetch<void>(`/api/assets/${encodeURIComponent(assetId)}`, { method: "DELETE" });
+}
+
 /** GET /api/assets/counts — includes a count for every status. */
 export function getAssetCounts(): Promise<AssetCounts> {
   return apiFetch<AssetCounts>("/api/assets/counts");

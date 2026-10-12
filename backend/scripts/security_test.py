@@ -130,7 +130,7 @@ print("Tenant isolation")
 attacks = [
     ("GET", f"/assets/{A['asset']}", None), ("PUT", f"/assets/{A['asset']}", {"name": "pwned"}),
     ("POST", f"/assets/{A['asset']}/assign", {"user_id": IDS["adminB"]}), ("POST", f"/assets/{A['asset']}/unassign", None),
-    ("GET", f"/assets/{A['asset']}/lifecycle", None),
+    ("GET", f"/assets/{A['asset']}/lifecycle", None), ("DELETE", f"/assets/{A['asset']}", None),
     ("GET", f"/users/{A['user']}", None), ("PUT", f"/users/{A['user']}", {"full_name": "pwned"}), ("DELETE", f"/users/{A['user']}", None),
     ("POST", f"/users/{A['user']}/reset-password", {"new_password": "pwned1234"}), ("GET", f"/users/{A['user']}/activity", None),
     ("POST", f"/users/{A['user']}/reactivate", None),
@@ -196,6 +196,12 @@ code, data = call("samA", "GET", "/profile")
 check("profile lists sub-admin modules", code == 200 and data["user"]["modules"] == ["SAM"], data)
 code, data = call("agentA", "PUT", f"/assets/{A['asset']}", {"name": "renamed"})
 check("IT Agent cannot edit asset details", code == 403, data)
+code, data = call("agentA", "DELETE", f"/assets/{A['asset']}")
+check("IT Agent cannot remove assets", code == 403, data)
+code, data = call("samA", "DELETE", f"/assets/{A['asset']}")
+check("SAM sub-admin cannot remove hardware assets", code == 403, data)
+code, data = call("reportA", "DELETE", f"/assets/{A['asset']}")
+check("reporting user cannot remove assets", code == 403, data)
 code, data = call("agentA", "POST", "/users", {"email": "y@example.com", "full_name": "Y", "password": "password123"})
 check("IT Agent cannot create users", code == 403, data)
 

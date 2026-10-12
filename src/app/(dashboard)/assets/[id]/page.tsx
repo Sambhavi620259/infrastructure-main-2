@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { getAsset, listAssetLifecycle, updateAsset } from "@/lib/assets";
+import { useParams, useRouter } from "next/navigation";
+import { deleteAsset, getAsset, listAssetLifecycle, updateAsset } from "@/lib/assets";
 import { getProfile } from "@/lib/profile";
 import { AssetForm, assetToForm, formToPayload, type AssetFormValues } from "@/components/assets/asset-form";
 import { AssetCare } from "@/components/assets/asset-care";
@@ -38,6 +38,23 @@ export default function AssetDetailPage() {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const router = useRouter();
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [removeError, setRemoveError] = useState("");
+  const [removedElsewhere, setRemovedElsewhere] = useState(false);
+
+  const removeAsset = async () => {
+    setRemoving(true);
+    setRemoveError("");
+    try {
+      await deleteAsset(assetId);
+      router.replace("/assets");
+    } catch (caught) {
+      setRemoveError(caught instanceof Error ? caught.message : "Unable to remove this asset.");
+      setRemoving(false);
+    }
+  };
 
   useEffect(() => {
     getProfile()
@@ -83,7 +100,9 @@ export default function AssetDetailPage() {
 
   // Real-time updates via WebSocket
   useAssetWebSocket(asset?.company_id, (message) => {
-    if (message.asset.id === assetId) {
+    if (message.asset.id === assetId && message.event === "ASSET_DELETED") {
+      if (!removing) setRemovedElsewhere(true);
+    } else if (message.asset.id === assetId) {
       setAsset(message.asset);
       // Refetch lifecycle to get the latest entry
       listAssetLifecycle(assetId).then(setLifecycle);
@@ -94,6 +113,19 @@ export default function AssetDetailPage() {
     return (
       <main className="mx-auto max-w-7xl">
         <p className="text-sm text-slate-500">Loading asset…</p>
+      </main>
+    );
+  }
+
+  if (removedElsewhere) {
+    return (
+      <main className="mx-auto max-w-7xl space-y-4">
+        <Link href="/assets" className="inline-flex text-sm font-semibold text-brand-600 hover:text-brand-700">
+          ← Back to assets
+        </Link>
+        <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800">
+          This asset was just removed by another user.
+        </div>
       </main>
     );
   }
@@ -233,6 +265,54 @@ export default function AssetDetailPage() {
       </section>
 
       <AssetCare asset={asset} onAssetChanged={fetchAsset} />
+
+      {canEdit && (
+        <section className="rounded-xl border border-red-200 bg-white p-6 shadow-sm">
+          <h2 className="font-semibold text-red-700">Remove asset</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Permanently deletes this asset with its history, maintenance records and warranty claims. Tickets and
+            audit scans that mention it are kept. Use this for assets registered by mistake; for equipment that left
+            service, set the status to Retired or Disposed instead.
+          </p>
+          {removeError && (
+            <p role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700">
+              {removeError}
+            </p>
+          )}
+          {confirmingRemove ? (
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <span className="text-sm font-semibold text-slate-800">Remove {asset.asset_tag} permanently?</span>
+              <button
+                type="button"
+                onClick={removeAsset}
+                disabled={removing}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-bold text-white hover:bg-red-700 disabled:opacity-60"
+              >
+                {removing ? "Removing…" : "Yes, remove"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmingRemove(false)}
+                disabled={removing}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setRemoveError("");
+                setConfirmingRemove(true);
+              }}
+              className="mt-4 rounded-lg border border-red-300 px-4 py-2 text-sm font-bold text-red-700 hover:bg-red-50"
+            >
+              Remove asset
+            </button>
+          )}
+        </section>
+      )}
     </main>
   );
 }

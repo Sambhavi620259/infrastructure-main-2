@@ -4,7 +4,7 @@ import type { ScanRecord } from "@/lib/audit";
 import { withUtcTimes } from "@/lib/api";
 
 interface AssetUpdateMessage {
-  event: "ASSET_CREATED" | "ASSET_UPDATED" | "ASSET_ASSIGNED" | "ASSET_UNASSIGNED";
+  event: "ASSET_CREATED" | "ASSET_UPDATED" | "ASSET_ASSIGNED" | "ASSET_UNASSIGNED" | "ASSET_DELETED";
   asset: Asset;
   timestamp: string;
 }
