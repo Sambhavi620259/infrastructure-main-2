@@ -30,6 +30,8 @@ import {
   UserGroupIcon,
   UsersIcon,
   XMarkIcon,
+  PlusCircleIcon,
+  UserPlusIcon,
   Bars3Icon,
 } from "@heroicons/react/24/outline";
 import { endDemoSession, type DemoSession } from "@/lib/demo-session";
@@ -47,7 +49,7 @@ type NavigationItem = readonly [label: string, href: string, countKey: string, i
 type MenuLink = { label: string; href: string; icon: NavigationItem[3]; section: Section; badge?: string };
 type MenuEntry =
   | ({ kind: "link" } & MenuLink)
-  | { kind: "group"; label: string; icon: NavigationItem[3]; children: MenuLink[] }
+  | { kind: "group"; label: string; icon: NavigationItem[3]; children: MenuLink[]; badge?: string }
   | { kind: "heading"; label: string };
 
 /** IT workspace sidebar. Assets and Inventory are separate groups; each link shows only if the role can open its section. */
@@ -55,9 +57,15 @@ const itMenu: readonly MenuEntry[] = [
   { kind: "link", label: "Dashboard", href: routes.dashboard, icon: Squares2X2Icon, section: "dashboard" },
   {
     kind: "group", label: "Assets", icon: ComputerDesktopIcon, children: [
-      { label: "Hardware Assets", href: routes.assets, icon: ComputerDesktopIcon, section: "assets", badge: "assets" },
+      { label: "All Assets", href: routes.assets, icon: Squares2X2Icon, section: "assets", badge: "assets" },
+      { label: "Hardware Assets", href: "/assets/hardware", icon: ComputerDesktopIcon, section: "assets" },
       { label: "Software Assets", href: "/assets/software", icon: RectangleStackIcon, section: "software" },
-      { label: "Assignments", href: routes.assetAssignment, icon: UserGroupIcon, section: "assets" },
+      { label: "Add New Asset", href: routes.assetNew, icon: PlusCircleIcon, section: "assets" },
+      { label: "Asset Assignments", href: routes.assetAssignment, icon: UserGroupIcon, section: "assets" },
+      { label: "Asset Audit", href: routes.assetAudit, icon: ClipboardDocumentCheckIcon, section: "assets" },
+      { label: "Asset Lifecycle", href: routes.assetLifecycle, icon: ArrowPathRoundedSquareIcon, section: "assets" },
+      { label: "Asset History", href: routes.assetHistory, icon: ClockIcon, section: "assets" },
+      { label: "Asset Status", href: routes.assetStatus, icon: CheckCircleIcon, section: "assets" },
     ],
   },
   {
@@ -71,25 +79,24 @@ const itMenu: readonly MenuEntry[] = [
   { kind: "link", label: "Maintenance & Warranty", href: "/maintenance", icon: WrenchScrewdriverIcon, section: "assets" },
   { kind: "link", label: "Reports & Analytics", href: routes.reports, icon: ChartBarIcon, section: "reports" },
   { kind: "heading", label: "Administration" },
-  { kind: "link", label: "Users", href: routes.users, icon: UsersIcon, section: "users", badge: "users" },
+  {
+    kind: "group", label: "Users", icon: UsersIcon, badge: "users", children: [
+      { label: "All Users", href: routes.users, icon: UsersIcon, section: "users" },
+      { label: "Add User", href: routes.userNew, icon: UserPlusIcon, section: "users" },
+      { label: "Departments / Teams", href: routes.userDepartments, icon: BuildingOffice2Icon, section: "users" },
+    ],
+  },
   { kind: "link", label: "Cloud", href: routes.cloud, icon: CloudIcon, section: "cloud" },
   { kind: "link", label: "Settings", href: routes.settings, icon: Cog6ToothIcon, section: "settings" },
 ];
 
 // Pages reached from inside other pages; listed so the search box still finds them.
 const itMorePages: readonly NavigationItem[] = [
-  ["Register an asset", routes.assetNew, "", CubeIcon],
-  ["Asset audit", routes.assetAudit, "", ClipboardDocumentCheckIcon],
-  ["Asset lifecycle", routes.assetLifecycle, "", ArrowPathRoundedSquareIcon],
-  ["Asset history", routes.assetHistory, "", ClockIcon],
-  ["Asset status", routes.assetStatus, "", CheckCircleIcon],
   ["Warranty / AMC", routes.assetWarranty, "", ShieldCheckIcon],
   ["Consumables stock", routes.inventoryStock, "", FolderIcon],
   ["Purchase orders", routes.inventoryPurchaseOrders, "", DocumentChartBarIcon],
   ["Vendors", routes.inventoryVendors, "", BuildingOffice2Icon],
   ["My tickets", routes.ticketMine, "", TicketIcon],
-  ["Add user", routes.userNew, "", UserGroupIcon],
-  ["Departments / Teams", routes.userDepartments, "", BuildingOffice2Icon],
 ];
 
 const itNavigation: readonly NavigationItem[] = itMenu.flatMap((entry): NavigationItem[] =>
@@ -155,7 +162,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [search, setSearch] = useState("");
   const [profileOpen, setProfileOpen] = useState(false);
   // Sidebar groups (Assets, Inventory): open when you are inside one.
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({ Assets: true, Inventory: true });
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({ Assets: true, Inventory: true, Users: true });
   // Dashboard counts for sidebar badges
   const [counts, setCounts] = useState<DashboardCounts | null>(null);
 
@@ -479,7 +486,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                     isActiveRoute(pathname, href) ? "bg-brand-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
                   }`;
                 if (entry.kind === "heading") {
-                  const anyVisible = itMenu.slice(index + 1).some((e) => e.kind === "link" && sections.has(e.section));
+                  const anyVisible = itMenu
+                    .slice(index + 1)
+                    .some((e) => (e.kind === "link" && sections.has(e.section)) || (e.kind === "group" && e.children.some((c) => sections.has(c.section))));
                   return anyVisible ? (
                     <p key={entry.label} className="px-3 pb-1 pt-4 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">
                       {entry.label}
@@ -513,6 +522,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                     >
                       <GroupIcon className="h-[17px] w-[17px]" />
                       <span className="flex-1 text-left">{entry.label}</span>
+                      {entry.badge && getBadge(entry.badge) && <Badge count={getBadge(entry.badge)!} />}
                       <ChevronDownIcon className={`h-4 w-4 transition ${isOpen ? "rotate-180" : ""}`} />
                     </button>
                     {isOpen && (
