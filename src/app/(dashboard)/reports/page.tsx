@@ -13,6 +13,7 @@ import {
 } from "@heroicons/react/24/outline";
 import {
   createReport,
+  deleteReportRun,
   deleteSavedReport,
   downloadReport,
   getReportSummary,
@@ -90,6 +91,21 @@ export default function ReportsPage() {
   const [builderOpen, setBuilderOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [confirmRemoveRun, setConfirmRemoveRun] = useState<string | null>(null);
+
+  const removeRun = async (run: ReportRun) => {
+    setBusy(run.id);
+    try {
+      await deleteReportRun(run.id);
+      setConfirmRemoveRun(null);
+      setNotice(`${run.name} removed.`);
+      refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not remove the report.");
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const refresh = useCallback(() => {
     Promise.all([getReportSummary(), listReportRuns(10), listSavedReports()])
@@ -154,11 +170,14 @@ export default function ReportsPage() {
     }
   };
 
+  // Users get personal reports only (about their own assets and tickets).
+  const personal = types.length > 0 && types.every((type) => type.key.startsWith("my_"));
+
   const tiles: [string, string, string][] = [
     [summary ? String(summary.generated_this_month) : "—", "Reports generated", "This month"],
     [summary ? String(summary.saved_reports) : "—", "Saved reports", "Ready to re-run"],
     [summary ? formatDateTime(summary.last_generated_at) : "—", "Last generated", "Most recent export"],
-    [String(types.length || "—"), "Report types", "Available to your team"],
+    [String(types.length || "—"), "Report types", personal ? "About your own data" : "Available to your team"],
   ];
 
   return (
@@ -167,7 +186,11 @@ export default function ReportsPage() {
         <div>
           <p className="text-sm font-medium text-brand-600">Reporting & analytics</p>
           <h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-950">Reports</h1>
-          <p className="mt-2 text-slate-500">Create audit-ready CSV exports and save them to re-run any time.</p>
+          <p className="mt-2 text-slate-500">
+            {personal
+              ? "Download CSV reports of your own assets and tickets. Only you can see the reports you generate."
+              : "Create audit-ready CSV exports and save them to re-run any time."}
+          </p>
         </div>
         <button
           type="button"
@@ -222,7 +245,9 @@ export default function ReportsPage() {
         <div className="mb-4">
           <h2 className="font-semibold text-slate-900">Quick reports</h2>
           <p className="mt-1 text-sm text-slate-500">
-            Generate any report with all records. Use Create report to add filters or save it.
+            {personal
+              ? "Generate a report of your own records. Use Create report to pick dates or save it."
+              : "Generate any report with all records. Use Create report to add filters or save it."}
           </p>
         </div>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -330,7 +355,8 @@ export default function ReportsPage() {
         <div className="border-b border-slate-100 px-6 py-5">
           <h2 className="font-semibold text-slate-900">Recent exports</h2>
           <p className="mt-1 text-sm text-slate-500">
-            Reports generated across your organization. Each download is the file exactly as it was generated.
+            {personal ? "Reports you generated." : "Reports generated across your organization."} Each download is the
+            file exactly as it was generated.
           </p>
         </div>
         {runs.length === 0 ? (
@@ -363,6 +389,30 @@ export default function ReportsPage() {
                 >
                   <ArrowDownTrayIcon className="h-4 w-4" aria-hidden="true" /> Download
                 </button>
+                {confirmRemoveRun === run.id ? (
+                  <span className="flex items-center gap-2 text-sm">
+                    <span className="font-semibold text-slate-700">Remove?</span>
+                    <button
+                      type="button"
+                      onClick={() => removeRun(run)}
+                      disabled={busy === run.id}
+                      className="rounded-md bg-rose-600 px-2 py-1 text-xs font-bold text-white hover:bg-rose-700 disabled:opacity-50"
+                    >
+                      Yes
+                    </button>
+                    <button type="button" onClick={() => setConfirmRemoveRun(null)} className="text-xs font-semibold text-slate-500">
+                      No
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmRemoveRun(run.id)}
+                    className="inline-flex items-center gap-1 text-left text-sm font-semibold text-rose-600 hover:text-rose-700"
+                  >
+                    <TrashIcon className="h-4 w-4" aria-hidden="true" /> Remove
+                  </button>
+                )}
               </div>
             ))}
           </div>

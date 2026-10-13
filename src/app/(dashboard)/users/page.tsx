@@ -148,7 +148,7 @@ export default function UsersPage() {
           <p className="text-[11px] font-bold uppercase tracking-wider text-brand-600">Users · Directory</p>
           <h1 className="mt-1 text-2xl font-extrabold tracking-tight text-slate-950">Users</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Everyone with access to this organization&rsquo;s workspace, plus IT Agents waiting to be added.
+            Everyone with access to this organization&rsquo;s workspace, plus new users waiting to be added.
           </p>
         </div>
         <Link
@@ -179,9 +179,9 @@ export default function UsersPage() {
       {signups.length > 0 && (
         <section className="overflow-hidden rounded-xl border border-amber-200 bg-white shadow-sm">
           <div className="border-b border-amber-100 bg-amber-50/60 px-5 py-4">
-            <h2 className="font-semibold text-slate-900">New IT Agent sign-ups ({signups.length})</h2>
+            <h2 className="font-semibold text-slate-900">New user sign-ups ({signups.length})</h2>
             <p className="mt-1 text-sm text-slate-600">
-              These agents registered on their own and are not in any organization yet. Add them to yours to give
+              These users registered on their own and are not in any organization yet. Add them to yours to give
               them access, or remove them.
             </p>
           </div>
@@ -191,7 +191,7 @@ export default function UsersPage() {
                 <tr>
                   <th className="px-4 py-3">Name</th>
                   <th className="px-4 py-3">Email</th>
-                  <th className="px-4 py-3">Agent ID</th>
+                  <th className="px-4 py-3">User ID</th>
                   <th className="px-4 py-3">Signed up</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3" />
@@ -219,7 +219,7 @@ export default function UsersPage() {
                               act(
                                 agent.id,
                                 () => addToOrganization(agent.id),
-                                `${agent.full_name} added to your organization. They can now use the IT Agent dashboard.`,
+                                `${agent.full_name} added to your organization. They can now use their dashboard.`,
                               )
                             }
                             className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-brand-700 disabled:opacity-50"
@@ -251,7 +251,7 @@ export default function UsersPage() {
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               aria-label="Search users"
-              placeholder="Search name, email or Agent ID"
+              placeholder="Search name, email or User ID"
               className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none placeholder:text-slate-400 focus:border-brand-500 sm:w-64"
             />
             <select
@@ -326,9 +326,12 @@ export default function UsersPage() {
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-right">
                     <span className="inline-flex items-center gap-4">
-                      <Link href={`/users/${user.id}`} className="text-sm font-semibold text-brand-600 hover:text-brand-700">
-                        View work
-                      </Link>
+                      {/* Admins review users' work only, not other admins'. */}
+                      {user.role === "EMPLOYEE" && (
+                        <Link href={`/users/${user.id}`} className="text-sm font-semibold text-brand-600 hover:text-brand-700">
+                          View work
+                        </Link>
+                      )}
                       {removeControls(user)}
                     </span>
                   </td>

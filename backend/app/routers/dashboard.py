@@ -8,7 +8,8 @@ from app.core.database import get_db
 from app.core.deps import get_current_user, get_tenant_company_id
 from app.models.models import (
     Asset, AssetStatusEnum, AssetRequest, RequestStatusEnum, 
-    Maintenance, InventoryItem, PlatformRole, User
+    Maintenance, InventoryItem, PlatformRole, User, InventoryRequest, PurchaseOrder, Software, SoftwareLicense,
+    SoftwareLicenseAssignment,
 )
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard Metrics"])
@@ -52,6 +53,25 @@ def get_dashboard_overview(
 
     low_stock_alerts = inv_q.filter(InventoryItem.quantity <= InventoryItem.reorder_level).count()
 
+    software_q = db.query(Software)
+    license_q = db.query(SoftwareLicense).filter(SoftwareLicense.status == "ACTIVE")
+    seat_q = db.query(SoftwareLicenseAssignment).filter(SoftwareLicenseAssignment.is_active.is_(True))
+    stock_req_q = db.query(InventoryRequest).filter(InventoryRequest.status == "PENDING")
+    po_q = db.query(PurchaseOrder).filter(PurchaseOrder.status == "PENDING")
+    if company_id:
+        software_q = software_q.filter(Software.company_id == company_id)
+        license_q = license_q.filter(SoftwareLicense.company_id == company_id)
+        seat_q = seat_q.filter(SoftwareLicenseAssignment.company_id == company_id)
+        stock_req_q = stock_req_q.filter(InventoryRequest.company_id == company_id)
+        po_q = po_q.filter(PurchaseOrder.company_id == company_id)
+    license_seats = int(license_q.with_entities(func.coalesce(func.sum(SoftwareLicense.seats), 0)).scalar() or 0)
+    seats_assigned = seat_q.count()
+    # Everything waiting for a decision: open tickets, stock requests and unapproved POs.
+    pending_approvals = (
+        req_q.filter(AssetRequest.status.in_([RequestStatusEnum.PENDING, RequestStatusEnum.IN_PROGRESS])).count()
+        + stock_req_q.count() + po_q.count()
+    )
+
     return {
         "metrics": {
             "total_assets": total_assets,
@@ -60,6 +80,10 @@ def get_dashboard_overview(
             "under_maintenance": maintenance_assets,
             "pending_requests": pending_requests,
             "low_stock_alerts": low_stock_alerts,
+            "software_products": software_q.count(),
+            "license_seats": license_seats,
+            "license_seats_assigned": seats_assigned,
+            "pending_approvals": pending_approvals,
             "total_asset_valuation": round(float(total_valuation), 2)
         }
     }

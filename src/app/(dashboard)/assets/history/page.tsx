@@ -213,7 +213,7 @@ export default function AssetHistoryPage() {
                   <td className="whitespace-nowrap px-5 py-3 text-slate-600">{formatDateTime(event.timestamp)}</td>
                   <td className="px-5 py-3">
                     <Link href={`/assets/${event.asset_id}`} className="font-semibold text-slate-800 hover:text-brand-700">
-                      {event.asset_tag}
+                      {event.asset_tag ?? "Untagged"}
                     </Link>
                     <p className="text-xs text-slate-500">{event.asset_name}</p>
                   </td>

@@ -152,7 +152,7 @@ export default function TicketDashboardPage() {
                     </td>
                     <td className="px-5 py-3 text-slate-600">{ticket.requested_by_name ?? ticket.requested_for}</td>
                     <td className="px-5 py-3">
-                      <TicketStatusBadge status={ticket.status} />
+                      <TicketStatusBadge status={ticket.status} ticketType={ticket.ticket_type} />
                     </td>
                     <td className="px-5 py-3 text-slate-600">{ticket.category_name ?? "—"}</td>
                     <td className="px-5 py-3 text-slate-500">

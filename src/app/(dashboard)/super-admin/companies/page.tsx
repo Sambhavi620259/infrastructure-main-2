@@ -149,7 +149,7 @@ export default function CompaniesPage() {
           <table className="w-full min-w-[1000px] text-left">
             <thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-400">
               <tr>
-                {["Organization", "IT Admin", "Plan", "Users", "Agents", "Assets", "Pending tickets", "Status", ""].map((h) => (
+                {["Organization", "IT Admin", "Plan", "All users", "Users", "Assets", "Pending tickets", "Status", ""].map((h) => (
                   <th key={h} className="px-4 py-2.5">
                     {h}
                   </th>

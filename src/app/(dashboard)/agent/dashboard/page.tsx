@@ -1,25 +1,40 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
+  PlusIcon,
+  TrashIcon,
   ArchiveBoxIcon,
   ComputerDesktopIcon,
   DocumentChartBarIcon,
-  ExclamationTriangleIcon,
   TicketIcon,
   WrenchScrewdriverIcon,
 } from "@heroicons/react/24/outline";
 import { getAssetCounts, listAssetEvents } from "@/lib/assets";
-import { getAssetRequestCounts, listAssetRequests, type AssetRequest, type AssetRequestCounts } from "@/lib/tickets";
-import { getInventoryCounts, type InventoryCounts } from "@/lib/inventory";
+import {
+  cancelTicket,
+  getAssetRequestCounts,
+  isOpenTicket,
+  listAssetCategories,
+  listAssetRequests,
+  type AssetCategory,
+  type AssetRequest,
+  type AssetRequestCounts,
+} from "@/lib/tickets";
+import { listDepartments } from "@/lib/users";
+import type { Department } from "@/types/user";
+import { TicketStatusBadge, ticketNumber } from "@/components/tickets/ticket-actions";
+import { NewTicketForm } from "@/components/tickets/ticket-queue";
+import { listInventoryRequests } from "@/lib/inventory";
+import { mySoftware } from "@/lib/software";
 import { getProfile, type Profile } from "@/lib/profile";
-import { assetStatusLabel, type AssetCounts, type AssetEvent } from "@/types/asset";
+import { assetStatusLabel, type AssetCounts, type AssetEvent, assetLabel } from "@/types/asset";
 
 const QUICK_ACTIONS = [
-  ["/agent/tickets", "Work the ticket queue", "Approve or reject asset requests", TicketIcon],
-  ["/agent/assets", "Hand over an asset", "Assign, unassign or update status", ComputerDesktopIcon],
-  ["/agent/inventory", "Issue stock", "Record consumables in and out", ArchiveBoxIcon],
+  ["/agent/tickets", "Request an asset", "Raise a ticket and follow its status", TicketIcon],
+  ["/agent/assets", "Update an asset", "Change status, condition or location", ComputerDesktopIcon],
+  ["/agent/inventory", "Request stock", "Ask for cables, mice and other consumables", ArchiveBoxIcon],
   ["/agent/reports", "Run a report", "Download a CSV export", DocumentChartBarIcon],
 ] as const;
 
@@ -44,8 +59,8 @@ export default function AgentDashboardPage() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [assets, setAssets] = useState<AssetCounts | null>(null);
   const [tickets, setTickets] = useState<AssetRequestCounts | null>(null);
-  const [inventory, setInventory] = useState<InventoryCounts | null>(null);
-  const [pending, setPending] = useState<AssetRequest[]>([]);
+  const [stockWaiting, setStockWaiting] = useState<number | null>(null);
+  const [softwareCount, setSoftwareCount] = useState<number | null>(null);
   const [events, setEvents] = useState<AssetEvent[]>([]);
   const [error, setError] = useState("");
 
@@ -55,17 +70,26 @@ export default function AgentDashboardPage() {
       setError(caught instanceof Error ? caught.message : "Some dashboard data could not be loaded.");
     getProfile().then(setProfile).catch(fail);
     getAssetCounts().then(setAssets).catch(fail);
+    mySoftware().then((seats) => setSoftwareCount(seats.length)).catch(fail);
     getAssetRequestCounts().then(setTickets).catch(fail);
-    getInventoryCounts().then(setInventory).catch(fail);
-    listAssetRequests({ status: "PENDING", limit: 5 }).then(setPending).catch(fail);
+    listInventoryRequests("PENDING")
+      .then((data) => setStockWaiting(data.length))
+      .catch(fail);
     listAssetEvents({ limit: 6 }).then(setEvents).catch(fail);
   }, []);
 
+  const refreshTicketCounts = useCallback(() => {
+    getAssetRequestCounts().then(setTickets).catch(() => undefined);
+  }, []);
+
+  // All counts cover only this user's own assets (the API scopes them).
+  const byStatus = assets?.by_status;
   const metrics: [string, number | undefined, string][] = [
-    ["Total assets", assets?.total, "text-slate-950"],
-    ["Assigned", assets?.assigned, "text-emerald-600"],
-    ["In stock", assets?.in_stock, "text-blue-600"],
+    ["My assets", assets?.total, "text-slate-950"],
+    ["My software", softwareCount ?? undefined, "text-indigo-600"],
+    ["Working", byStatus ? byStatus.ASSIGNED + byStatus.IN_USE : undefined, "text-emerald-600"],
     ["In repair", assets?.in_repair, "text-amber-600"],
+    ["Damaged or lost", byStatus ? byStatus.DAMAGED + byStatus.LOST : undefined, "text-rose-600"],
   ];
 
   const today = new Date().toLocaleDateString(undefined, { weekday: "short", day: "2-digit", month: "short" });
@@ -75,7 +99,7 @@ export default function AgentDashboardPage() {
       <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-[11px] font-semibold text-brand-600">
-            IT Agent{profile?.companyName ? ` · ${profile.companyName}` : ""}
+            User{profile?.companyName ? ` · ${profile.companyName}` : ""}
           </p>
           <h1 className="mt-0.5 text-2xl font-extrabold tracking-tight text-slate-950">
             Welcome back{profile ? `, ${profile.name.split(" ")[0]}` : ""}!
@@ -91,9 +115,9 @@ export default function AgentDashboardPage() {
         </div>
       )}
 
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
         {metrics.map(([label, value, color]) => (
-          <Link key={label} href="/agent/assets" className="ui-surface p-4 transition hover:border-brand-200">
+          <Link key={label} href={label === "My software" ? "/agent/software" : "/agent/assets"} className="ui-surface p-4 transition hover:border-brand-200">
             <p className="text-[10px] text-slate-500">{label}</p>
             <p className={`mt-1 text-2xl font-extrabold ${color}`}>{value ?? "—"}</p>
           </Link>
@@ -104,66 +128,42 @@ export default function AgentDashboardPage() {
         <Link href="/agent/tickets" className="ui-surface flex items-center gap-3 p-4 transition hover:border-brand-200">
           <TicketIcon className="h-6 w-6 text-amber-500" aria-hidden="true" />
           <div>
-            <p className="text-xl font-extrabold">{tickets?.pending ?? "—"}</p>
-            <p className="text-[10px] text-slate-500">Tickets waiting for a decision</p>
+            <p className="text-xl font-extrabold">{tickets?.open ?? "—"}</p>
+            <p className="text-[10px] text-slate-500">Your open tickets</p>
           </div>
         </Link>
         <Link href="/agent/tickets" className="ui-surface flex items-center gap-3 p-4 transition hover:border-brand-200">
           <WrenchScrewdriverIcon className="h-6 w-6 text-emerald-500" aria-hidden="true" />
           <div>
-            <p className="text-xl font-extrabold">{tickets?.my_open ?? "—"}</p>
-            <p className="text-[10px] text-slate-500">Open tickets you raised</p>
+            <p className="text-xl font-extrabold">{tickets?.approved ?? "—"}</p>
+            <p className="text-[10px] text-slate-500">Approved, waiting for stock</p>
           </div>
         </Link>
         <Link href="/agent/inventory" className="ui-surface flex items-center gap-3 p-4 transition hover:border-brand-200">
-          <ExclamationTriangleIcon className="h-6 w-6 text-rose-500" aria-hidden="true" />
+          <ArchiveBoxIcon className="h-6 w-6 text-violet-500" aria-hidden="true" />
           <div>
-            <p className="text-xl font-extrabold">{inventory?.low_stock ?? "—"}</p>
-            <p className="text-[10px] text-slate-500">Inventory items low on stock</p>
+            <p className="text-xl font-extrabold">{stockWaiting ?? "—"}</p>
+            <p className="text-[10px] text-slate-500">Stock requests waiting for approval</p>
           </div>
         </Link>
       </section>
 
       <section className="grid gap-3 xl:grid-cols-[1.3fr_1fr]">
-        <article className="ui-surface overflow-hidden">
-          <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
-            <h2 className="text-sm font-bold">Pending tickets</h2>
-            <Link href="/agent/tickets" className="text-xs font-semibold text-brand-600 hover:text-brand-700">
-              Open queue →
-            </Link>
-          </div>
-          {pending.length === 0 ? (
-            <p className="p-6 text-center text-xs text-slate-500">No tickets are waiting. Nice work.</p>
-          ) : (
-            <ul className="divide-y divide-slate-100">
-              {pending.map((ticket) => (
-                <li key={ticket.id} className="flex items-start justify-between gap-3 px-4 py-3 text-xs">
-                  <div className="min-w-0">
-                    <p className="font-semibold text-slate-700">
-                      {ticket.category_name ?? "Asset request"} · {ticket.requested_by_name ?? ticket.requested_for}
-                    </p>
-                    <p className="truncate text-slate-500">{ticket.reason}</p>
-                  </div>
-                  <span className="shrink-0 text-[11px] text-slate-400">{timeAgo(ticket.created_at)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </article>
+        <MyTicketsCard onChanged={refreshTicketCounts} />
 
         <article className="ui-surface overflow-hidden">
           <div className="border-b border-slate-100 px-4 py-3">
-            <h2 className="text-sm font-bold">Recent asset activity</h2>
+            <h2 className="text-sm font-bold">Activity on my assets</h2>
           </div>
           {events.length === 0 ? (
-            <p className="p-6 text-center text-xs text-slate-500">No asset activity yet.</p>
+            <p className="p-6 text-center text-xs text-slate-500">No activity on your assets yet.</p>
           ) : (
             <ul className="divide-y divide-slate-100">
               {events.map((event) => (
                 <li key={event.id} className="px-4 py-3 text-xs">
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-semibold text-slate-700">
-                      {event.asset_tag} · {EVENT_LABEL[event.action] ?? event.action}
+                      {event.asset_tag ?? "Untagged"} · {EVENT_LABEL[event.action] ?? event.action}
                     </span>
                     <span className="text-[11px] text-slate-400">{timeAgo(event.timestamp)}</span>
                   </div>
@@ -194,5 +194,149 @@ export default function AgentDashboardPage() {
         </div>
       </section>
     </main>
+  );
+}
+
+/** The user's open tickets, with "New ticket" and "Remove" (cancel) right on the dashboard. */
+function MyTicketsCard({ onChanged }: { onChanged: () => void }) {
+  const [tickets, setTickets] = useState<AssetRequest[]>([]);
+  const [categories, setCategories] = useState<AssetCategory[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [formOpen, setFormOpen] = useState(false);
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  useEffect(() => {
+    // The API returns only this user's tickets.
+    listAssetRequests({ limit: 50 })
+      .then((data) => setTickets(data.filter((ticket) => isOpenTicket(ticket.status)).slice(0, 6)))
+      .catch((caught) => setError(caught instanceof Error ? caught.message : "Could not load your tickets."));
+  }, [refreshKey]);
+
+  useEffect(() => {
+    if (!formOpen || categories.length > 0) return;
+    listAssetCategories().then(setCategories).catch(() => undefined);
+    listDepartments().then(setDepartments).catch(() => undefined);
+  }, [formOpen, categories.length]);
+
+  const changed = (message: string) => {
+    setNotice(message);
+    setError("");
+    setRefreshKey((key) => key + 1);
+    onChanged();
+  };
+
+  const remove = async (ticket: AssetRequest) => {
+    setBusy(true);
+    try {
+      await cancelTicket(ticket.id);
+      setConfirming(null);
+      changed(`Ticket ${ticketNumber(ticket)} removed.`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not remove the ticket.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <article className="ui-surface overflow-hidden">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
+        <h2 className="text-sm font-bold">My open tickets</h2>
+        <div className="flex items-center gap-3">
+          <Link href="/agent/tickets" className="text-xs font-semibold text-brand-600 hover:text-brand-700">
+            All my tickets →
+          </Link>
+          <button
+            type="button"
+            onClick={() => {
+              setFormOpen(true);
+              setNotice("");
+            }}
+            disabled={formOpen}
+            className="inline-flex items-center gap-1 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-brand-700 disabled:opacity-60"
+          >
+            <PlusIcon className="h-4 w-4" aria-hidden="true" /> New ticket
+          </button>
+        </div>
+      </div>
+
+      {formOpen && (
+        <div className="border-b border-slate-100 p-3">
+          <NewTicketForm
+            categories={categories}
+            onCategoryCreated={(category) => setCategories((current) => [...current, category])}
+            departments={departments}
+            users={[]}
+            forOthers={false}
+            onCancel={() => setFormOpen(false)}
+            onCreated={(ticket) => {
+              setFormOpen(false);
+              changed(`Ticket ${ticketNumber(ticket)} raised. Your IT Admin has been notified.`);
+            }}
+          />
+        </div>
+      )}
+
+      {notice && (
+        <p role="status" className="border-b border-emerald-100 bg-emerald-50 px-4 py-2 text-xs text-emerald-800">
+          {notice}
+        </p>
+      )}
+      {error && (
+        <p role="alert" className="border-b border-red-100 bg-red-50 px-4 py-2 text-xs text-red-800">
+          {error}
+        </p>
+      )}
+
+      {tickets.length === 0 ? (
+        <p className="p-6 text-center text-xs text-slate-500">No open tickets. Need something? Choose New ticket.</p>
+      ) : (
+        <ul className="divide-y divide-slate-100">
+          {tickets.map((ticket) => (
+            <li key={ticket.id} className="flex items-start justify-between gap-3 px-4 py-3 text-xs">
+              <div className="min-w-0">
+                <p className="font-semibold text-slate-700">
+                  {ticketNumber(ticket)} ·{" "}
+                  {ticket.asset ? `Problem with ${assetLabel(ticket.asset)}` : (ticket.category_name ?? "Asset request")}
+                </p>
+                <p className="truncate text-slate-500">{ticket.reason}</p>
+                <p className="text-[11px] text-slate-400">{timeAgo(ticket.created_at)}</p>
+              </div>
+              <span className="flex shrink-0 flex-col items-end gap-1.5">
+                <TicketStatusBadge status={ticket.status} ticketType={ticket.ticket_type} />
+                {confirming === ticket.id ? (
+                  <span className="flex items-center gap-2">
+                    <span className="font-semibold text-slate-600">Remove?</span>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => remove(ticket)}
+                      className="rounded-md bg-rose-600 px-2 py-1 font-bold text-white hover:bg-rose-700 disabled:opacity-60"
+                    >
+                      {busy ? "…" : "Yes"}
+                    </button>
+                    <button type="button" onClick={() => setConfirming(null)} className="font-semibold text-slate-500">
+                      No
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setConfirming(ticket.id)}
+                    className="inline-flex items-center gap-1 font-semibold text-rose-600 hover:text-rose-700"
+                  >
+                    <TrashIcon className="h-3.5 w-3.5" aria-hidden="true" /> Remove
+                  </button>
+                )}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </article>
   );
 }

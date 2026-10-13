@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from enum import Enum as PyEnum
 from sqlalchemy import (
-    Column, String, DateTime, ForeignKey, Integer, JSON, Numeric, Text, Boolean, Enum, Index
+    Column, String, DateTime, ForeignKey, Integer, JSON, Numeric, Text, Boolean, Enum, Index, text
 )
 from sqlalchemy.orm import relationship
 from app.core.database import Base
@@ -142,6 +142,17 @@ class User(Base):
     modules = Column(JSON, nullable=True)
     status = Column(String(20), default="ACTIVE")
     location = Column(String(100), nullable=True)
+    # Details the user fills in on their own profile.
+    phone = Column(String(30), nullable=True)
+    job_title = Column(String(100), nullable=True)
+    employee_code = Column(String(50), nullable=True)
+    bio = Column(Text, nullable=True)
+    # Organization name / ID as the user enters them on their profile. Display
+    # only: the account's real organization is company_id, set by the IT Admin.
+    profile_org_name = Column(String(150), nullable=True)
+    profile_org_code = Column(String(60), nullable=True)
+    # Profile photo as a small data URL (resized in the browser before upload).
+    avatar = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     company = relationship("Company", back_populates="users")
@@ -179,8 +190,10 @@ class Asset(Base):
 
     id = Column(String, primary_key=True, default=gen_uuid)
     company_id = Column(String, ForeignKey("companies.id"), nullable=False, index=True)
-    asset_tag = Column(String(100), nullable=False, index=True)
-    serial_number = Column(String(100), nullable=False, index=True)
+    # Optional; when given it is unique within the organization.
+    asset_tag = Column(String(100), nullable=True, index=True)
+    # Optional too; when given it is unique within the organization.
+    serial_number = Column(String(100), nullable=True, index=True)
     name = Column(String(150), nullable=False)
     category = Column(String(100), nullable=False)
     type = Column(String(50), nullable=True)
@@ -201,14 +214,25 @@ class Asset(Base):
     status = Column(Enum(AssetStatusEnum), default=AssetStatusEnum.IN_STOCK, nullable=False, index=True)
     condition = Column(String(50), default="EXCELLENT")
     description = Column(Text, nullable=True)
+    specifications = Column(Text, nullable=True)
+    # The stock receipt this device arrived in, when registered from one.
+    receipt_id = Column(String, ForeignKey("stock_receipts.id"), nullable=True, index=True)
     created_by = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     __table_args__ = (
+        # NULL tags do not collide, so untagged assets are allowed.
         Index("uix_company_asset_tag", "company_id", "asset_tag", unique=True),
         Index("uix_company_serial", "company_id", "serial_number", unique=True),
     )
+
+    @property
+    def label(self) -> str:
+        """How the asset is named in messages: its tag, or its serial number when untagged."""
+        if self.asset_tag:
+            return self.asset_tag
+        return f"S/N {self.serial_number}" if self.serial_number else self.name
 
 
 class AssetAssignment(Base):
@@ -222,6 +246,12 @@ class AssetAssignment(Base):
     returned_at = Column(DateTime, nullable=True)
     is_active = Column(Boolean, default=True)
 
+    __table_args__ = (
+        # A device has at most one current holder, even under concurrent requests.
+        Index("uix_asset_active_assignment", "asset_id", unique=True,
+              postgresql_where=text("is_active"), sqlite_where=text("is_active")),
+    )
+
 
 class AssetRequest(Base):
     __tablename__ = "asset_requests"
@@ -231,7 +261,18 @@ class AssetRequest(Base):
     requested_by = Column(String, ForeignKey("users.id"), nullable=False, index=True)
     # Who created the ticket (an agent may raise one on someone else's behalf).
     raised_by = Column(String, ForeignKey("users.id"), nullable=True, index=True)
-    asset_category_id = Column(String, nullable=False)
+    # REQUEST: asks for an asset of a category. ISSUE: a problem with an asset
+    # the requester holds (asset_id), resolved by an admin with a note.
+    ticket_type = Column(String(20), default="REQUEST", nullable=False, index=True)
+    asset_id = Column(String, ForeignKey("assets.id"), nullable=True, index=True)
+    resolution_note = Column(Text, nullable=True)
+    # SOFTWARE tickets: the product asked for, and the seat given on fulfilment.
+    software_id = Column(String, ForeignKey("software.id"), nullable=True, index=True)
+    license_assignment_id = Column(String, ForeignKey("license_assignments.id"), nullable=True)
+    # RETURN tickets: condition confirmed when the device is handed back.
+    return_condition = Column(String(30), nullable=True)
+    # Required for REQUEST tickets; for ISSUE tickets, the asset's category when known.
+    asset_category_id = Column(String, nullable=True)
     department_id = Column(String, ForeignKey("departments.id"), nullable=True)
     requested_for = Column(String(150), nullable=True)
     reason = Column(Text, nullable=False)
@@ -287,32 +328,95 @@ class InventoryItem(Base):
     status = Column(String(20), default="IN_STOCK")
 
 
+class InventoryRequest(Base):
+    """A user asks for stock; an admin approves (stock is issued to them) or rejects it."""
+    __tablename__ = "inventory_requests"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    company_id = Column(String, ForeignKey("companies.id"), nullable=False, index=True)
+    item_id = Column(String, ForeignKey("inventory_items.id"), nullable=False, index=True)
+    requested_by = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    quantity = Column(Integer, nullable=False)
+    reason = Column(Text, nullable=False)
+    # PENDING, APPROVED (stock issued), REJECTED or CANCELLED.
+    status = Column(String(20), default="PENDING", nullable=False, index=True)
+    rejection_reason = Column(Text, nullable=True)
+    processed_by = Column(String, ForeignKey("users.id"), nullable=True)
+    processed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 # --- Software & Licensing ---
 
 class Software(Base):
+    """A software product (name, publisher, version). Seats come from its SoftwareLicense rows."""
     __tablename__ = "software"
 
     id = Column(String, primary_key=True, default=gen_uuid)
     company_id = Column(String, ForeignKey("companies.id"), nullable=False, index=True)
     name = Column(String(150), nullable=False)
+    # Publisher.
     vendor = Column(String(150), nullable=True)
     version = Column(String(50), nullable=True)
+    # Summary columns kept in step with the licenses and seat assignments
+    # (see services/software_service.sync_totals), for reports and older screens.
     license_type = Column(String(50), default="PERPETUAL")
-    total_licenses = Column(Integer, default=1)
+    total_licenses = Column(Integer, default=0)
     used_licenses = Column(Integer, default=0)
     cost = Column(Numeric(12, 2), default=0.0)
     status = Column(String(20), default="ACTIVE")
     expiry_date = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class SoftwareLicense(Base):
+    """A purchased license entitlement for a product: a number of seats with its own terms."""
+    __tablename__ = "software_licenses"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    company_id = Column(String, ForeignKey("companies.id"), nullable=False, index=True)
+    software_id = Column(String, ForeignKey("software.id"), nullable=False, index=True)
+    license_type = Column(String(50), default="PERPETUAL", nullable=False)
+    # Sensitive: shown in full to admins only.
+    license_number = Column(String(255), nullable=True)
+    seats = Column(Integer, nullable=False)
+    purchase_date = Column(DateTime, nullable=True)
+    expiry_date = Column(DateTime, nullable=True)
+    renewal_date = Column(DateTime, nullable=True)
+    cost = Column(Numeric(12, 2), default=0, nullable=False)
+    vendor_id = Column(String, ForeignKey("vendors.id"), nullable=True)
+    purchase_order_id = Column(String, ForeignKey("purchase_orders.id"), nullable=True)
+    status = Column(String(20), default="ACTIVE", nullable=False)
+    notes = Column(Text, nullable=True)
+    created_by = Column(String, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("uix_company_license_number", "company_id", "license_number", unique=True),
+    )
 
 
 class SoftwareLicenseAssignment(Base):
+    """One seat of a license given to a user (optionally on a device); released seats keep their history."""
     __tablename__ = "license_assignments"
 
     id = Column(String, primary_key=True, default=gen_uuid)
     company_id = Column(String, ForeignKey("companies.id"), nullable=False, index=True)
     software_id = Column(String, ForeignKey("software.id"), nullable=False)
+    license_id = Column(String, ForeignKey("software_licenses.id"), nullable=True, index=True)
     user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    asset_id = Column(String, ForeignKey("assets.id"), nullable=True)
     assigned_at = Column(DateTime, default=datetime.utcnow)
+    assigned_by = Column(String, ForeignKey("users.id"), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+    released_at = Column(DateTime, nullable=True)
+    released_by = Column(String, ForeignKey("users.id"), nullable=True)
+
+    __table_args__ = (
+        # One active seat per user per license.
+        Index("uix_license_user_active", "license_id", "user_id", unique=True,
+              postgresql_where=text("is_active"), sqlite_where=text("is_active")),
+    )
 
 
 # --- Vendors, Procurement & Maintenance ---
@@ -341,6 +445,72 @@ class PurchaseOrder(Base):
     order_date = Column(DateTime, default=datetime.utcnow)
     total_amount = Column(Numeric(12, 2), default=0.0)
     status = Column(String(50), default="PENDING")
+    # Who raised it: they cannot approve it themselves unless policy allows.
+    created_by = Column(String, ForeignKey("users.id"), nullable=True)
+
+
+class StockReceipt(Base):
+    """Hardware received against an approved (ordered) purchase order, before devices are registered."""
+    __tablename__ = "stock_receipts"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    company_id = Column(String, ForeignKey("companies.id"), nullable=False, index=True)
+    purchase_order_id = Column(String, ForeignKey("purchase_orders.id"), nullable=False, index=True)
+    category = Column(String(100), nullable=False)
+    brand = Column(String(100), nullable=True)
+    model = Column(String(100), nullable=True)
+    specifications = Column(Text, nullable=True)
+    quantity = Column(Integer, nullable=False)
+    unit_cost = Column(Numeric(12, 2), default=0, nullable=False)
+    location = Column(String(100), nullable=True)
+    notes = Column(Text, nullable=True)
+    received_by = Column(String, ForeignKey("users.id"), nullable=True)
+    received_at = Column(DateTime, default=datetime.utcnow)
+
+
+class StockMovement(Base):
+    """Ledger of stock changes. `reference` is a client key that stops the same movement being recorded twice."""
+    __tablename__ = "stock_movements"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    company_id = Column(String, ForeignKey("companies.id"), nullable=False, index=True)
+    # RECEIPT, REGISTER, ASSIGN, RETURN, TRANSFER, ISSUE, ADJUSTMENT, REPAIR, RETIRE
+    movement_type = Column(String(20), nullable=False, index=True)
+    # HARDWARE (assets / receipts) or CONSUMABLE (inventory items)
+    item_kind = Column(String(20), nullable=False)
+    asset_id = Column(String, ForeignKey("assets.id"), nullable=True, index=True)
+    inventory_item_id = Column(String, ForeignKey("inventory_items.id"), nullable=True, index=True)
+    receipt_id = Column(String, ForeignKey("stock_receipts.id"), nullable=True)
+    purchase_order_id = Column(String, ForeignKey("purchase_orders.id"), nullable=True)
+    quantity = Column(Integer, nullable=False, default=1)
+    from_location = Column(String(100), nullable=True)
+    to_location = Column(String(100), nullable=True)
+    reason = Column(Text, nullable=True)
+    reference = Column(String(64), nullable=True)
+    performed_by = Column(String, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    __table_args__ = (
+        Index("uix_company_movement_reference", "company_id", "reference", unique=True),
+    )
+
+
+class ApprovalPolicy(Base):
+    """Who may approve one kind of request in an organization, and whether self-approval is allowed."""
+    __tablename__ = "approval_policies"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    company_id = Column(String, ForeignKey("companies.id"), nullable=False, index=True)
+    # ASSET, SOFTWARE, RETURN, ISSUE, STOCK, PURCHASE_ORDER
+    request_type = Column(String(30), nullable=False)
+    approver_roles = Column(JSON, nullable=False)
+    allow_self_approval = Column(Boolean, default=False, nullable=False)
+    updated_by = Column(String, ForeignKey("users.id"), nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index("uix_company_policy_type", "company_id", "request_type", unique=True),
+    )
 
 
 class Maintenance(Base):

@@ -1,42 +1,63 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import {
   approveTicket,
   cancelTicket,
   fulfilTicket,
+  RETURN_CONDITIONS,
+  confirmReturnTicket,
+  fulfilSoftwareTicket,
   rejectTicket,
   releaseTicket,
+  resolveTicket,
   startTicket,
   ticketStatusLabel,
   ticketStatusStyle,
   type AssetRequest,
 } from "@/lib/tickets";
-import type { Asset } from "@/types/asset";
+import { assetStatusLabel, formatDate, type Asset, type AssetStatus, assetLabel } from "@/types/asset";
 
 export function ticketNumber(ticket: AssetRequest): string {
   return `#${ticket.id.slice(0, 6).toUpperCase()}`;
 }
 
-export function TicketStatusBadge({ status }: { status: string }) {
+export function TicketStatusBadge({ status, ticketType }: { status: string; ticketType?: string }) {
   return (
     <span className={`inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-bold ring-1 ring-inset ${ticketStatusStyle(status)}`}>
-      {ticketStatusLabel(status)}
+      {ticketStatusLabel(status, ticketType)}
     </span>
   );
 }
 
-const STEPS = ["PENDING", "IN_PROGRESS", "APPROVED", "FULFILLED"] as const;
+/** "Asset request" or "Problem" chip. */
+const TYPE_CHIP: Record<string, [string, string]> = {
+  ISSUE: ["Problem", "bg-orange-50 text-orange-700 ring-1 ring-inset ring-orange-200"],
+  SOFTWARE: ["Software", "bg-indigo-50 text-indigo-700 ring-1 ring-inset ring-indigo-200"],
+  RETURN: ["Return", "bg-sky-50 text-sky-700 ring-1 ring-inset ring-sky-200"],
+  REQUEST: ["Asset request", "bg-slate-100 text-slate-600"],
+};
 
-/** Badge plus a four-step bar showing how far the ticket has got. */
-export function TicketProgress({ status }: { status: string }) {
-  const reached = STEPS.indexOf(status as (typeof STEPS)[number]);
+/** "Asset request", "Problem", "Software" or "Return" chip. */
+export function TicketTypeChip({ ticketType }: { ticketType: string }) {
+  const [text, style] = TYPE_CHIP[ticketType] ?? TYPE_CHIP.REQUEST;
+  return <span className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-bold ${style}`}>{text}</span>;
+}
+
+const REQUEST_STEPS = ["PENDING", "IN_PROGRESS", "APPROVED", "FULFILLED"];
+const ISSUE_STEPS = ["PENDING", "IN_PROGRESS", "FULFILLED"];
+
+/** Badge plus a bar showing how far the ticket has got. */
+export function TicketProgress({ status, ticketType }: { status: string; ticketType?: string }) {
+  const steps = ticketType === "ISSUE" ? ISSUE_STEPS : REQUEST_STEPS;
+  const reached = steps.indexOf(status);
   return (
     <div className="space-y-1.5">
-      <TicketStatusBadge status={status} />
+      <TicketStatusBadge status={status} ticketType={ticketType} />
       {reached >= 0 && (
         <div className="flex w-28 gap-0.5" aria-hidden="true">
-          {STEPS.map((step, index) => (
+          {steps.map((step, index) => (
             <span
               key={step}
               className={`h-1 flex-1 rounded-full ${
@@ -59,7 +80,9 @@ export function ticketHandler(ticket: AssetRequest): string | null {
     case "APPROVED":
       return `Approved by ${ticket.processed_by_name}`;
     case "FULFILLED":
-      return `Fulfilled by ${ticket.processed_by_name}`;
+      return `${
+        ticket.ticket_type === "ISSUE" ? "Resolved" : ticket.ticket_type === "RETURN" ? "Received" : "Fulfilled"
+      } by ${ticket.processed_by_name}`;
     case "REJECTED":
       return `Rejected by ${ticket.processed_by_name}`;
     case "CANCELLED":
@@ -67,6 +90,36 @@ export function ticketHandler(ticket: AssetRequest): string | null {
     default:
       return null;
   }
+}
+
+/**
+ * The asset a problem ticket is about, with what an admin needs to resolve it.
+ * `link` adds a link to the asset page (admins only).
+ */
+export function TicketAssetDetails({ ticket, link = false }: { ticket: AssetRequest; link?: boolean }) {
+  const asset = ticket.asset;
+  if (!asset) return null;
+  const facts = [
+    [asset.brand, asset.model].filter(Boolean).join(" ") || null,
+    `S/N ${asset.serial_number}`,
+    assetStatusLabel(asset.status as AssetStatus),
+    asset.condition ? `Condition ${asset.condition.toLowerCase()}` : null,
+    asset.warranty_end ? `Warranty until ${formatDate(asset.warranty_end)}` : "No warranty on record",
+  ].filter(Boolean);
+  return (
+    <div className="mt-1 rounded-md border border-orange-100 bg-orange-50/50 px-2 py-1.5 text-[11px] text-slate-600">
+      <p className="font-semibold text-slate-800">
+        {link ? (
+          <Link href={`/assets/${asset.id}`} className="hover:text-brand-700 hover:underline">
+            {assetLabel(asset)} · {asset.name}
+          </Link>
+        ) : (
+          `${assetLabel(asset)} · ${asset.name}`
+        )}
+      </p>
+      <p>{facts.join(" · ")}</p>
+    </div>
+  );
 }
 
 /**
@@ -78,14 +131,19 @@ export function TicketActions({
   stock,
   onDone,
   onError,
+  canHandle = true,
 }: {
   ticket: AssetRequest;
   /** In-stock assets to choose from when fulfilling. */
   stock: Asset[];
+  /** False for users: they can only cancel their own open ticket; admins work the queue. */
+  canHandle?: boolean;
   onDone: (message: string) => void;
   onError: (message: string) => void;
 }) {
-  const [mode, setMode] = useState<"fulfil" | "reject" | "cancel" | null>(null);
+  const [mode, setMode] = useState<"fulfil" | "reject" | "cancel" | "resolve" | "handover" | null>(null);
+  const [note, setNote] = useState("");
+  const [condition, setCondition] = useState<(typeof RETURN_CONDITIONS)[number] | "">("");
   const [assetId, setAssetId] = useState("");
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
@@ -134,6 +192,72 @@ export function TicketActions({
     );
   }
 
+  if (mode === "handover") {
+    return (
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <label>
+          <span className="sr-only">Condition on return</span>
+          <select
+            value={condition}
+            onChange={(event) => setCondition(event.target.value as (typeof RETURN_CONDITIONS)[number])}
+            className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs"
+          >
+            <option value="">Condition it came back in…</option>
+            {RETURN_CONDITIONS.map((c) => (
+              <option key={c} value={c}>{c.charAt(0) + c.slice(1).toLowerCase()}</option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="button"
+          disabled={busy || !condition}
+          onClick={() =>
+            condition &&
+            run(
+              () => confirmReturnTicket(ticket.id, condition),
+              () =>
+                `${number}: device received${
+                  condition === "POOR" ? " and sent for repair" : condition === "DAMAGED" ? " and filed as damaged" : " and back in stock"
+                }.`,
+            )
+          }
+          className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-50"
+        >
+          {busy ? "Saving…" : "Confirm handover"}
+        </button>
+        <button type="button" onClick={() => setMode(null)} className="px-1 text-xs font-semibold text-slate-600">Back</button>
+      </div>
+    );
+  }
+
+  if (mode === "resolve") {
+    return (
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <label>
+          <span className="sr-only">How it was resolved</span>
+          <input
+            value={note}
+            onChange={(event) => setNote(event.target.value)}
+            maxLength={1000}
+            placeholder="What was done, e.g. replaced the battery"
+            className="w-64 rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
+          />
+        </label>
+        <button
+          type="button"
+          disabled={busy || !note.trim()}
+          onClick={() => run(() => resolveTicket(ticket.id, note.trim()), () => `${number} resolved.`)}
+          className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-50"
+        >
+          {busy ? "Saving…" : "Mark resolved"}
+        </button>
+        <button type="button" onClick={() => setMode(null)} className="px-1 text-xs font-semibold text-slate-600">
+          Back
+        </button>
+      </div>
+    );
+  }
+
   if (mode) {
     return (
       <div className="flex flex-wrap items-center justify-end gap-2">
@@ -151,7 +275,7 @@ export function TicketActions({
                 <option value="">Choose an in-stock asset…</option>
                 {options.map((asset) => (
                   <option key={asset.id} value={asset.id}>
-                    {asset.asset_tag} · {asset.name} ({asset.category})
+                    {assetLabel(asset)} · {asset.name} ({asset.category})
                   </option>
                 ))}
               </select>
@@ -189,6 +313,88 @@ export function TicketActions({
           Back
         </button>
       </div>
+    );
+  }
+
+  if (!canHandle) {
+    return (
+      <button type="button" disabled={busy} onClick={() => setMode("cancel")} className={`${link} text-xs text-slate-500 hover:text-slate-700`}>
+        Cancel ticket
+      </button>
+    );
+  }
+
+  // Software access and device returns: approve first, then fulfil (seat / handover) as its own step.
+  if (ticket.ticket_type === "SOFTWARE" || ticket.ticket_type === "RETURN") {
+    const isSoftware = ticket.ticket_type === "SOFTWARE";
+    return (
+      <span className="inline-flex flex-wrap justify-end gap-x-3 gap-y-1 text-xs">
+        {status === "PENDING" && (
+          <button type="button" disabled={busy} className={`${link} text-blue-700 hover:text-blue-800`}
+            onClick={() => run(() => startTicket(ticket.id), () => `${number} is now in progress with you.`)}>
+            Start work
+          </button>
+        )}
+        {status !== "APPROVED" && (
+          <button type="button" disabled={busy} className={`${link} text-violet-700 hover:text-violet-800`}
+            onClick={() => run(() => approveTicket(ticket.id), () => `${number} approved.`)}>
+            Approve
+          </button>
+        )}
+        {status === "APPROVED" &&
+          (isSoftware ? (
+            <button type="button" disabled={busy} className={`${link} text-emerald-700 hover:text-emerald-800`}
+              onClick={() => run(() => fulfilSoftwareTicket(ticket.id), () => `${number}: seat of ${ticket.software_name} assigned.`)}>
+              Assign seat
+            </button>
+          ) : (
+            <button type="button" disabled={busy} onClick={() => setMode("handover")} className={`${link} text-emerald-700 hover:text-emerald-800`}>
+              Confirm handover
+            </button>
+          ))}
+        {status !== "APPROVED" && (
+          <button type="button" disabled={busy} onClick={() => setMode("reject")} className={`${link} text-rose-600 hover:text-rose-700`}>
+            Reject
+          </button>
+        )}
+        {status === "IN_PROGRESS" && (
+          <button type="button" disabled={busy} className={`${link} text-slate-600 hover:text-slate-800`}
+            onClick={() => run(() => releaseTicket(ticket.id), () => `${number} is back in the pending queue.`)}>
+            Release
+          </button>
+        )}
+        <button type="button" disabled={busy} onClick={() => setMode("cancel")} className={`${link} text-slate-500 hover:text-slate-700`}>
+          Cancel ticket
+        </button>
+      </span>
+    );
+  }
+
+  if (ticket.ticket_type === "ISSUE") {
+    return (
+      <span className="inline-flex flex-wrap justify-end gap-x-3 gap-y-1 text-xs">
+        {status === "PENDING" && (
+          <button type="button" disabled={busy} className={`${link} text-blue-700 hover:text-blue-800`}
+            onClick={() => run(() => startTicket(ticket.id), () => `${number} is now in progress with you.`)}>
+            Start work
+          </button>
+        )}
+        <button type="button" disabled={busy} onClick={() => setMode("resolve")} className={`${link} text-emerald-700 hover:text-emerald-800`}>
+          Resolve
+        </button>
+        <button type="button" disabled={busy} onClick={() => setMode("reject")} className={`${link} text-rose-600 hover:text-rose-700`}>
+          Reject
+        </button>
+        {status === "IN_PROGRESS" && (
+          <button type="button" disabled={busy} className={`${link} text-slate-600 hover:text-slate-800`}
+            onClick={() => run(() => releaseTicket(ticket.id), () => `${number} is back in the pending queue.`)}>
+            Release
+          </button>
+        )}
+        <button type="button" disabled={busy} onClick={() => setMode("cancel")} className={`${link} text-slate-500 hover:text-slate-700`}>
+          Cancel ticket
+        </button>
+      </span>
     );
   }
 

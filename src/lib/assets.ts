@@ -20,10 +20,14 @@ export type AssetListParams = {
 };
 
 export type AssetCreateInput = {
-  asset_tag: string;
-  serial_number: string;
+  /** Optional; blank means no tag. */
+  asset_tag?: string;
+  /** Register this device from a stock receipt. */
+  receipt_id?: string;
+  specifications?: string;
+  serial_number?: string;
   name: string;
-  category: string;
+  category?: string;
   type?: string;
   brand?: string;
   model?: string;
@@ -69,6 +73,7 @@ export type AssetUpdateInput = Partial<
   Pick<
     Asset,
     | "name"
+    | "specifications"
     | "category"
     | "type"
     | "brand"
@@ -83,6 +88,9 @@ export type AssetUpdateInput = Partial<
     | "warranty_end"
   >
 > & {
+  /** Add, change or clear ("") the tag. */
+  asset_tag?: string;
+  serial_number?: string | null;
   purchase_price?: number;
   status?: AssetStatus;
   /** Stored on the lifecycle entry when the status changes. */

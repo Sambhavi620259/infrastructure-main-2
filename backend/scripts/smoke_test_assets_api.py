@@ -15,6 +15,7 @@ Usage (from backend/):
     SMOKE_DATABASE_URL=postgresql+psycopg2://... .venv/bin/python scripts/smoke_test_assets_api.py
 """
 import asyncio
+import base64
 import json
 import os
 import sys
@@ -36,7 +37,8 @@ from app.core.deps import get_current_user
 from app.core.security import create_access_token
 from app.models.models import AssetAssignment, AssetLifecycle, AuditLog, AuditSession, Company, PlatformRole, User
 from app.routers import (
-    asset_requests, assets, audit, auth, departments, inventory, organization, purchase_orders, reports, software,
+    approvals, asset_requests, assets, audit, auth, departments, inventory, organization, purchase_orders, reports,
+    software,
     super_admin, users, vendors,
     warranty_maintenance, maintenance, depreciation, financial, notifications, discovery, cloud, profile,
 )
@@ -96,6 +98,7 @@ def override_user():
 
 app = FastAPI()
 app.include_router(assets.router, prefix="/api")
+app.include_router(approvals.router, prefix="/api")
 app.include_router(audit.router, prefix="/api")
 app.include_router(warranty_maintenance.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
@@ -357,7 +360,7 @@ async def run_checks():
     print("Reports")
     code, body = call("GET", "/reports/types")
     type_keys = [t["key"] for t in body] if code == 200 else []
-    check("GET /reports/types lists the six report types", code == 200 and len(type_keys) == 6, body)
+    check("GET /reports/types lists the seven organization report types", code == 200 and len(type_keys) == 7, body)
 
     for key in type_keys:
         code, body = call("POST", "/reports/runs", {"report_type": key})
@@ -396,7 +399,7 @@ async def run_checks():
     check("recent runs newest first", code == 200 and len(body) == 3 and body[0]["report_config_id"] == config_id, body)
     code, body = call("GET", "/reports/summary")
     check("summary counts runs and saved reports",
-          code == 200 and body.get("generated_this_month") == 8 and body.get("saved_reports") == 1, body)
+          code == 200 and body.get("generated_this_month") == 9 and body.get("saved_reports") == 1, body)
 
     code, body = call("DELETE", f"/reports/saved/{config_id}")
     check("delete saved report", code == 204, body)
@@ -472,29 +475,47 @@ async def run_checks():
         ACTING["user_id"] = rahul_id
         code, body = call("POST", "/asset-requests", {"asset_category_id": category_id,
                                                       "requested_for_user_id": neha_id,
+                                                      "reason": "For Neha"})
+        check("user cannot raise a ticket for someone else (403)", code == 403, body)
+
+        ACTING["user_id"] = None
+        code, body = call("POST", "/asset-requests", {"asset_category_id": category_id,
+                                                      "requested_for_user_id": neha_id,
                                                       "department_id": support_dept,
                                                       "reason": "New joiner needs a laptop"})
         check("ticket records its department", code == 201 and body.get("department_name") == "Support", body)
-        check("agent raises a ticket on behalf of a user (recorded as raised by the agent)",
-              code == 201 and body.get("requested_by") == neha_id and body.get("raised_by") == rahul_id
+        check("admin raises a ticket on behalf of a user (recorded as raised by the admin)",
+              code == 201 and body.get("requested_by") == neha_id and body.get("raised_by_name") == "Smoke Admin"
               and body.get("category_name") == "Laptops"
               and body.get("requested_by_name") == "Neha Verma", body)
         ticket_id = body.get("id", "")
+        ACTING["user_id"] = rahul_id
         code, body = call("POST", "/asset-requests", {"asset_category_id": category_id, "reason": "Spare"})
         reject_id = body.get("id", "")
 
         code, body = call("GET", "/asset-requests?status=PENDING")
-        check("agent sees the company ticket queue, filtered by status",
-              code == 200 and {t["id"] for t in body} >= {ticket_id, reject_id}
-              and all(t["status"] == "PENDING" for t in body), body)
+        check("user sees only their own tickets, filtered by status",
+              code == 200 and [t["id"] for t in body] == [reject_id], body)
+        code, body = call("GET", f"/asset-requests/{ticket_id}")
+        check("user cannot open another person's ticket (404)", code == 404, body)
 
-        # Ticket workflow: pending -> in progress -> (released) -> fulfilled.
+        # Only the IT Admin works tickets; the user may only cancel their own.
+        for step in ({"status": "IN_PROGRESS"}, {"status": "APPROVED"},
+                     {"status": "APPROVED", "assigned_asset_id": stock_asset_id},
+                     {"status": "REJECTED", "rejection_reason": "x"}):
+            code, body = call("PUT", f"/asset-requests/{reject_id}", step)
+            check(f"user cannot move even their own ticket to {step['status'].lower()} (403)", code == 403, body)
+
+        # Ticket workflow, worked by the admin: pending -> in progress -> (released) -> fulfilled.
+        ACTING["user_id"] = None
         code, body = call("PUT", f"/asset-requests/{ticket_id}", {"status": "IN_PROGRESS"})
-        check("agent starts work: ticket is in progress with them",
-              code == 200 and body.get("status") == "IN_PROGRESS" and body.get("processed_by") == rahul_id, body)
+        check("admin starts work: ticket is in progress with them",
+              code == 200 and body.get("status") == "IN_PROGRESS" and body.get("processed_by_name") == "Smoke Admin", body)
+        ACTING["user_id"] = rahul_id
         code, body = call("GET", "/asset-requests/counts")
-        check("counts show the in-progress ticket as open",
-              code == 200 and body.get("in_progress") == 1 and body.get("open") == 2, body)
+        check("user's counts cover only their tickets",
+              code == 200 and body.get("in_progress") == 0 and body.get("open") == 1, body)
+        ACTING["user_id"] = None
         code, body = call("PUT", f"/asset-requests/{ticket_id}", {"status": "PENDING"})
         check("releasing puts it back in the queue with no handler",
               code == 200 and body.get("status") == "PENDING" and body.get("processed_by") is None, body)
@@ -514,52 +535,174 @@ async def run_checks():
         code, body = call("PUT", f"/asset-requests/{reject_id}", {"status": "REJECTED", "rejection_reason": "  "})
         check("rejecting needs a reason", code == 400, body)
         code, body = call("PUT", f"/asset-requests/{reject_id}", {"status": "REJECTED", "rejection_reason": "No budget"})
-        check("agent rejects a ticket with a reason",
+        check("admin rejects a ticket with a reason",
               code == 200 and body.get("status") == "REJECTED" and body.get("rejection_reason") == "No budget", body)
 
-        # Approved while nothing is in stock: waits, then can be cancelled but not rejected.
+        # Approved while nothing is in stock: waits, then can be cancelled (by its owner) but not rejected.
+        ACTING["user_id"] = rahul_id
         code, body = call("POST", "/asset-requests", {"asset_category_id": category_id, "reason": "Monitor"})
         wait_id = body.get("id", "")
+        ACTING["user_id"] = None
         code, body = call("PUT", f"/asset-requests/{wait_id}", {"status": "APPROVED"})
         check("approving without an asset leaves it awaiting stock", code == 200 and body.get("status") == "APPROVED", body)
-        code, body = call("GET", "/asset-requests/counts")
-        check("counts show it awaiting stock", code == 200 and body.get("approved") == 1 and body.get("fulfilled") == 1, body)
         code, body = call("PUT", f"/asset-requests/{wait_id}", {"status": "REJECTED", "rejection_reason": "x"})
         check("an approved ticket cannot be rejected", code == 400, body)
+        ACTING["user_id"] = rahul_id
+        code, body = call("GET", "/asset-requests/counts")
+        check("counts show it awaiting stock", code == 200 and body.get("approved") == 1 and body.get("fulfilled") == 0, body)
         code, body = call("PUT", f"/asset-requests/{wait_id}", {"status": "CANCELLED"})
-        check("an approved ticket can be cancelled", code == 200 and body.get("status") == "CANCELLED", body)
+        check("the user cancels their own approved ticket", code == 200 and body.get("status") == "CANCELLED", body)
+        ACTING["user_id"] = None
+        code, body = call("GET", "/notifications")
+        check("the admin handling it is told the user cancelled it",
+              code == 200 and any(n["title"].startswith("Rahul Sharma cancelled ticket") for n in body),
+              [n["title"] for n in body][:5])
+        ACTING["user_id"] = rahul_id
 
+        # Only the IT Admin hands assets out or takes them back.
         code, body = call("POST", f"/assets/{stock_asset_id}/unassign")
-        check("agent unassigns an asset", code == 200 and body.get("status") == "IN_STOCK", body)
+        check("user cannot unassign an asset (403)", code == 403, body)
+        code, body = call("POST", f"/assets/{stock_asset_id}/assign", {"user_id": rahul_id})
+        check("user cannot assign an asset (403)", code == 403, body)
+        code, body = call("PUT", f"/assets/{stock_asset_id}", {"status": "IN_STOCK"})
+        check("user cannot change someone else's asset (404)", code == 404, body)
+        ACTING["user_id"] = None
+        code, body = call("POST", f"/assets/{stock_asset_id}/unassign")
+        check("admin unassigns an asset", code == 200 and body.get("status") == "IN_STOCK", body)
         code, body = call("POST", f"/assets/{stock_asset_id}/assign", {"user_id": neha_id})
-        check("agent assigns an asset to a user", code == 200 and body.get("assigned_to_id") == neha_id, body)
+        check("admin assigns an asset to a user", code == 200 and body.get("assigned_to_id") == neha_id, body)
+        code, body = call("POST", "/assets", {"asset_tag": "AGT-R", "serial_number": "SN-AGT-R",
+                                              "name": "Rahul's Laptop", "category": "Laptop"})
+        own_asset_id = body.get("id", "")
+        call("POST", f"/assets/{own_asset_id}/assign", {"user_id": rahul_id})
+        ACTING["user_id"] = rahul_id
 
-        code, body = call("PUT", f"/assets/{stock_asset_id}", {"status": "IN_REPAIR", "status_remarks": "Keyboard"})
-        check("agent changes asset status", code == 200 and body.get("status") == "IN_REPAIR", body)
-        code, body = call("PUT", f"/assets/{stock_asset_id}", {"purchase_price": "1"})
-        check("agent cannot edit asset purchase details (403)", code == 403, body)
+        # A user sees and updates only the assets assigned to them.
+        code, body = call("GET", "/assets")
+        check("user's asset list holds only their own assets",
+              code == 200 and [a["asset_tag"] for a in body] == ["AGT-R"], body)
+        code, body = call("GET", f"/assets/{stock_asset_id}")
+        check("user cannot open someone else's asset (404)", code == 404, body)
+        code, body = call("GET", f"/assets/{stock_asset_id}/lifecycle")
+        check("user cannot read someone else's asset history (404)", code == 404, body)
+        code, body = call("GET", "/assets/counts")
+        check("user's asset counts cover only their own assets",
+              code == 200 and body.get("total") == 1 and body.get("assigned") == 1, body)
+        code, body = call("GET", "/assets/events")
+        check("user's activity feed covers only their own assets",
+              code == 200 and body and all(e["asset_tag"] == "AGT-R" for e in body), body)
+        code, body = call("PUT", f"/assets/{own_asset_id}", {"status": "IN_REPAIR", "status_remarks": "Keyboard"})
+        check("user changes their own asset's status", code == 200 and body.get("status") == "IN_REPAIR", body)
+        code, body = call("PUT", f"/assets/{own_asset_id}", {"status": "IN_STOCK"})
+        check("user cannot hand their asset back by changing its status (403)", code == 403, body)
+        code, body = call("PUT", f"/assets/{own_asset_id}", {"purchase_price": "1"})
+        check("user cannot edit asset purchase details (403)", code == 403, body)
+
+        # Problem tickets: raised on an asset the user holds, resolved by the admin.
+        code, body = call("POST", "/asset-requests", {"ticket_type": "ISSUE", "reason": "Broken"})
+        check("a problem ticket needs an asset", code == 400, body)
+        code, body = call("POST", "/asset-requests", {"ticket_type": "ISSUE", "asset_id": stock_asset_id, "reason": "x"})
+        check("user cannot report a problem with someone else's asset", code == 400, body)
+        code, body = call("POST", "/asset-requests", {"ticket_type": "ISSUE", "asset_id": own_asset_id,
+                                                      "reason": "Battery drains in an hour"})
+        check("user reports a problem with their own asset",
+              code == 201 and body.get("ticket_type") == "ISSUE" and body.get("asset", {}).get("asset_tag") == "AGT-R"
+              and body["asset"].get("serial_number") == "SN-AGT-R", body)
+        issue_id = body.get("id", "")
+        code, body = call("PUT", f"/asset-requests/{issue_id}", {"status": "FULFILLED", "resolution_note": "x"})
+        check("user cannot resolve their own problem ticket (403)", code == 403, body)
+
+        ACTING["user_id"] = None
+        code, body = call("GET", f"/asset-requests?asset_id={own_asset_id}")
+        check("admin sees problem tickets on an asset, with its details",
+              code == 200 and [t["id"] for t in body] == [issue_id] and body[0]["asset"]["status"] == "IN_REPAIR", body)
+        code, body = call("PUT", f"/asset-requests/{issue_id}", {"status": "APPROVED"})
+        check("a problem ticket cannot be 'approved'", code == 400, body)
+        code, body = call("PUT", f"/asset-requests/{issue_id}", {"status": "IN_PROGRESS"})
+        check("admin starts work on the problem", code == 200 and body.get("status") == "IN_PROGRESS", body)
+        code, body = call("PUT", f"/asset-requests/{issue_id}", {"status": "FULFILLED", "resolution_note": "  "})
+        check("resolving needs a note", code == 400, body)
+        code, body = call("PUT", f"/asset-requests/{issue_id}", {"status": "FULFILLED",
+                                                                   "resolution_note": "Replaced the battery"})
+        check("admin resolves the problem with a note",
+              code == 200 and body.get("status") == "FULFILLED" and body.get("resolution_note") == "Replaced the battery", body)
+        code, body = call("GET", f"/assets/{own_asset_id}")
+        check("resolving does not take the asset from the user", code == 200 and body.get("assigned_to_id") == rahul_id, body)
+        ACTING["user_id"] = rahul_id
+        code, body = call("GET", "/notifications")
+        check("user is told their problem was resolved, with the note",
+              code == 200 and any(n["title"] == "Your problem with AGT-R is resolved" and "Replaced the battery" in n["message"]
+                                  for n in body), [n["title"] for n in body][:5])
         code, body = call("POST", "/assets", {"asset_tag": "AGT-2", "serial_number": "SN-AGT-2",
                                               "name": "Nope", "category": "Laptop"})
         check("agent cannot register assets (403)", code == 403, body)
 
-        code, body = call("POST", f"/inventory/{item_id}/adjust", {"change": -2, "reason": "Issued to Neha"})
-        check("agent issues stock; status turns LOW_STOCK at reorder level",
+        # Stock: users request it, the IT Admin approves and issues it.
+        code, body = call("POST", f"/inventory/{item_id}/adjust", {"change": -2, "reason": "Taking some"})
+        check("user cannot move stock directly (403)", code == 403, body)
+        code, body = call("POST", "/inventory/requests", {"item_id": item_id, "quantity": 2, "reason": "For the new joiners"})
+        check("user requests stock", code == 201 and body.get("status") == "PENDING"
+              and body.get("item_name") == "USB-C cable" and body.get("available") == 5, body)
+        stock_req = body.get("id", "")
+        code, body = call("PUT", f"/inventory/requests/{stock_req}", {"status": "APPROVED"})
+        check("user cannot approve their own stock request (403)", code == 403, body)
+        code, body = call("POST", "/inventory/requests", {"item_id": item_id, "quantity": 50, "reason": "Too many"})
+        big_req = body.get("id", "")
+        code, body = call("POST", "/inventory/requests", {"item_id": item_id, "quantity": 1, "reason": "Changed my mind"})
+        code, body = call("PUT", f"/inventory/requests/{body.get('id', '')}", {"status": "CANCELLED"})
+        check("user cancels their own pending stock request", code == 200 and body.get("status") == "CANCELLED", body)
+
+        ACTING["user_id"] = None
+        code, body = call("GET", "/inventory/requests?status=PENDING")
+        check("admin sees pending stock requests with names",
+              code == 200 and len(body) == 2 and all(r["requested_by_name"] == "Rahul Sharma" for r in body), body)
+        code, body = call("PUT", f"/inventory/requests/{big_req}", {"status": "APPROVED"})
+        check("approving more than is in stock is refused", code == 400, body)
+        code, body = call("PUT", f"/inventory/requests/{big_req}", {"status": "REJECTED"})
+        check("rejecting needs a reason", code == 400, body)
+        code, body = call("PUT", f"/inventory/requests/{big_req}", {"status": "REJECTED", "rejection_reason": "Too many"})
+        check("admin rejects a stock request", code == 200 and body.get("status") == "REJECTED", body)
+        code, body = call("PUT", f"/inventory/requests/{stock_req}", {"status": "APPROVED"})
+        check("admin approves: stock is issued", code == 200 and body.get("status") == "APPROVED"
+              and body.get("processed_by_name") == "Smoke Admin", body)
+        code, body = call("GET", f"/inventory/{item_id}")
+        check("approval lowers stock; status turns LOW_STOCK at reorder level",
               code == 200 and body.get("quantity") == 3 and body.get("status") == "LOW_STOCK", body)
+        code, body = call("PUT", f"/inventory/requests/{stock_req}", {"status": "REJECTED", "rejection_reason": "x"})
+        check("a decided stock request is final", code == 400, body)
         code, body = call("POST", f"/inventory/{item_id}/adjust", {"change": -10, "reason": "Too many"})
         check("issuing more than in stock is refused", code == 400, body)
         code, body = call("POST", f"/inventory/{item_id}/adjust", {"change": 10, "reason": "Delivery"})
-        check("agent receives stock", code == 200 and body.get("quantity") == 13 and body.get("status") == "IN_STOCK", body)
+        check("admin receives stock", code == 200 and body.get("quantity") == 13 and body.get("status") == "IN_STOCK", body)
+        ACTING["user_id"] = rahul_id
+        code, body = call("GET", "/inventory/requests")
+        check("user sees their own stock requests and the outcome",
+              code == 200 and len(body) == 3 and {r["status"] for r in body} == {"APPROVED", "REJECTED", "CANCELLED"}, body)
+        code, body = call("GET", "/notifications")
+        check("user is told their stock request was approved",
+              code == 200 and any(n["title"] == "Your request for USB-C cable was approved" for n in body), [n["title"] for n in body][:6])
+
         code, body = call("PUT", f"/inventory/{item_id}", {"reorder_level": 1})
         check("agent cannot edit inventory settings (403)", code == 403, body)
 
+        code, body = call("GET", "/reports/types")
+        check("user is offered only personal reports",
+              code == 200 and sorted(t["key"] for t in body) == ["my_assets", "my_tickets"], body)
         code, body = call("POST", "/reports/runs", {"report_type": "asset_inventory"})
-        check("agent generates a report", code == 201, body)
+        check("user cannot run an organization-wide report (403)", code == 403, body)
+        code, body = call("POST", "/reports/runs", {"report_type": "my_assets"})
+        check("user generates a report of their own assets", code == 201 and body.get("row_count") == 1, body)
+        my_run = body.get("id", "")
+        code, body = call("POST", "/reports/runs", {"report_type": "my_tickets"})
+        check("user's ticket report covers only their tickets", code == 201 and body.get("row_count") == 3, body)
 
         code, body = call("GET", "/users")
         check("agent cannot read full user records (403)", code == 403, body)
-        code, body = call("GET", "/users/directory")
-        check("agent gets a names-only directory (no emails or roles)",
-              code == 200 and len(body) >= 3 and all(set(u) == {"id", "full_name", "department_id"} for u in body), body)
+        user_token = create_access_token({"sub": rahul_id})
+        check("user cannot subscribe to the company-wide asset feed",
+              await ws_rejected(f"{WS_BASE}/assets/ws/{COMPANY_ID}?token={user_token}"))
+        # Area-level blocking (directory, maintenance, vendors...) is enforced by
+        # the access guard and covered in scripts/security_test.py.
         code, body = call("DELETE", f"/users/{neha_id}")
         check("agent cannot remove users (403)", code == 403, body)
 
@@ -575,18 +718,19 @@ async def run_checks():
     print("Admin reviews an IT Agent's work")
     code, body = call("GET", f"/users/{rahul_id}/activity")
     summary = body.get("summary", {}) if code == 200 else {}
-    check("activity summary counts the agent's work",
-          code == 200 and summary.get("tickets_raised") == 3 and summary.get("tickets_approved") == 1
-          and summary.get("tickets_rejected") == 1 and summary.get("assets_assigned") == 1
-          and summary.get("assets_unassigned") == 1 and summary.get("stock_adjustments") == 2
-          and summary.get("reports_generated") == 1, summary)
+    check("activity summary counts the user's work",
+          code == 200 and summary.get("tickets_raised") == 3 and summary.get("tickets_approved") == 0
+          and summary.get("tickets_rejected") == 0 and summary.get("assets_assigned") == 0
+          and summary.get("assets_unassigned") == 0 and summary.get("stock_adjustments") == 0
+          and summary.get("reports_generated") == 2, summary)
     actions = [entry["action"] for entry in body.get("recent", [])]
     check("activity feed lists their actions newest first",
           code == 200 and actions[:1] == ["CHANGE_PASSWORD"] and "PROCESS_ASSET_REQUEST" in actions
           and "USER_LOGIN" not in actions, actions)
     code, body = call("GET", f"/asset-requests?processed_by={rahul_id}")
-    check("tickets processed by the agent, with processor name",
-          code == 200 and len(body) == 3 and all(t["processed_by_name"] == "Rahul Sharma" for t in body), body)
+    check("tickets the user closed themselves (their cancellation), with name",
+          code == 200 and len(body) == 1 and body[0]["status"] == "CANCELLED"
+          and body[0]["processed_by_name"] == "Rahul Sharma", body)
     ACTING["user_id"] = rahul_id
     call("POST", "/asset-requests", {"asset_category_id": category_id, "reason": "Second monitor"})
     ACTING["user_id"] = None
@@ -621,6 +765,11 @@ async def run_checks():
     check("duplicate PO number is refused", code == 400, body)
     code, body = call("PUT", f"/purchase-orders/{po_id}/status", {"status": "RECEIVED"})
     check("PO cannot skip from PENDING to RECEIVED", code == 400, body)
+    code, body = call("PUT", f"/purchase-orders/{po_id}/status", {"status": "ORDERED"})
+    check("whoever raised a PO cannot approve it by default", code == 403, body)
+    code, body = call("PUT", "/approval-policies/PURCHASE_ORDER", {"approver_roles": ["IT_ADMIN"], "allow_self_approval": True})
+    check("a one-admin organization can allow self-approval for POs",
+          code == 200 and body.get("allow_self_approval") is True and body.get("configured") is True, body)
     code, body = call("PUT", f"/purchase-orders/{po_id}/status", {"status": "ORDERED"})
     check("PO moves to ORDERED", code == 200 and body.get("status") == "ORDERED", body)
     code, body = call("GET", "/purchase-orders")
@@ -757,6 +906,33 @@ async def run_checks():
     check("too-short name refused", code == 422, body)
     code, body = call("GET", "/profile/activity?limit=5")
     check("own activity, newest first", code == 200 and body and body[0]["action"] == "UPDATE_PROFILE", body[:2])
+
+    ACTING["user_id"] = rahul_id
+    details = {"name": "Rahul Sharma", "location": "Pune", "phone": "+91 98765 43210", "jobTitle": "Support Engineer",
+               "employeeId": "EMP-1042", "bio": "Laptops and printers.", "organizationName": "Bold And Wise",
+               "organizationId": "BWV-001"}
+    code, body = call("PUT", "/profile", details)
+    user = body.get("user", {}) if code == 200 else {}
+    check("user saves their own details, organization name and ID",
+          code == 200 and user.get("jobTitle") == "Support Engineer" and user.get("employeeId") == "EMP-1042"
+          and user.get("organizationName") == "Bold And Wise" and user.get("organizationId") == "BWV-001"
+          and user.get("phone") == "+91 98765 43210" and user.get("companyName") == "Smoke Co", body)
+    code, body = call("PUT", "/profile", {**details, "phone": "call me maybe"})
+    check("phone with letters is refused", code == 422, body)
+    code, body = call("PUT", "/profile", {**details, "bio": "x" * 501})
+    check("about-me over 500 characters is refused", code == 422, body)
+    png = "data:image/png;base64," + base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"0" * 64).decode()
+    code, body = call("PUT", "/profile/avatar", {"image": png})
+    check("user uploads a profile photo", code == 200 and body["user"]["avatarUrl"] == png, str(body)[:120])
+    code, body = call("PUT", "/profile/avatar", {"image": "data:image/png;base64," + base64.b64encode(b"<svg/>").decode()})
+    check("a file that is not really an image is refused", code == 400, body)
+    code, body = call("PUT", "/profile/avatar", {"image": "data:image/svg+xml;base64,PHN2Zy8+"})
+    check("SVG (can carry scripts) is refused", code == 400, body)
+    code, body = call("PUT", "/profile/avatar", {"image": "data:image/png;base64," + "A" * 500_000})
+    check("an oversized photo is refused", code == 422, str(body)[:80])
+    code, body = call("DELETE", "/profile/avatar")
+    check("user removes their photo", code == 200 and body["user"]["avatarUrl"] is None, str(body)[:120])
+    ACTING["user_id"] = None
     ACTING["user_id"] = rahul_id
     code, body = call("GET", "/profile")
     ACTING["user_id"] = None
@@ -898,12 +1074,12 @@ async def run_checks():
         return [n["title"] for n in body] if code == 200 else []
 
     admin_titles = titles_for()
-    check("IT Admin was told about the new IT Agent sign-up",
-          "New IT Agent sign-up: Rahul Sharma" in admin_titles, admin_titles[:15])
+    check("IT Admin was told about the new user sign-up",
+          "New user sign-up: Rahul Sharma" in admin_titles, admin_titles[:15])
     call("POST", "/auth/register", {"name": "Late Agent", "email": "late.agent@example.com",
                                     "password": "password123", "role": "IT_AGENT"})
     check("Super Admin was told about the sign-up and the new organizations",
-          "New IT Agent sign-up: Late Agent" in titles_for(boss_id)
+          "New user sign-up: Late Agent" in titles_for(boss_id)
           and any(t.startswith("New organization: Fresh Admin") for t in titles_for(boss_id)), titles_for(boss_id)[:10])
     neha_titles = titles_for(neha_id)
     check("asset holder told when it went for repair and came back",

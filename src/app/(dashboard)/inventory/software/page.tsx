@@ -1,304 +1,179 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
-import { assignLicense, createSoftware, listSoftware, type Software } from "@/lib/software";
-import { listUserDirectory, type DirectoryEntry } from "@/lib/users";
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { licenseTypeLabel, listLicenses, type SoftwareLicense } from "@/lib/software";
+import { formatDate } from "@/types/asset";
 
-const LICENSE_TYPES = ["PERPETUAL", "SUBSCRIPTION", "PER_USER", "SITE"] as const;
+const PAGE_SIZE = 25;
 
-export default function SoftwareInventoryPage() {
-  const [items, setItems] = useState<Software[]>([]);
-  const [users, setUsers] = useState<DirectoryEntry[]>([]);
+type Filter = "all" | "expiring" | "expired" | "full";
+
+/** License entitlements: seats purchased, assigned and available, with expiry and renewal dates. */
+export default function SoftwareLicensesPage() {
+  const [licenses, setLicenses] = useState<SoftwareLicense[]>([]);
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<Filter>("all");
+  const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-  const [formOpen, setFormOpen] = useState(false);
-  const [assigning, setAssigning] = useState<string | null>(null);
-  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
-    listUserDirectory().then(setUsers).catch(() => undefined);
+    listLicenses()
+      .then(setLicenses)
+      .catch((caught) => setError(caught instanceof Error ? caught.message : "Unable to load licenses."))
+      .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    listSoftware()
-      .then((data) => {
-        if (!cancelled) setItems(data);
-      })
-      .catch((caught) => {
-        if (!cancelled) setError(caught instanceof Error ? caught.message : "Unable to load software.");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [refreshKey]);
+  const now = Date.now();
+  const soon = now + 30 * 24 * 60 * 60 * 1000;
+  const expiresAt = (l: SoftwareLicense) => (l.expiry_date ? new Date(l.expiry_date).getTime() : null);
 
-  const totalSeats = items.reduce((sum, item) => sum + item.total_licenses, 0);
-  const usedSeats = items.reduce((sum, item) => sum + item.used_licenses, 0);
+  const visible = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return licenses.filter((l) => {
+      if (needle && !`${l.software_name ?? ""} ${l.license_number ?? ""}`.toLowerCase().includes(needle)) return false;
+      const end = expiresAt(l);
+      if (filter === "expiring") return end !== null && end >= now && end <= soon;
+      if (filter === "expired") return end !== null && end < now;
+      if (filter === "full") return l.status === "ACTIVE" && l.available === 0;
+      return true;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [licenses, query, filter]);
+
+  const active = licenses.filter((l) => l.status === "ACTIVE");
+  const seats = active.reduce((sum, l) => sum + l.seats, 0);
+  const assigned = active.reduce((sum, l) => sum + l.assigned, 0);
+  const expiring = licenses.filter((l) => {
+    const end = expiresAt(l);
+    return end !== null && end >= now && end <= soon;
+  }).length;
+  const shown = visible.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   return (
     <main className="mx-auto max-w-7xl space-y-5">
       <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-[11px] font-bold uppercase tracking-wider text-brand-600">Inventory · Software</p>
-          <h1 className="mt-1 text-2xl font-extrabold tracking-tight text-slate-950">Software Inventory</h1>
-          <p className="mt-1 text-sm text-slate-500">Licences you own, seats in use, and who holds them.</p>
+          <p className="text-[11px] font-bold uppercase tracking-wider text-brand-600">Inventory · Software Licenses</p>
+          <h1 className="mt-1 text-2xl font-extrabold tracking-tight text-slate-950">Software Licenses</h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Every license bought: seats purchased, assigned and available, cost, expiry and renewal. Manage seats under Software Assets.
+          </p>
         </div>
-        <button
-          type="button"
-          onClick={() => setFormOpen(true)}
-          disabled={formOpen}
-          className="rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-brand-700 disabled:opacity-60"
-        >
-          Add software
-        </button>
+        <Link href="/assets/software" className="rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50">
+          Software Assets →
+        </Link>
       </header>
 
-      {error && (
-        <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-          {error}
-        </div>
-      )}
-      {notice && (
-        <div role="status" className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-          <span>{notice}</span>
-          <button type="button" onClick={() => setNotice("")} aria-label="Dismiss">
-            ×
-          </button>
-        </div>
-      )}
+      {error && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div>}
 
-      <section className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {[
-          ["Products", items.length],
-          ["Seats in use", usedSeats],
-          ["Seats available", totalSeats - usedSeats],
-        ].map(([label, value]) => (
-          <article key={String(label)} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-2xl font-bold text-slate-950">{loading ? "—" : value}</p>
-            <p className="mt-1 text-sm text-slate-600">{label}</p>
-          </article>
+          ["Seats purchased", seats, "text-slate-900"],
+          ["Seats assigned", assigned, "text-blue-600"],
+          ["Seats available", Math.max(seats - assigned, 0), "text-emerald-600"],
+          ["Expiring in 30 days", expiring, expiring ? "text-amber-600" : "text-slate-900"],
+        ].map(([label, value, color]) => (
+          <div key={String(label)} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <p className="text-xs font-semibold text-slate-500">{label}</p>
+            <p className={`mt-1 text-2xl font-extrabold ${color}`}>{loading ? "—" : value}</p>
+          </div>
         ))}
       </section>
 
-      {formOpen && (
-        <SoftwareForm
-          onCancel={() => setFormOpen(false)}
-          onSaved={(software) => {
-            setFormOpen(false);
-            setNotice(`${software.name} added with ${software.total_licenses} seat(s).`);
-            setError("");
-            setRefreshKey((key) => key + 1);
-          }}
-        />
-      )}
-
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-col gap-3 border-b border-slate-100 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <label className="flex-1">
+            <span className="sr-only">Search licenses</span>
+            <input
+              value={query}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setPage(0);
+              }}
+              placeholder="Search product or license number"
+              className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-brand-500 sm:max-w-sm"
+            />
+          </label>
+          <div role="tablist" aria-label="Filter licenses" className="flex flex-wrap gap-1">
+            {([["all", "All"], ["expiring", "Expiring soon"], ["expired", "Expired"], ["full", "Fully used"]] as const).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                role="tab"
+                aria-selected={filter === value}
+                onClick={() => {
+                  setFilter(value);
+                  setPage(0);
+                }}
+                className={`rounded-full px-3 py-1 text-xs font-semibold ${filter === value ? "bg-brand-600 text-white" : "text-slate-600 hover:bg-slate-100"}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="overflow-x-auto">
-          <table className="min-w-[880px] w-full text-left">
-            <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-600">
+          <table className="w-full min-w-[960px] text-left text-sm">
+            <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
               <tr>
-                {["Software", "Licence", "Seats used", "Cost", "Expires", ""].map((heading) => (
-                  <th key={heading} className="px-5 py-3">
-                    {heading}
-                  </th>
+                {["Product", "License number", "Type", "Seats", "Assigned", "Available", "Utilization", "Expiry", "Renewal", "Cost"].map((h) => (
+                  <th key={h} className="px-4 py-2.5 font-semibold">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {items.map((item) => {
-                const full = item.used_licenses >= item.total_licenses;
-                const expired = item.expiry_date ? new Date(item.expiry_date) < new Date() : false;
+              {shown.map((l) => {
+                const pct = l.seats ? Math.round((l.assigned / l.seats) * 100) : 0;
+                const end = expiresAt(l);
                 return (
-                  <tr key={item.id} className="align-top text-sm hover:bg-slate-50">
-                    <td className="px-5 py-3">
-                      <p className="font-semibold text-slate-800">{item.name}</p>
-                      <p className="text-xs text-slate-500">
-                        {[item.vendor, item.version].filter(Boolean).join(" · ") || "—"}
-                      </p>
+                  <tr key={l.id} className="hover:bg-slate-50">
+                    <td className="px-4 py-3">
+                      <Link href={`/assets/software?product=${l.software_id}`} className="font-semibold text-slate-800 hover:text-brand-700">
+                        {l.software_name}
+                      </Link>
+                      {l.status !== "ACTIVE" && <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-600">{l.status}</span>}
                     </td>
-                    <td className="px-5 py-3 text-slate-600">{item.license_type.replace("_", " ").toLowerCase()}</td>
-                    <td className="px-5 py-3">
-                      <span className={`font-semibold ${full ? "text-rose-600" : "text-slate-800"}`}>
-                        {item.used_licenses} / {item.total_licenses}
-                      </span>
+                    <td className="px-4 py-3 font-mono text-xs text-slate-600">{l.license_number ?? "—"}</td>
+                    <td className="px-4 py-3 text-slate-600">{licenseTypeLabel(l.license_type)}</td>
+                    <td className="px-4 py-3 font-semibold text-slate-800">{l.seats}</td>
+                    <td className="px-4 py-3 text-slate-700">{l.assigned}</td>
+                    <td className={`px-4 py-3 font-semibold ${l.available === 0 ? "text-rose-600" : "text-emerald-700"}`}>{l.available}</td>
+                    <td className="px-4 py-3">
+                      <div className="h-1.5 w-24 rounded-full bg-slate-100">
+                        <div className={`h-1.5 rounded-full ${pct >= 90 ? "bg-rose-500" : pct >= 70 ? "bg-amber-500" : "bg-emerald-500"}`} style={{ width: `${Math.min(pct, 100)}%` }} />
+                      </div>
+                      <span className="text-[11px] text-slate-500">{pct}%</span>
                     </td>
-                    <td className="px-5 py-3 text-slate-600">{Number(item.cost).toLocaleString()}</td>
-                    <td className={`px-5 py-3 ${expired ? "font-semibold text-rose-600" : "text-slate-600"}`}>
-                      {item.expiry_date ? new Date(item.expiry_date).toLocaleDateString() : "—"}
+                    <td className={`px-4 py-3 ${end !== null && end < now ? "font-semibold text-rose-600" : end !== null && end <= soon ? "font-semibold text-amber-700" : "text-slate-600"}`}>
+                      {formatDate(l.expiry_date)}
                     </td>
-                    <td className="px-5 py-3 text-right">
-                      {assigning === item.id ? (
-                        <AssignSeat
-                          users={users}
-                          onCancel={() => setAssigning(null)}
-                          onAssign={async (userId, userName) => {
-                            try {
-                              await assignLicense(item.id, userId);
-                              setAssigning(null);
-                              setNotice(`${item.name} seat assigned to ${userName}.`);
-                              setError("");
-                              setRefreshKey((key) => key + 1);
-                            } catch (caught) {
-                              setError(caught instanceof Error ? caught.message : "Could not assign the seat.");
-                            }
-                          }}
-                        />
-                      ) : (
-                        <button
-                          type="button"
-                          disabled={full}
-                          title={full ? "All seats are in use" : undefined}
-                          onClick={() => setAssigning(item.id)}
-                          className="text-sm font-semibold text-brand-600 hover:text-brand-700 disabled:cursor-not-allowed disabled:opacity-40"
-                        >
-                          Assign seat
-                        </button>
-                      )}
-                    </td>
+                    <td className="px-4 py-3 text-slate-600">{formatDate(l.renewal_date)}</td>
+                    <td className="px-4 py-3 text-slate-600">{Number(l.cost) ? Number(l.cost).toLocaleString() : "—"}</td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
         </div>
-        {!loading && items.length === 0 && !error && (
-          <p className="p-10 text-center text-sm text-slate-500">No software recorded yet.</p>
+        {!loading && visible.length === 0 && (
+          <p className="p-8 text-center text-sm text-slate-500">
+            {licenses.length === 0 ? "No licenses yet. Register software under Assets → Software Assets." : "No licenses match."}
+          </p>
+        )}
+        {visible.length > PAGE_SIZE && (
+          <footer className="flex items-center justify-between border-t border-slate-100 px-4 py-3 text-sm text-slate-500">
+            <span>
+              {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, visible.length)} of {visible.length}
+            </span>
+            <span className="space-x-2">
+              <button type="button" disabled={page === 0} onClick={() => setPage((p) => p - 1)} className="rounded-md border border-slate-200 px-3 py-1 disabled:opacity-50">Previous</button>
+              <button type="button" disabled={(page + 1) * PAGE_SIZE >= visible.length} onClick={() => setPage((p) => p + 1)} className="rounded-md border border-slate-200 px-3 py-1 disabled:opacity-50">Next</button>
+            </span>
+          </footer>
         )}
       </section>
     </main>
-  );
-}
-
-function AssignSeat({
-  users,
-  onAssign,
-  onCancel,
-}: {
-  users: DirectoryEntry[];
-  onAssign: (userId: string, userName: string) => void;
-  onCancel: () => void;
-}) {
-  const [userId, setUserId] = useState("");
-  return (
-    <span className="inline-flex items-center gap-2">
-      <label>
-        <span className="sr-only">User</span>
-        <select value={userId} onChange={(event) => setUserId(event.target.value)} className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs">
-          <option value="">Choose a user…</option>
-          {users.map((user) => (
-            <option key={user.id} value={user.id}>
-              {user.full_name}
-            </option>
-          ))}
-        </select>
-      </label>
-      <button
-        type="button"
-        disabled={!userId}
-        onClick={() => onAssign(userId, users.find((user) => user.id === userId)?.full_name ?? "user")}
-        className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
-      >
-        Assign
-      </button>
-      <button type="button" onClick={onCancel} className="text-xs font-semibold text-slate-600">
-        Cancel
-      </button>
-    </span>
-  );
-}
-
-function SoftwareForm({ onCancel, onSaved }: { onCancel: () => void; onSaved: (software: Software) => void }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const text = (key: string) => String(form.get(key) ?? "").trim() || undefined;
-    const name = text("name");
-    const seats = Number(form.get("total_licenses"));
-    if (!name) return setError("Enter the software name.");
-    if (!Number.isInteger(seats) || seats < 1) return setError("Seats must be a whole number of at least 1.");
-    setBusy(true);
-    try {
-      const expiry = text("expiry_date");
-      onSaved(
-        await createSoftware({
-          name,
-          vendor: text("vendor"),
-          version: text("version"),
-          license_type: text("license_type"),
-          total_licenses: seats,
-          cost: Number(form.get("cost")) || 0,
-          expiry_date: expiry ? `${expiry}T00:00:00` : undefined,
-        }),
-      );
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not add the software.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const inputClass = "mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal";
-
-  return (
-    <form onSubmit={submit} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm" noValidate>
-      <h2 className="text-base font-extrabold text-slate-900">Add software</h2>
-      <div className="mt-4 grid gap-4 sm:grid-cols-4">
-        <label className="block text-xs font-semibold text-slate-600 sm:col-span-2">
-          Name
-          <input name="name" placeholder="e.g. Microsoft 365 Business" className={inputClass} />
-        </label>
-        <label className="block text-xs font-semibold text-slate-600">
-          Vendor
-          <input name="vendor" className={inputClass} />
-        </label>
-        <label className="block text-xs font-semibold text-slate-600">
-          Version
-          <input name="version" className={inputClass} />
-        </label>
-        <label className="block text-xs font-semibold text-slate-600">
-          Licence type
-          <select name="license_type" defaultValue="SUBSCRIPTION" className={inputClass}>
-            {LICENSE_TYPES.map((type) => (
-              <option key={type} value={type}>
-                {type.replace("_", " ").toLowerCase()}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block text-xs font-semibold text-slate-600">
-          Seats
-          <input name="total_licenses" type="number" min={1} defaultValue={1} className={inputClass} />
-        </label>
-        <label className="block text-xs font-semibold text-slate-600">
-          Total cost
-          <input name="cost" type="number" min={0} step="0.01" className={inputClass} />
-        </label>
-        <label className="block text-xs font-semibold text-slate-600">
-          Expires
-          <input name="expiry_date" type="date" className={inputClass} />
-        </label>
-      </div>
-      {error && (
-        <p role="alert" className="mt-3 text-sm text-red-700">
-          {error}
-        </p>
-      )}
-      <div className="mt-4 flex gap-2">
-        <button type="submit" disabled={busy} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-bold text-white hover:bg-brand-700 disabled:opacity-50">
-          {busy ? "Saving…" : "Save software"}
-        </button>
-        <button type="button" onClick={onCancel} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700">
-          Cancel
-        </button>
-      </div>
-    </form>
   );
 }

@@ -10,8 +10,7 @@ import {
   formatDate,
   type Asset,
   type AssetCounts,
-  type AssetStatus,
-} from "@/types/asset";
+  type AssetStatus, assetLabel } from "@/types/asset";
 
 const PAGE_SIZE = 25;
 
@@ -64,7 +63,7 @@ export default function AssetStatusPage() {
   };
 
   const handleUpdated = (asset: Asset) => {
-    setNotice(`${asset.asset_tag} is now ${assetStatusLabel(asset.status)}.`);
+    setNotice(`${assetLabel(asset)} is now ${assetStatusLabel(asset.status)}.`);
     setRefreshKey((key) => key + 1);
   };
 
@@ -228,7 +227,7 @@ function StatusRow({ asset, onUpdated }: { asset: Asset; onUpdated: (asset: Asse
         <Link href={`/assets/${asset.id}`} className="font-semibold text-slate-800 hover:text-brand-700">
           {asset.name}
         </Link>
-        <p className="mt-0.5 text-xs text-slate-500">{asset.asset_tag}</p>
+        <p className="mt-0.5 text-xs text-slate-500">{assetLabel(asset)}</p>
       </td>
       <td className="px-5 py-3 text-slate-600">{asset.assigned_to_name ?? <span className="text-slate-400">Unassigned</span>}</td>
       <td className="px-5 py-3">
@@ -242,7 +241,7 @@ function StatusRow({ asset, onUpdated }: { asset: Asset; onUpdated: (asset: Asse
       <td className="px-5 py-3">
         <div className="flex flex-wrap items-center gap-2">
           <label>
-            <span className="sr-only">New status for {asset.asset_tag}</span>
+            <span className="sr-only">New status for {assetLabel(asset)}</span>
             <select
               value={next}
               onChange={(event) => setNext(event.target.value as AssetStatus | "")}
@@ -259,7 +258,7 @@ function StatusRow({ asset, onUpdated }: { asset: Asset; onUpdated: (asset: Asse
           {next && (
             <>
               <label>
-                <span className="sr-only">Note for {asset.asset_tag}</span>
+                <span className="sr-only">Note for {assetLabel(asset)}</span>
                 <input
                   value={remarks}
                   onChange={(event) => setRemarks(event.target.value)}

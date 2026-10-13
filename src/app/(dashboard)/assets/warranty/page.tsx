@@ -165,7 +165,7 @@ export default function AssetWarrantyPage() {
                 <CoverageRow
                   key={row.asset_id}
                   row={row}
-                  onSaved={() => refresh(`Coverage updated for ${row.asset_tag}.`)}
+                  onSaved={() => refresh(`Coverage updated for ${row.asset_tag ?? "untagged asset"}.`)}
                   onFileClaim={() => setClaimFor(row)}
                 />
               ))}
@@ -225,7 +225,7 @@ function CoverageRow({
           {row.name}
         </Link>
         <p className="text-xs text-slate-500">
-          {row.asset_tag} · {row.category}
+          {row.asset_tag ?? "Untagged"} · {row.category}
         </p>
       </td>
       <td className="px-5 py-3">
@@ -237,7 +237,7 @@ function CoverageRow({
         <>
           <td className="px-5 py-3">
             <label>
-              <span className="sr-only">Warranty start for {row.asset_tag}</span>
+              <span className="sr-only">Warranty start for {row.asset_tag ?? "Untagged"}</span>
               <input
                 type="date"
                 value={start}
@@ -248,7 +248,7 @@ function CoverageRow({
           </td>
           <td className="px-5 py-3">
             <label>
-              <span className="sr-only">Warranty end for {row.asset_tag}</span>
+              <span className="sr-only">Warranty end for {row.asset_tag ?? "Untagged"}</span>
               <input
                 type="date"
                 value={end}
@@ -354,7 +354,7 @@ function ClaimForm({
       <div>
         <h2 className="text-base font-extrabold text-slate-900">File a warranty claim</h2>
         <p className="mt-1 text-xs text-slate-500">
-          {asset.asset_tag} · {asset.name} · covered until {formatDate(asset.warranty_end)}
+          {asset.asset_tag ?? "Untagged"} · {asset.name} · covered until {formatDate(asset.warranty_end)}
         </p>
       </div>
       <div className="grid gap-4 sm:grid-cols-[2fr_1fr]">
@@ -461,7 +461,7 @@ function ClaimsTable({ claims, onChanged }: { claims: WarrantyClaim[]; onChanged
                   <td className="px-5 py-3 text-slate-600">{claim.claim_number ?? "—"}</td>
                   <td className="px-5 py-3">
                     <label>
-                      <span className="sr-only">Status of claim for {claim.asset_tag}</span>
+                      <span className="sr-only">Status of claim for {claim.asset_tag ?? "untagged asset"}</span>
                       <select
                         value={claim.status}
                         disabled={savingId === claim.id}

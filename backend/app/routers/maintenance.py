@@ -133,7 +133,7 @@ def create_maintenance_log(
     db.add(record)
     if record.status == "IN_PROGRESS":
         _move_asset(db, asset, AssetStatusEnum.IN_REPAIR, current_user.id, f"Maintenance: {record.issue[:200]}")
-        _tell_holder(db, asset, current_user, f"Your {asset.name} ({asset.asset_tag}) went for repair", record.issue)
+        _tell_holder(db, asset, current_user, f"Your {asset.name} ({asset.label}) went for repair", record.issue)
     db.commit()
     db.refresh(record)
 
@@ -144,7 +144,7 @@ def create_maintenance_log(
         company_id=company_id,
         user_id=current_user.id,
         entity_id=record.id,
-        new_value=f"{asset.asset_tag}: {record.issue[:120]}"
+        new_value=f"{asset.label}: {record.issue[:120]}"
     )
     return _responses(db, [record])[0]
 
@@ -206,7 +206,7 @@ def update_maintenance_log(
     if asset and record.status != old_status:
         if record.status == "IN_PROGRESS":
             _move_asset(db, asset, AssetStatusEnum.IN_REPAIR, current_user.id, f"Maintenance started: {record.issue[:200]}")
-            _tell_holder(db, asset, current_user, f"Your {asset.name} ({asset.asset_tag}) went for repair", record.issue)
+            _tell_holder(db, asset, current_user, f"Your {asset.name} ({asset.label}) went for repair", record.issue)
         elif record.status in ("COMPLETED", "CANCELLED"):
             record.completion_date = datetime.utcnow()
             if asset.status == AssetStatusEnum.IN_REPAIR:
@@ -215,11 +215,11 @@ def update_maintenance_log(
                     f"Maintenance {record.status.lower()}: {record.issue[:200]}",
                 )
             if record.status == "COMPLETED":
-                _tell_holder(db, asset, current_user, f"Your {asset.name} ({asset.asset_tag}) is back from repair", record.issue, "SUCCESS")
+                _tell_holder(db, asset, current_user, f"Your {asset.name} ({asset.label}) is back from repair", record.issue, "SUCCESS")
             reporter = db.query(User).filter(User.id == record.reported_by).first()
             if reporter and reporter.id != current_user.id:
                 notify(
-                    db, reporter, f"Repair {record.status.lower()}: {asset.asset_tag}", record.issue[:200],
+                    db, reporter, f"Repair {record.status.lower()}: {asset.label}", record.issue[:200],
                     home_link(reporter, f"/assets/{asset.id}", "/agent/assets"),
                     "SUCCESS" if record.status == "COMPLETED" else "INFO",
                 )
@@ -234,7 +234,7 @@ def update_maintenance_log(
         user_id=current_user.id,
         entity_id=record.id,
         old_value=f"Status: {old_status}",
-        new_value=f"{asset.asset_tag if asset else record.asset_id}: {record.status}"
+        new_value=f"{asset.label if asset else record.asset_id}: {record.status}"
     )
     return _responses(db, [record])[0]
 

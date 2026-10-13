@@ -123,6 +123,7 @@ A["cloud"] = created("adminA", "POST", "/cloud/resources", {"provider": "AWS", "
 A["device"] = created("adminA", "POST", "/discovery/agent-ingest", {"hostname": "h", "ip_address": "1.1.1.1", "mac_address": "aa"}, key="device_id")
 code, run = call("adminA", "POST", "/reports/runs", {"report_type": "asset_inventory", "save": True})
 A["run"], A["saved"] = run["id"], run["report_config_id"]
+A["stockreq"] = created("agentA", "POST", "/inventory/requests", {"item_id": A["item"], "quantity": 1, "reason": "Need one"})
 A["claim"] = created("adminA", "POST", "/warranty-maintenance/claims", {"asset_id": A["asset"], "issue_description": "broken"})
 
 # --- Tenant isolation: organization B's admin attacks A's records -------------
@@ -138,6 +139,8 @@ attacks = [
     ("GET", f"/asset-requests/{A['ticket']}", None), ("PUT", f"/asset-requests/{A['ticket']}", {"status": "REJECTED", "rejection_reason": "x"}),
     ("GET", f"/inventory/{A['item']}", None), ("PUT", f"/inventory/{A['item']}", {"quantity": 0}),
     ("POST", f"/inventory/{A['item']}/adjust", {"change": -1, "reason": "x"}), ("DELETE", f"/inventory/{A['item']}", None),
+    ("PUT", f"/inventory/requests/{A['stockreq']}", {"status": "APPROVED"}),
+    ("POST", "/inventory/requests", {"item_id": A["item"], "quantity": 1, "reason": "x"}),
     ("GET", f"/vendors/{A['vendor']}", None), ("PUT", f"/vendors/{A['vendor']}", {"name": "pwned"}), ("DELETE", f"/vendors/{A['vendor']}", None),
     ("PUT", f"/purchase-orders/{A['po']}/status", {"status": "CANCELLED"}),
     ("POST", "/purchase-orders", {"po_number": "X", "vendor_id": A["vendor"], "total_amount": "1"}),
@@ -167,7 +170,7 @@ a_ids = [str(v) for v in A.values()] + [v for k, v in IDS.items() if k.endswith(
 for path in ["/assets", "/users", "/departments", "/asset-requests", "/inventory", "/vendors", "/purchase-orders", "/software",
              "/maintenance", "/physical-audit/sessions", "/cloud/resources", "/discovery/devices", "/reports/runs", "/reports/saved",
              "/warranty-maintenance/claims", "/assets/events", "/audit-logs", "/notifications", "/assets/categories",
-             "/users/directory", "/warranty-maintenance/coverage"]:
+             "/users/directory", "/warranty-maintenance/coverage", "/inventory/requests"]:
     code, data = call("adminB", "GET", path)
     leaked = [value for value in a_ids if value in json.dumps(data)]
     check(f"B's list {path} shows none of A's records", not leaked, leaked)
@@ -195,15 +198,76 @@ check("reporting user edits own profile", code == 200, data)
 code, data = call("samA", "GET", "/profile")
 check("profile lists sub-admin modules", code == 200 and data["user"]["modules"] == ["SAM"], data)
 code, data = call("agentA", "PUT", f"/assets/{A['asset']}", {"name": "renamed"})
-check("IT Agent cannot edit asset details", code == 403, data)
+check("user cannot edit asset details", code in (403, 404), data)
 code, data = call("agentA", "DELETE", f"/assets/{A['asset']}")
-check("IT Agent cannot remove assets", code == 403, data)
+check("user cannot remove assets", code == 403, data)
+code, data = call("agentA", "POST", f"/assets/{A['asset']}/assign", {"user_id": IDS["agentA"]})
+check("user cannot assign assets (only the IT Admin)", code == 403, data)
+code, data = call("agentA", "POST", f"/assets/{A['asset']}/unassign")
+check("user cannot unassign assets", code == 403, data)
+code, data = call("agentA", "GET", f"/asset-requests/{A['ticket']}")
+check("user cannot open someone else's ticket", code == 404, data)
+code, data = call("agentA", "GET", "/asset-requests")
+check("user's ticket list holds none of the admin's tickets",
+      code == 200 and all(t["id"] != A["ticket"] for t in data), data)
+code, data = call("agentA", "PUT", f"/asset-requests/{A['ticket']}", {"status": "CANCELLED"})
+check("user cannot cancel someone else's ticket", code == 404, data)
+code, data = call("agentA", "POST", "/asset-requests", {"asset_category_id": A["cat"], "reason": "Need a mouse"})
+own_ticket = data.get("id", "") if isinstance(data, dict) else ""
+code, data = call("agentA", "PUT", f"/asset-requests/{own_ticket}", {"status": "IN_PROGRESS"})
+check("user cannot work even their own ticket", code == 403, data)
+code, data = call("agentA", "PUT", f"/asset-requests/{own_ticket}", {"status": "CANCELLED"})
+check("user can cancel their own ticket", code == 200 and data.get("status") == "CANCELLED", data)
+# A user reaches only their own assets, tickets, stock requests and reports.
+for path in ("/users", "/users/directory", "/maintenance", "/vendors", "/purchase-orders", "/audit-logs",
+             "/dashboard/overview", "/physical-audit/sessions", "/software", "/financial/overview",
+             "/warranty-maintenance/claims", "/cloud/resources", "/discovery/devices", "/depreciation/schedule"):
+    code, data = call("agentA", "GET", path)
+    check(f"user cannot read {path}", code == 403, str(data)[:80])
+code, data = call("agentA", "GET", "/departments")
+check("user can read department names (ticket form)", code == 200, data)
+code, data = call("agentA", "POST", "/departments", {"name": "Hack"})
+check("user cannot create departments", code == 403, data)
+code, data = call("agentA", "GET", "/assets")
+check("user sees no company assets when none are assigned to them", code == 200 and data == [], data)
+code, data = call("agentA", "GET", f"/assets/{A['asset']}")
+check("user cannot open an asset that is not theirs", code == 404, data)
+code, data = call("agentA", "GET", "/reports/runs")
+check("user does not see the admin's reports", code == 200 and all(r["id"] != A["run"] for r in data), data)
+code, data = call("agentA", "GET", f"/reports/runs/{A['run']}/download")
+check("user cannot download the admin's report", code == 404, str(data)[:80])
+code, data = call("agentA", "GET", "/reports/saved")
+check("user does not see the admin's saved reports", code == 200 and all(r["id"] != A["saved"] for r in data), data)
+code, data = call("agentA", "POST", f"/reports/saved/{A['saved']}/run")
+check("user cannot run the admin's saved report", code == 404, data)
+code, data = call("agentA", "POST", "/reports/runs", {"report_type": "asset_inventory"})
+check("user cannot run organization-wide reports", code == 403, data)
+code, data = call("adminA", "POST", "/reports/runs", {"report_type": "my_tickets"})
+check("admins use organization reports, not personal ones", code == 403, data)
+code, data = call("agentA", "POST", "/asset-requests", {"asset_category_id": A["cat"], "reason": "x",
+                                                         "requested_for_user_id": IDS["adminA"]})
+check("user cannot raise a ticket for someone else", code == 403, data)
+code, data = call("agentA", "POST", f"/inventory/{A['item']}/adjust", {"change": -1, "reason": "x"})
+check("user cannot move stock directly", code == 403, data)
+code, data = call("agentA", "PUT", f"/inventory/requests/{A['stockreq']}", {"status": "APPROVED"})
+check("user cannot approve their own stock request", code == 403, data)
+code, data = call("samA", "PUT", f"/inventory/requests/{A['stockreq']}", {"status": "APPROVED"})
+check("SAM sub-admin cannot approve stock requests (inventory is HAM)", code == 403, data)
 code, data = call("samA", "DELETE", f"/assets/{A['asset']}")
 check("SAM sub-admin cannot remove hardware assets", code == 403, data)
 code, data = call("reportA", "DELETE", f"/assets/{A['asset']}")
 check("reporting user cannot remove assets", code == 403, data)
 code, data = call("agentA", "POST", "/users", {"email": "y@example.com", "full_name": "Y", "password": "password123"})
-check("IT Agent cannot create users", code == 403, data)
+check("user cannot create users", code == 403, data)
+
+# --- Work review: admins see users' work, not other admins' -----------------
+code, data = call("adminA", "GET", f"/users/{IDS['agentA']}/activity")
+check("an IT Admin reviews a user's work", code == 200, data)
+for other in ("samA", "hamA", "reportA"):
+    code, data = call("adminA", "GET", f"/users/{IDS[other]}/activity")
+    check(f"an IT Admin cannot review another admin's work ({other})", code == 403, data)
+code, data = call("hamA", "GET", f"/users/{IDS['adminA']}/activity")
+check("a sub-admin cannot review the IT Admin's work", code == 403, data)
 
 # --- Privilege escalation ---------------------------------------------------
 print("Privilege escalation")

@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.deps import get_tenant_company_id, require_roles
 from app.models.models import Asset, AssetLifecycle, AssetStatusEnum, DiscoveredDevice, PlatformRole, User
+from app.schemas.schemas import clean_asset_tag
 from app.services.audit_service import log_audit_event
 
 router = APIRouter(prefix="/discovery", tags=["Automated Network & Agent Discovery"])
@@ -50,7 +51,8 @@ class DiscoveredDeviceOut(BaseModel):
 
 
 class ReconcileRequest(BaseModel):
-    asset_tag: str = Field(..., min_length=1, max_length=100)
+    # Optional, like on the asset form.
+    asset_tag: Optional[str] = Field(None, max_length=100)
     category: str = Field(..., min_length=1, max_length=100)
     name: Optional[str] = Field(None, max_length=150)
 
@@ -140,12 +142,15 @@ def promote_discovered_device_to_asset(
     if device.status == "MANAGED":
         raise HTTPException(status_code=400, detail="This device is already an asset.")
 
-    asset_tag = body.asset_tag.strip()
+    try:
+        asset_tag = clean_asset_tag(body.asset_tag)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
     serial = device.serial_number or f"SN-{device.mac_address.replace(':', '').upper()}"
-    if db.query(Asset.id).filter(
-        Asset.company_id == device.company_id,
-        (Asset.asset_tag == asset_tag) | (Asset.serial_number == serial),
-    ).first():
+    clash = Asset.serial_number == serial
+    if asset_tag:
+        clash = clash | (Asset.asset_tag == asset_tag)
+    if db.query(Asset.id).filter(Asset.company_id == device.company_id, clash).first():
         raise HTTPException(status_code=400, detail="An asset with this tag or serial number already exists.")
 
     asset = Asset(
@@ -182,7 +187,7 @@ def promote_discovered_device_to_asset(
         company_id=device.company_id,
         user_id=current_user.id,
         entity_id=asset.id,
-        new_value=f"{asset.asset_tag} from {device.hostname or device.mac_address}"
+        new_value=f"{asset.label} from {device.hostname or device.mac_address}"
     )
     return {"message": "Discovered device reconciled to asset.", "asset_id": asset.id}
 

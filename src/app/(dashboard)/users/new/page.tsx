@@ -57,7 +57,7 @@ export default function NewUserPage() {
         </p>
         <h1 className="mt-1 text-2xl font-extrabold">Create user</h1>
         <p className="mt-1 text-sm text-slate-500">
-          Creates the account in your organization with the password you set. IT Agents can also sign up
+          Creates the account in your organization with the password you set. Users can also sign up
           themselves; they then appear on the{" "}
           <Link href="/users" className="font-semibold text-brand-600 hover:text-brand-700">
             users list

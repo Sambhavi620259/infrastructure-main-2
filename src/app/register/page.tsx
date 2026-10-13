@@ -100,7 +100,7 @@ export default function RegisterPage() {
             className="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3.5 py-3 text-base font-normal text-slate-900 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
           >
             <option value="IT_ADMIN">IT Admin</option>
-            <option value="IT_AGENT">IT Agent</option>
+            <option value="IT_AGENT">User</option>
             <option value="SUPER_ADMIN">Super Admin (key required)</option>
           </select>
         </label>

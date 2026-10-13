@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_roles, get_tenant_company_id
 from app.models.models import PurchaseOrder, PlatformRole, User, Vendor
+from app.services.approval_service import require_approver
 from app.services.audit_service import log_audit_event
 from app.services.notification_service import notify_company
 
@@ -90,6 +91,7 @@ def create_purchase_order(
         total_amount=po_in.total_amount,
         order_date=po_in.order_date or datetime.utcnow(),
         status="PENDING",
+        created_by=current_user.id,
     )
     db.add(po)
     db.commit()
@@ -150,6 +152,9 @@ def update_po_status(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Purchase order not found.")
 
     old_status = po.status
+    # Approving (ordering) a PO follows the organization's approval rule.
+    if update_in.status == "ORDERED":
+        require_approver(db, current_user, po.company_id, "PURCHASE_ORDER", [po.created_by])
     if update_in.status not in _NEXT_STATUSES.get(old_status, set()):
         raise HTTPException(
             status_code=400,

@@ -22,8 +22,10 @@ export type AssetStatus = (typeof ASSET_STATUSES)[number];
 export interface Asset {
   id: string;
   company_id: string;
-  asset_tag: string;
-  serial_number: string;
+  /** Optional: null when the asset has no tag (see assetLabel). */
+  asset_tag: string | null;
+  /** Optional: null when no serial number was recorded. */
+  serial_number: string | null;
   name: string;
   category: string;
   type: string | null;
@@ -38,6 +40,9 @@ export interface Asset {
   department_id: string | null;
   condition: string;
   description: string | null;
+  specifications?: string | null;
+  /** The stock receipt the device was registered from. */
+  receipt_id?: string | null;
   status: AssetStatus;
   created_by: string | null;
   created_at: string;
@@ -62,7 +67,7 @@ export interface AssetLifecycleEntry {
 
 /** Mirrors AssetEventResponse: a lifecycle entry with asset and user names. */
 export interface AssetEvent extends AssetLifecycleEntry {
-  asset_tag: string;
+  asset_tag: string | null;
   asset_name: string;
   performed_by_name: string | null;
 }
@@ -85,6 +90,11 @@ export interface DashboardMetrics {
   pending_requests: number;
   low_stock_alerts: number;
   total_asset_valuation: number;
+  software_products?: number;
+  license_seats?: number;
+  license_seats_assigned?: number;
+  /** Open tickets + stock requests + purchase orders waiting for approval. */
+  pending_approvals?: number;
 }
 
 const STATUS_LABEL: Record<AssetStatus, string> = {
@@ -131,4 +141,9 @@ export function formatDate(value: string | null): string {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "—";
   return parsed.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
+}
+
+/** How to name an asset in the UI: its tag, or its serial number when it has none. */
+export function assetLabel(asset: { asset_tag: string | null; serial_number?: string | null }): string {
+  return asset.asset_tag || (asset.serial_number ? `S/N ${asset.serial_number}` : "No tag or serial");
 }

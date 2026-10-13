@@ -7,14 +7,14 @@ import { deleteAsset, getAsset, listAssetLifecycle, updateAsset } from "@/lib/as
 import { getProfile } from "@/lib/profile";
 import { AssetForm, assetToForm, formToPayload, type AssetFormValues } from "@/components/assets/asset-form";
 import { AssetCare } from "@/components/assets/asset-care";
+import { AssetTickets } from "@/components/tickets/asset-tickets";
 import { useAssetWebSocket } from "@/lib/realtime";
 import {
   assetStatusLabel,
   assetStatusStyle,
   formatDate,
   type Asset,
-  type AssetLifecycleEntry,
-} from "@/types/asset";
+  type AssetLifecycleEntry, assetLabel } from "@/types/asset";
 
 function initials(name: string): string {
   return name
@@ -33,7 +33,7 @@ export default function AssetDetailPage() {
   const [lifecycle, setLifecycle] = useState<AssetLifecycleEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  // IT Agents may only change status, condition and location (see AssetCare).
+  // Users (IT_AGENT role) may only change status, condition and location (see AssetCare).
   const [canEdit, setCanEdit] = useState(false);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -154,7 +154,7 @@ export default function AssetDetailPage() {
     ["Type", asset.type ?? "—"],
     ["Manufacturer", asset.brand ?? "—"],
     ["Model", asset.model ?? "—"],
-    ["Serial number", asset.serial_number],
+    ["Serial number", asset.serial_number ?? "—"],
     ["Condition", asset.condition],
     ["Assigned to", asset.assigned_to_name ?? "Unassigned"],
     ["Purchase date", formatDate(asset.purchase_date)],
@@ -185,7 +185,7 @@ export default function AssetDetailPage() {
               </span>
             </div>
             <p className="mt-2 text-sm text-slate-500">
-              Asset tag: <span className="font-semibold text-slate-700">{asset.asset_tag}</span>
+              Asset tag: <span className="font-semibold text-slate-700">{assetLabel(asset)}</span>
               {asset.model ? ` · ${asset.model}` : ""}
             </p>
           </div>
@@ -264,6 +264,8 @@ export default function AssetDetailPage() {
         </article>
       </section>
 
+      <AssetTickets assetId={asset.id} onChanged={fetchAsset} />
+
       <AssetCare asset={asset} onAssetChanged={fetchAsset} />
 
       {canEdit && (
@@ -281,7 +283,7 @@ export default function AssetDetailPage() {
           )}
           {confirmingRemove ? (
             <div className="mt-4 flex flex-wrap items-center gap-3">
-              <span className="text-sm font-semibold text-slate-800">Remove {asset.asset_tag} permanently?</span>
+              <span className="text-sm font-semibold text-slate-800">Remove {assetLabel(asset)} permanently?</span>
               <button
                 type="button"
                 onClick={removeAsset}

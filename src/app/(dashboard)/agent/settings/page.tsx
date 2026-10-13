@@ -26,17 +26,17 @@ export default function AgentSettingsPage() {
   const details: [string, string][] = [
     ["Name", profile?.name ?? "—"],
     ["Email", profile?.email ?? "—"],
-    ["Agent ID", profile?.agentId ?? "—"],
+    ["User ID", profile?.agentId ?? "—"],
     ["Organization", profile?.companyName ?? "—"],
     ["Department", profile?.department ?? "—"],
-    ["Role", "IT Agent"],
+    ["Role", "User"],
   ];
 
   return (
     <main className="mx-auto max-w-[1000px] space-y-4">
       <header>
-        <p className="text-[11px] font-semibold text-brand-600">IT Agent · Settings</p>
-        <h1 className="mt-1 text-2xl font-extrabold">Agent Profile</h1>
+        <p className="text-[11px] font-semibold text-brand-600">User · Settings</p>
+        <h1 className="mt-1 text-2xl font-extrabold">My Profile</h1>
         <p className="mt-1 text-xs text-slate-500">Your account details, access, and password.</p>
       </header>
 
@@ -53,7 +53,7 @@ export default function AgentSettingsPage() {
             {details.map(([label, value]) => (
               <div key={label}>
                 <dt className="text-[10px] text-slate-400">{label}</dt>
-                <dd className={`font-semibold ${label === "Agent ID" ? "font-mono" : ""}`}>{value}</dd>
+                <dd className={`font-semibold ${label === "User ID" ? "font-mono" : ""}`}>{value}</dd>
               </div>
             ))}
           </dl>

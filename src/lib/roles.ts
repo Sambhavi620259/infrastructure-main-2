@@ -132,8 +132,8 @@ export const roleDefinitions: Record<
     permissions: ["reports:read", "reports:export"],
   },
   IT_AGENT: {
-    label: "IT Agent",
-    description: "Operational support role for tickets, assigned assets, inventory and approved reports.",
+    label: "User",
+    description: "Standard user: raises tickets, requests stock, updates asset status and runs reports. Assets and stock are given out by the IT Admin.",
     scope: "Company operations",
     permissions: [
       "tickets:read",

@@ -174,11 +174,11 @@ def register(
     if is_agent:
         db.flush()
         notify_super_admins(
-            db, f"New IT Agent sign-up: {user.full_name}",
+            db, f"New user sign-up: {user.full_name}",
             f"{user.email} is waiting to be added to an organization.", "/super-admin",
         )
         for admin in db.query(User).filter(User.role == PlatformRole.IT_ADMIN, User.status == "ACTIVE").all():
-            notify(db, admin, f"New IT Agent sign-up: {user.full_name}",
+            notify(db, admin, f"New user sign-up: {user.full_name}",
                    f"{user.email} is waiting to be added to an organization.", "/users")
     elif company is not None and backend_role == PlatformRole.IT_ADMIN:
         notify_super_admins(

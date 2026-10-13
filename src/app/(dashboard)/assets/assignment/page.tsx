@@ -4,8 +4,9 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { assignAsset, listAssets, unassignAsset } from "@/lib/assets";
 import { listUsers } from "@/lib/users";
-import { assetStatusLabel, assetStatusStyle, type Asset } from "@/types/asset";
+import { assetStatusLabel, assetStatusStyle, type Asset, assetLabel } from "@/types/asset";
 import type { AppUser } from "@/types/user";
+import { listSeats, releaseSeat, type SoftwareSeat } from "@/lib/software";
 
 export default function AssetAssignmentPage() {
   const [assignable, setAssignable] = useState<Asset[]>([]);
@@ -131,7 +132,7 @@ export default function AssetAssignmentPage() {
               </option>
               {assignable.map((asset) => (
                 <option key={asset.id} value={asset.id}>
-                  {asset.name} · {asset.asset_tag}
+                  {asset.name} · {assetLabel(asset)}
                 </option>
               ))}
             </select>
@@ -197,7 +198,7 @@ export default function AssetAssignmentPage() {
                     >
                       {asset.name}
                     </Link>
-                    <p className="mt-0.5 text-xs text-slate-500">{asset.asset_tag}</p>
+                    <p className="mt-0.5 text-xs text-slate-500">{assetLabel(asset)}</p>
                   </td>
                   <td className="px-5 py-3">
                     {asset.assigned_to_name ? (
@@ -237,11 +238,71 @@ export default function AssetAssignmentPage() {
         )}
       </section>
 
+      <SoftwareSeats />
+
       <p>
         <Link href="/assets" className="text-sm font-bold text-brand-600 hover:text-brand-700">
           ← Back to all assets
         </Link>
       </p>
     </main>
+  );
+}
+
+/** Software seats currently held, with release. New seats are given on Software Assets or by fulfilling a software request. */
+function SoftwareSeats() {
+  const [seats, setSeats] = useState<SoftwareSeat[]>([]);
+  const [busy, setBusy] = useState("");
+  const [message, setMessage] = useState("");
+
+  const load = useCallback(() => {
+    listSeats({ active: true }).then(setSeats).catch(() => setSeats([]));
+  }, []);
+  useEffect(load, [load]);
+
+  const release = async (seat: SoftwareSeat) => {
+    setBusy(seat.id);
+    try {
+      await releaseSeat(seat.id);
+      setMessage(`${seat.software_name} released from ${seat.user_name}.`);
+      load();
+    } catch (caught) {
+      setMessage(caught instanceof Error ? caught.message : "Could not release the seat.");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  return (
+    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-5 py-4">
+        <div>
+          <h2 className="font-extrabold text-slate-950">Software seats ({seats.length})</h2>
+          <p className="text-xs text-slate-500">Who holds a seat of which product. Assign seats on Software Assets.</p>
+        </div>
+        <Link href="/assets/software" className="text-sm font-bold text-brand-600 hover:text-brand-700">Software Assets →</Link>
+      </div>
+      {message && <p className="border-b border-slate-100 bg-slate-50 px-5 py-2 text-xs text-slate-700">{message}</p>}
+      {seats.length === 0 ? (
+        <p className="p-8 text-center text-sm text-slate-500">No software seats assigned.</p>
+      ) : (
+        <ul className="divide-y divide-slate-100">
+          {seats.map((seat) => (
+            <li key={seat.id} className="flex items-center justify-between gap-3 px-5 py-3 text-sm">
+              <span className="min-w-0">
+                <span className="block font-semibold text-slate-800">{seat.software_name} · {seat.user_name}</span>
+                <span className="block text-xs text-slate-500">
+                  {seat.license_number ?? "No license number"}
+                  {seat.asset_label ? ` · on ${seat.asset_label}` : ""}
+                </span>
+              </span>
+              <button type="button" disabled={busy === seat.id} onClick={() => release(seat)} className="text-xs font-bold text-rose-600 hover:text-rose-700 disabled:opacity-50">
+                Release
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }

@@ -9,8 +9,7 @@ import {
   assetStatusStyle,
   formatDate,
   type Asset,
-  type DashboardMetrics,
-} from "@/types/asset";
+  type DashboardMetrics, assetLabel } from "@/types/asset";
 
 const PAGE_SIZE = 25;
 
@@ -83,9 +82,22 @@ export default function AssetsPage() {
     <main className="mx-auto max-w-7xl space-y-8">
       <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
         <div>
-          <p className="text-sm font-medium text-brand-600">Hardware asset management</p>
-          <h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-950">Assets</h1>
-          <p className="mt-2 text-slate-500">Track equipment, ownership, locations, and lifecycle status.</p>
+          <p className="text-sm font-medium text-brand-600">Assets</p>
+          <h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-950">Hardware Assets</h1>
+          <p className="mt-2 text-slate-500">One record per device: ownership, location, condition and lifecycle status.</p>
+          <nav aria-label="Asset tools" className="mt-3 flex flex-wrap gap-2 text-xs font-semibold">
+            {[
+              ["/assets/status", "Status"],
+              ["/assets/lifecycle", "Lifecycle"],
+              ["/assets/history", "History"],
+              ["/assets/audit", "Physical audit"],
+              ["/maintenance?tab=warranty", "Warranty / AMC"],
+            ].map(([href, text]) => (
+              <Link key={href} href={href} className="rounded-full border border-slate-200 bg-white px-3 py-1 text-slate-600 hover:border-brand-200 hover:text-brand-700">
+                {text}
+              </Link>
+            ))}
+          </nav>
         </div>
         <Link
           href="/assets/new"
@@ -172,7 +184,7 @@ export default function AssetsPage() {
                   <td className="px-6 py-4">
                     <p className="font-semibold text-slate-800">{asset.name}</p>
                     <p className="mt-0.5 text-sm text-slate-500">
-                      {asset.asset_tag}
+                      {assetLabel(asset)}
                       {asset.model ? ` · ${asset.model}` : ""}
                     </p>
                   </td>

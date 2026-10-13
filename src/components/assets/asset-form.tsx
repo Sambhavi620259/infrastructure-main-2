@@ -4,6 +4,8 @@ import { useEffect, useState, type FormEvent } from "react";
 import { listAssetCategories, type AssetCategory } from "@/lib/tickets";
 import { listDepartments } from "@/lib/users";
 import { listVendors, type Vendor } from "@/lib/procurement";
+import { LICENSE_TYPES, licenseTypeLabel, type SoftwareInput } from "@/lib/software";
+import type { StockReceipt } from "@/lib/inventory";
 import type { Asset } from "@/types/asset";
 import type { Department } from "@/types/user";
 
@@ -18,6 +20,7 @@ export interface AssetFormValues {
   type: string;
   brand: string;
   model: string;
+  specifications: string;
   condition: string;
   department_id: string;
   vendor_id: string;
@@ -27,26 +30,49 @@ export interface AssetFormValues {
   warranty_start: string;
   warranty_end: string;
   description: string;
+  // Software licenses only.
+  license_type: string;
+  license_number: string;
+  license_count: string;
+  license_expiry: string;
 }
 
 export function emptyAssetForm(): AssetFormValues {
   return {
-    asset_tag: "", serial_number: "", name: "", category: "", type: "Hardware", brand: "", model: "", condition: "EXCELLENT",
-    department_id: "", vendor_id: "", location_id: "", purchase_date: "", purchase_price: "", warranty_start: "",
-    warranty_end: "", description: "",
+    asset_tag: "", serial_number: "", name: "", category: "", type: "Hardware", brand: "", model: "", specifications: "",
+    condition: "EXCELLENT", department_id: "", vendor_id: "", location_id: "", purchase_date: "", purchase_price: "",
+    warranty_start: "", warranty_end: "", description: "", license_type: "PERPETUAL", license_number: "",
+    license_count: "", license_expiry: "",
+  };
+}
+
+/** Prefill a new device from the stock receipt it is registered from. */
+export function formFromReceipt(receipt: StockReceipt): AssetFormValues {
+  return {
+    ...emptyAssetForm(),
+    name: [receipt.brand, receipt.model].filter(Boolean).join(" ") || receipt.category,
+    category: receipt.category,
+    brand: receipt.brand ?? "",
+    model: receipt.model ?? "",
+    specifications: receipt.specifications ?? "",
+    location_id: receipt.location ?? "",
+    purchase_price: receipt.unit_cost ? String(receipt.unit_cost) : "",
   };
 }
 
 export function assetToForm(asset: Asset): AssetFormValues {
   const day = (value: string | null) => (value ? value.slice(0, 10) : "");
   return {
-    asset_tag: asset.asset_tag,
-    serial_number: asset.serial_number,
+    ...emptyAssetForm(),
+    asset_tag: asset.asset_tag ?? "",
+    serial_number: asset.serial_number ?? "",
     name: asset.name,
-    category: asset.category,
-    type: asset.type ?? "",
+    category: asset.category === "Uncategorised" ? "" : asset.category,
+    // Existing records are devices; the type is set automatically.
+    type: "Hardware",
     brand: asset.brand ?? "",
     model: asset.model ?? "",
+    specifications: asset.specifications ?? "",
     condition: asset.condition ?? "EXCELLENT",
     department_id: asset.department_id ?? "",
     vendor_id: asset.vendor_id ?? "",
@@ -59,19 +85,30 @@ export function assetToForm(asset: Asset): AssetFormValues {
   };
 }
 
+/** Software licenses are registered as software (product + license), not as a device record. */
+export function isSoftwareLicense(values: Pick<AssetFormValues, "type" | "category">): boolean {
+  return values.type === "Software" || values.category.trim().toLowerCase() === "software license";
+}
+
 /**
- * Convert form values to an API payload. Optional text becomes null when
- * cleared (so edits can remove a value); dates are sent as midnight.
+ * Convert form values to an API payload for a hardware asset. Optional text
+ * becomes null when cleared (so edits can remove a value); dates are sent as
+ * midnight. A blank asset tag is sent as "" (no tag).
  */
 export function formToPayload(values: AssetFormValues) {
   const text = (value: string) => value.trim() || null;
   const date = (value: string) => (value ? `${value}T00:00:00` : null);
   return {
+    asset_tag: values.asset_tag.trim(),
+    serial_number: text(values.serial_number),
     name: values.name.trim(),
+    // Blank is stored as "Uncategorised".
     category: values.category.trim(),
-    type: text(values.type),
+    // Set automatically from the Hardware / Software choice.
+    type: "Hardware",
     brand: text(values.brand),
     model: text(values.model),
+    specifications: text(values.specifications),
     condition: values.condition,
     department_id: text(values.department_id),
     vendor_id: text(values.vendor_id),
@@ -84,15 +121,49 @@ export function formToPayload(values: AssetFormValues) {
   };
 }
 
-/** Problems the user can fix before sending; empty when the form is valid. */
-export function validateAssetForm(values: AssetFormValues, creating: boolean): string {
-  if (creating && (!values.asset_tag.trim() || !values.serial_number.trim())) return "Asset tag and serial number are required.";
+/** Payload for registering a software license (product + its first license). */
+export function formToSoftware(values: AssetFormValues): SoftwareInput {
+  const date = (value: string) => (value ? `${value}T00:00:00` : undefined);
+  return {
+    name: values.name.trim(),
+    vendor: values.brand.trim() || undefined,
+    version: values.model.trim() || undefined,
+    license: {
+      license_type: values.license_type,
+      license_number: values.license_number.trim() || undefined,
+      seats: Number(values.license_count),
+      purchase_date: date(values.purchase_date),
+      expiry_date: date(values.license_expiry),
+      cost: values.purchase_price ? Number(values.purchase_price) : 0,
+      vendor_id: values.vendor_id || undefined,
+      notes: values.description.trim() || undefined,
+    },
+  };
+}
+
+const TAG_PATTERN = /^[A-Za-z0-9][A-Za-z0-9\-_./]{0,99}$/;
+const LICENSE_NUMBER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9\-_./# ]{2,254}$/;
+
+/** Problems the user can fix before sending; empty when the form is valid. Mirrors the API's checks. */
+export function validateAssetForm(values: AssetFormValues): string {
   if (!values.name.trim()) return "Give the asset a name.";
-  if (!values.category.trim()) return "Choose a category.";
-  if (values.purchase_price && !(Number(values.purchase_price) >= 0)) return "Purchase price must be zero or more.";
-  if (values.warranty_start && values.warranty_end && values.warranty_end < values.warranty_start) {
-    return "Warranty end must be after warranty start.";
+  if (isSoftwareLicense(values)) {
+    if (!/^\d+$/.test(values.license_count.trim()) || Number(values.license_count) < 1) {
+      return "License count must be a whole number of at least 1.";
+    }
+    if (values.license_number.trim() && !LICENSE_NUMBER_PATTERN.test(values.license_number.trim())) {
+      return "A license number is 3-255 letters, digits and - _ . / # characters.";
+    }
+  } else {
+    // Only the name is required; tag, serial number and category are optional.
+    if (values.asset_tag.trim() && !TAG_PATTERN.test(values.asset_tag.trim())) {
+      return "An asset tag uses letters, digits and - _ . / only (no spaces), or leave it blank.";
+    }
+    if (values.warranty_start && values.warranty_end && values.warranty_end < values.warranty_start) {
+      return "Warranty end must be after warranty start.";
+    }
   }
+  if (values.purchase_price && !(Number(values.purchase_price) >= 0)) return "Purchase price must be zero or more.";
   return "";
 }
 
@@ -103,6 +174,7 @@ export function AssetForm({
   submitLabel,
   onSubmit,
   onCancel,
+  receipt,
 }: {
   initial: AssetFormValues;
   creating: boolean;
@@ -110,6 +182,8 @@ export function AssetForm({
   submitLabel: string;
   onSubmit: (values: AssetFormValues) => void;
   onCancel: () => void;
+  /** Registering a device from this stock receipt: software mode is not offered. */
+  receipt?: StockReceipt | null;
 }) {
   const [values, setValues] = useState<AssetFormValues>(initial);
   const [categories, setCategories] = useState<AssetCategory[]>([]);
@@ -128,9 +202,12 @@ export function AssetForm({
   const set = (key: keyof AssetFormValues) => (event: { target: { value: string } }) =>
     setValues((current) => ({ ...current, [key]: event.target.value }));
 
+  // Software mode is for new records only; existing devices stay devices.
+  const software = creating && !receipt && isSoftwareLicense(values);
+
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const problem = validateAssetForm(values, creating);
+    const problem = validateAssetForm(values);
     setError(problem);
     if (!problem) onSubmit(values);
   };
@@ -144,21 +221,45 @@ export function AssetForm({
 
   return (
     <form onSubmit={submit} className="rounded-2xl border border-slate-200 bg-white shadow-sm" noValidate>
-      <Fieldset title="Identity" hint="Tag and serial number identify the asset and cannot be changed later.">
+      {creating && !receipt && (
+        <div className="border-b border-slate-100 px-5 pt-5">
+          <p className="text-xs font-bold text-slate-700">What are you registering?</p>
+          <div role="radiogroup" aria-label="Asset type" className="mt-2 inline-flex rounded-lg border border-slate-200 p-0.5 text-sm font-semibold">
+            {(
+              [
+                ["Hardware", "Hardware device"],
+                ["Software", "Software license"],
+              ] as const
+            ).map(([value, text]) => (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={values.type === value}
+                onClick={() => setValues((current) => ({ ...current, type: value }))}
+                className={`rounded-md px-4 py-2 ${values.type === value ? "bg-brand-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}
+              >
+                {text}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1 pb-1 text-[11px] text-slate-400">The asset type is set automatically: {software ? "Software" : "Hardware"}.</p>
+        </div>
+      )}
+      <Fieldset
+        title="Identity"
+        hint={
+          software
+            ? "A software license is recorded as a product with its purchased seats, not as a device."
+            : "Only the name is required. Serial number and asset tag are optional; when given they must be unique."
+        }
+      >
         <label className={label}>
           Name <Required />
-          <input value={values.name} onChange={set("name")} maxLength={150} placeholder="e.g. ThinkPad T14 Gen 4" className={input} />
+          <input value={values.name} onChange={set("name")} maxLength={150} placeholder={software ? "e.g. Microsoft 365" : "e.g. ThinkPad T14 Gen 4"} className={input} />
         </label>
         <label className={label}>
-          Asset tag <Required />
-          <input value={values.asset_tag} onChange={set("asset_tag")} readOnly={!creating} maxLength={100} placeholder="e.g. AST-0142" className={input} />
-        </label>
-        <label className={label}>
-          Serial number <Required />
-          <input value={values.serial_number} onChange={set("serial_number")} readOnly={!creating} maxLength={100} className={input} />
-        </label>
-        <label className={label}>
-          Category <Required />
+          Category <span className="font-normal text-slate-400">(optional)</span>
           <select value={values.category} onChange={set("category")} className={input}>
             <option value="">Choose…</option>
             {categoryNames.map((name) => (
@@ -168,87 +269,166 @@ export function AssetForm({
             ))}
           </select>
         </label>
+        {!software && (
+          <>
+            <label className={label}>
+              Asset tag <span className="font-normal text-slate-400">(optional)</span>
+              <input value={values.asset_tag} onChange={set("asset_tag")} maxLength={100} placeholder="e.g. AST-0142" className={input} />
+            </label>
+            <label className={label}>
+              Serial number <span className="font-normal text-slate-400">(optional)</span>
+              <input
+                value={values.serial_number}
+                onChange={set("serial_number")}
+                readOnly={!creating && Boolean(initial.serial_number)}
+                maxLength={100}
+                className={input}
+              />
+            </label>
+            <label className={label}>
+              Condition
+              <select value={values.condition} onChange={set("condition")} className={input}>
+                {CONDITIONS.map((condition) => (
+                  <option key={condition} value={condition}>
+                    {condition.charAt(0) + condition.slice(1).toLowerCase()}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </>
+        )}
         <label className={label}>
-          Type
-          <select value={values.type} onChange={set("type")} className={input}>
-            {["Hardware", "Software", "Accessory", "Peripheral", "Network", "Other"].map((type) => (
-              <option key={type} value={type}>
-                {type}
-              </option>
-            ))}
-          </select>
+          {software ? "Publisher" : "Manufacturer"}
+          <input value={values.brand} onChange={set("brand")} maxLength={100} placeholder={software ? "e.g. Microsoft" : "e.g. Lenovo"} className={input} />
         </label>
         <label className={label}>
-          Condition
-          <select value={values.condition} onChange={set("condition")} className={input}>
-            {CONDITIONS.map((condition) => (
-              <option key={condition} value={condition}>
-                {condition.charAt(0) + condition.slice(1).toLowerCase()}
-              </option>
-            ))}
-          </select>
+          {software ? "Version / edition" : "Model"}
+          <input value={values.model} onChange={set("model")} maxLength={100} placeholder={software ? "e.g. E3" : ""} className={input} />
         </label>
-        <label className={label}>
-          Brand
-          <input value={values.brand} onChange={set("brand")} maxLength={100} placeholder="e.g. Lenovo" className={input} />
-        </label>
-        <label className={label}>
-          Model
-          <input value={values.model} onChange={set("model")} maxLength={100} className={input} />
-        </label>
+        {!software && (
+          <label className={`${label} sm:col-span-2 lg:col-span-1`}>
+            Specifications
+            <input value={values.specifications} onChange={set("specifications")} maxLength={2000} placeholder="e.g. i7, 16 GB RAM, 512 GB SSD" className={input} />
+          </label>
+        )}
       </Fieldset>
 
-      <Fieldset title="Ownership & location">
-        <label className={label}>
-          Department
-          <select value={values.department_id} onChange={set("department_id")} className={input}>
-            <option value="">Not assigned</option>
-            {departments.map((department) => (
-              <option key={department.id} value={department.id}>
-                {department.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className={label}>
-          Location
-          <input value={values.location_id} onChange={set("location_id")} placeholder="e.g. Pune office, floor 2" className={input} />
-        </label>
-      </Fieldset>
+      {software ? (
+        <Fieldset title="License" hint="License Count is the number of seats bought. Assigned and available seats are tracked separately.">
+          <label className={label}>
+            License type
+            <select value={values.license_type} onChange={set("license_type")} className={input}>
+              {LICENSE_TYPES.map((type) => (
+                <option key={type} value={type}>
+                  {licenseTypeLabel(type)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className={label}>
+            License Number <span className="font-normal text-slate-400">(optional)</span>
+            <input
+              value={values.license_number}
+              onChange={set("license_number")}
+              maxLength={255}
+              autoComplete="off"
+              placeholder="e.g. M365-ABCD-1234"
+              className={`${input} font-mono`}
+            />
+            <span className="mt-1 block text-[11px] font-normal text-slate-400">Only admins see the full number; users see the last 4 characters.</span>
+          </label>
+          <label className={label}>
+            License Count <Required />
+            <input
+              type="number"
+              min={1}
+              step={1}
+              inputMode="numeric"
+              value={values.license_count}
+              onChange={set("license_count")}
+              placeholder="e.g. 100"
+              className={input}
+            />
+          </label>
+          <label className={label}>
+            Purchase date
+            <input type="date" value={values.purchase_date} onChange={set("purchase_date")} className={input} />
+          </label>
+          <label className={label}>
+            License cost
+            <input type="number" min={0} step="0.01" value={values.purchase_price} onChange={set("purchase_price")} className={input} />
+          </label>
+          <label className={label}>
+            Expiry date
+            <input type="date" value={values.license_expiry} onChange={set("license_expiry")} className={input} />
+          </label>
+          <label className={label}>
+            Vendor
+            <select value={values.vendor_id} onChange={set("vendor_id")} className={input}>
+              <option value="">Not specified</option>
+              {vendors.map((vendor) => (
+                <option key={vendor.id} value={vendor.id}>
+                  {vendor.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </Fieldset>
+      ) : (
+        <>
+          <Fieldset title="Ownership & location">
+            <label className={label}>
+              Department
+              <select value={values.department_id} onChange={set("department_id")} className={input}>
+                <option value="">Not assigned</option>
+                {departments.map((department) => (
+                  <option key={department.id} value={department.id}>
+                    {department.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={label}>
+              Location
+              <input value={values.location_id} onChange={set("location_id")} placeholder="e.g. Pune office, floor 2" className={input} />
+            </label>
+          </Fieldset>
 
-      <Fieldset title="Purchase & warranty" hint="Needed for depreciation, finance and warranty alerts.">
-        <label className={label}>
-          Purchase date
-          <input type="date" value={values.purchase_date} onChange={set("purchase_date")} className={input} />
-        </label>
-        <label className={label}>
-          Purchase price
-          <input type="number" min={0} step="0.01" value={values.purchase_price} onChange={set("purchase_price")} className={input} />
-        </label>
-        <label className={label}>
-          Vendor
-          <select value={values.vendor_id} onChange={set("vendor_id")} className={input}>
-            <option value="">Not specified</option>
-            {vendors.map((vendor) => (
-              <option key={vendor.id} value={vendor.id}>
-                {vendor.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className={label}>
-          Warranty start
-          <input type="date" value={values.warranty_start} onChange={set("warranty_start")} className={input} />
-        </label>
-        <label className={label}>
-          Warranty end
-          <input type="date" value={values.warranty_end} onChange={set("warranty_end")} className={input} />
-        </label>
-      </Fieldset>
+          <Fieldset title="Purchase & warranty" hint="Needed for depreciation, finance and warranty alerts.">
+            <label className={label}>
+              Purchase date
+              <input type="date" value={values.purchase_date} onChange={set("purchase_date")} className={input} />
+            </label>
+            <label className={label}>
+              Purchase price
+              <input type="number" min={0} step="0.01" value={values.purchase_price} onChange={set("purchase_price")} className={input} />
+            </label>
+            <label className={label}>
+              Vendor
+              <select value={values.vendor_id} onChange={set("vendor_id")} className={input}>
+                <option value="">Not specified</option>
+                {vendors.map((vendor) => (
+                  <option key={vendor.id} value={vendor.id}>
+                    {vendor.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={label}>
+              Warranty start
+              <input type="date" value={values.warranty_start} onChange={set("warranty_start")} className={input} />
+            </label>
+            <label className={label}>
+              Warranty end
+              <input type="date" value={values.warranty_end} onChange={set("warranty_end")} className={input} />
+            </label>
+          </Fieldset>
+        </>
+      )}
 
       <div className="px-5 pb-5">
         <label className={label}>
-          Description
+          {software ? "Notes" : "Description"}
           <textarea value={values.description} onChange={set("description")} rows={3} className={input} />
         </label>
       </div>
@@ -264,7 +444,7 @@ export function AssetForm({
           Cancel
         </button>
         <button type="submit" disabled={busy} className="rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-brand-700 disabled:opacity-60">
-          {busy ? "Saving…" : submitLabel}
+          {busy ? "Saving…" : software ? "Register software license" : submitLabel}
         </button>
       </div>
     </form>

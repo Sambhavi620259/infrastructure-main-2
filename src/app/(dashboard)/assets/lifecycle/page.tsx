@@ -9,8 +9,7 @@ import {
   type Asset,
   type AssetCounts,
   type AssetEvent,
-  type AssetStatus,
-} from "@/types/asset";
+  type AssetStatus, assetLabel } from "@/types/asset";
 
 /** Lifecycle stages, each grouping the statuses an asset can hold in it. */
 const STAGES: { label: string; hint: string; statuses: AssetStatus[] }[] = [
@@ -112,7 +111,7 @@ export default function AssetLifecyclePage() {
       <section className="grid gap-5 lg:grid-cols-[1fr_1.4fr]">
         <TransitionForm
           onDone={(asset) => {
-            setNotice(`${asset.asset_tag} moved to ${assetStatusLabel(asset.status)}.`);
+            setNotice(`${assetLabel(asset)} moved to ${assetStatusLabel(asset.status)}.`);
             setRefreshKey((key) => key + 1);
           }}
         />
@@ -135,7 +134,7 @@ export default function AssetLifecyclePage() {
                 <li key={event.id} className="px-5 py-3 text-sm">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <Link href={`/assets/${event.asset_id}`} className="font-semibold text-slate-800 hover:text-brand-700">
-                      {event.asset_tag} · {event.asset_name}
+                      {event.asset_tag ?? "Untagged"} · {event.asset_name}
                     </Link>
                     <span className="text-xs text-slate-500">{formatDateTime(event.timestamp)}</span>
                   </div>
@@ -235,7 +234,7 @@ function TransitionForm({ onDone }: { onDone: (asset: Asset) => void }) {
           <div>
             <p className="font-semibold text-slate-800">{asset.name}</p>
             <p className="text-xs text-slate-500">
-              {asset.asset_tag} · currently {assetStatusLabel(asset.status)}
+              {assetLabel(asset)} · currently {assetStatusLabel(asset.status)}
             </p>
           </div>
           <button type="button" onClick={reset} className="text-xs font-semibold text-brand-600 hover:text-brand-700">
@@ -265,7 +264,7 @@ function TransitionForm({ onDone }: { onDone: (asset: Asset) => void }) {
                     }}
                     className="w-full px-3 py-2 text-left text-sm hover:bg-slate-50"
                   >
-                    <span className="font-semibold text-slate-800">{match.asset_tag}</span>{" "}
+                    <span className="font-semibold text-slate-800">{assetLabel(match)}</span>{" "}
                     <span className="text-slate-600">{match.name}</span>{" "}
                     <span className="text-xs text-slate-400">({assetStatusLabel(match.status)})</span>
                   </button>

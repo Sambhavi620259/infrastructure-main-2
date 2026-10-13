@@ -21,7 +21,7 @@ import {
 
 const ROLE_LABELS: [string, string][] = [
   ["IT_ADMIN", "IT Admins"],
-  ["IT_AGENT", "IT Agents"],
+  ["IT_AGENT", "Users"],
   ["SUB_ADMIN", "Sub-admins"],
   ["REPORTING_USER", "Reporting users"],
   ["SUPER_ADMIN", "Super Admins"],
@@ -43,7 +43,7 @@ export default function SuperAdminOverviewPage() {
 
   const stats: [string, number | undefined, string, typeof UsersIcon][] = [
     ["Organizations", overview?.companies_total, `${overview?.companies_new_this_month ?? 0} new this month`, BuildingOffice2Icon],
-    ["Active users", overview?.users_total, `${overview?.unassigned_agents ?? 0} agents awaiting an organization`, UsersIcon],
+    ["Active users", overview?.users_total, `${overview?.unassigned_agents ?? 0} users awaiting an organization`, UsersIcon],
     ["Assets managed", overview?.assets_total, "Across all organizations", ComputerDesktopIcon],
     ["Pending tickets", overview?.pending_tickets, "Waiting for a decision", TicketIcon],
   ];

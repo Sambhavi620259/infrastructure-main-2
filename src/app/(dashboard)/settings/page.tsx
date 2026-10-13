@@ -25,7 +25,7 @@ interface Organization {
 const ROLE_ROWS: [string, string, string][] = [
   ["IT_ADMIN", "IT Admin", "Organization settings, users, and every ITAM module."],
   ["SUB_ADMIN", "Sub-admin", "Administers the modules assigned to them."],
-  ["IT_AGENT", "IT Agent", "Tickets, asset hand-over, stock moves and reports."],
+  ["IT_AGENT", "User", "Raises tickets, requests stock, updates asset status and runs reports."],
   ["REPORTING_USER", "Reporting User", "Read-only access to reports and exports."],
 ];
 

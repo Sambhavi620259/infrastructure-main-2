@@ -15,6 +15,7 @@ from app.core.logging_config import configure_logging
 from app.core.seed import seed_initial_users
 from app.services.warranty_alerts import warranty_alert_loop
 from app.routers import (
+    approvals,
     auth,
     users,
     departments,
@@ -91,6 +92,7 @@ app.include_router(super_admin.router, prefix="/api")
 app.include_router(organization.router, prefix="/api")
 app.include_router(notifications.router, prefix="/api")
 app.include_router(profile.router, prefix="/api")
+app.include_router(approvals.router, prefix="/api")
 
 logger = logging.getLogger("app")
 

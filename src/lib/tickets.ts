@@ -17,7 +17,13 @@ const TICKET_STATUS_META: Record<TicketStatus, { label: string; style: string }>
   CANCELLED: { label: "Cancelled", style: "bg-slate-100 text-slate-600 ring-slate-200" },
 };
 
-export function ticketStatusLabel(status: string): string {
+/** Problem tickets (ISSUE) end as "Resolved" rather than "Fulfilled". */
+export function ticketStatusLabel(status: string, ticketType?: string): string {
+  if (ticketType === "ISSUE" && status === "FULFILLED") return "Resolved";
+  if (ticketType === "SOFTWARE" && status === "FULFILLED") return "Seat assigned";
+  if (ticketType === "SOFTWARE" && status === "APPROVED") return "Approved · awaiting seat";
+  if (ticketType === "RETURN" && status === "FULFILLED") return "Returned";
+  if (ticketType === "RETURN" && status === "APPROVED") return "Approved · awaiting handover";
   return TICKET_STATUS_META[status as TicketStatus]?.label ?? status;
 }
 
@@ -29,6 +35,22 @@ export function ticketStatusStyle(status: string): string {
 export function isOpenTicket(status: string): boolean {
   return status === "PENDING" || status === "IN_PROGRESS" || status === "APPROVED";
 }
+
+/** The asset a problem ticket is about (mirrors TicketAsset). */
+export interface TicketAsset {
+  id: string;
+  asset_tag: string;
+  name: string;
+  category: string;
+  brand: string | null;
+  model: string | null;
+  serial_number: string;
+  status: string;
+  condition: string | null;
+  warranty_end: string | null;
+}
+
+export type TicketType = "REQUEST" | "ISSUE" | "SOFTWARE" | "RETURN";
 
 export interface AssetRequest {
   id: string;
@@ -53,10 +75,28 @@ export interface AssetRequest {
   processed_by: string | null;
   processed_by_name: string | null;
   processed_at: string | null;
+  /** REQUEST asks for an asset; ISSUE reports a problem with the requester's asset. */
+  ticket_type: TicketType;
+  asset_id: string | null;
+  asset: TicketAsset | null;
+  /** What the admin did to resolve a problem ticket. */
+  resolution_note: string | null;
+  /** SOFTWARE tickets: the product asked for and the seat given. */
+  software_id: string | null;
+  software_name: string | null;
+  license_assignment_id: string | null;
+  /** RETURN tickets: condition confirmed at handover. */
+  return_condition: string | null;
 }
 
 export interface AssetRequestCreateInput {
-  asset_category_id: string;
+  ticket_type?: TicketType;
+  /** Required for REQUEST tickets. */
+  asset_category_id?: string;
+  /** Required for ISSUE and RETURN tickets: an asset assigned to the requester. */
+  asset_id?: string;
+  /** Required for SOFTWARE tickets. */
+  software_id?: string;
   reason: string;
   priority?: string;
   /** Raise the ticket for another user in the organization; they receive the asset on approval. */
@@ -101,6 +141,8 @@ export function listAssetRequests(
     requested_by?: string;
     raised_by?: string;
     processed_by?: string;
+    /** Problem tickets about this asset. */
+    asset_id?: string;
   } = {},
 ): Promise<AssetRequest[]> {
   const { mine, ...rest } = params;
@@ -153,6 +195,23 @@ export function fulfilTicket(id: string, assignedAssetId: string): Promise<Asset
 
 export function rejectTicket(id: string, reason: string): Promise<AssetRequest> {
   return moveTicket(id, { status: "REJECTED", rejection_reason: reason });
+}
+
+/** Close a problem ticket with a note on what was done. */
+export function resolveTicket(id: string, note: string): Promise<AssetRequest> {
+  return moveTicket(id, { status: "FULFILLED", resolution_note: note });
+}
+
+/** Fulfil an approved software request: a seat is taken now (re-checked), from `licenseId` or any license with room. */
+export function fulfilSoftwareTicket(id: string, licenseId?: string): Promise<AssetRequest> {
+  return moveTicket(id, licenseId ? { status: "FULFILLED", license_id: licenseId } : { status: "FULFILLED" });
+}
+
+export const RETURN_CONDITIONS = ["EXCELLENT", "GOOD", "FAIR", "POOR", "DAMAGED"] as const;
+
+/** Confirm a returned device was handed back, and in what condition (poor goes to repair, damaged is filed as damaged). */
+export function confirmReturnTicket(id: string, condition: (typeof RETURN_CONDITIONS)[number]): Promise<AssetRequest> {
+  return moveTicket(id, { status: "FULFILLED", return_condition: condition });
 }
 
 export function cancelTicket(id: string): Promise<AssetRequest> {

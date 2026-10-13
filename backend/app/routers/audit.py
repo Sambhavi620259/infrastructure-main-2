@@ -298,7 +298,8 @@ def scan_asset_qr(
 
     asset = db.query(Asset).filter(
         Asset.company_id == sess.company_id,
-        Asset.asset_tag == scan_in.asset_tag
+        # Untagged devices are scanned by their serial number.
+        (Asset.asset_tag == scan_in.asset_tag) | (Asset.serial_number == scan_in.asset_tag)
     ).first()
 
     record = AuditScanRecord(

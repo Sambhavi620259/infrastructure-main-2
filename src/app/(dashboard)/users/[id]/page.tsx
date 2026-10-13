@@ -7,13 +7,14 @@ import { getUserActivity, resetUserPassword, type ActivityEntry, type UserActivi
 import { isOpenTicket, listAssetRequests, type AssetRequest } from "@/lib/tickets";
 import {
   TicketActions,
+  TicketAssetDetails,
   TicketProgress,
   TicketStatusBadge,
   ticketHandler,
   ticketNumber,
 } from "@/components/tickets/ticket-actions";
 import { listAssets } from "@/lib/assets";
-import { assetStatusLabel, assetStatusStyle, formatDate, type Asset } from "@/types/asset";
+import { assetStatusLabel, assetStatusStyle, formatDate, type Asset, assetLabel } from "@/types/asset";
 import { initialsOf, roleBadgeClass, roleLabel, statusBadgeClass } from "@/types/user";
 
 const ACTION_LABEL: Record<string, string> = {
@@ -209,7 +210,7 @@ export default function UserWorkPage() {
                     <span className="font-semibold text-slate-800">
                       {ticketNumber(ticket)} · {ticket.category_name ?? "Asset request"}
                     </span>
-                    <TicketStatusBadge status={ticket.status} />
+                    <TicketStatusBadge status={ticket.status} ticketType={ticket.ticket_type} />
                   </div>
                   <p className="text-xs text-slate-500">
                     For {ticket.requested_by_name ?? ticket.requested_for}
@@ -233,7 +234,7 @@ export default function UserWorkPage() {
               {held.map((asset) => (
                 <li key={asset.id} className="flex items-center justify-between gap-2 px-5 py-3">
                   <Link href={`/assets/${asset.id}`} className="font-semibold text-slate-800 hover:text-brand-700">
-                    {asset.asset_tag} · {asset.name}
+                    {assetLabel(asset)} · {asset.name}
                   </Link>
                   <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${assetStatusStyle(asset.status)}`}>
                     {assetStatusLabel(asset.status)}
@@ -287,13 +288,14 @@ function OpenTicket({
   return (
     <li className="flex flex-col gap-3 px-5 py-3 text-sm lg:flex-row lg:items-start lg:justify-between">
       <div className="flex gap-4">
-        <TicketProgress status={ticket.status} />
+        <TicketProgress status={ticket.status} ticketType={ticket.ticket_type} />
         <div>
           <p className="font-semibold text-slate-800">
             {ticketNumber(ticket)} · {ticket.category_name ?? "Asset request"}
             {ticket.department_name ? ` · ${ticket.department_name}` : ""}
           </p>
           <p className="text-slate-500">{ticket.reason}</p>
+          <TicketAssetDetails ticket={ticket} link />
           <p className="text-xs text-slate-400">
             For {ticket.requested_by_name ?? ticket.requested_for} · raised {formatDateTime(ticket.created_at)}
             {handler ? ` · ${handler}` : ""}

@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { adjustInventoryStock, listInventory, type InventoryItem } from "@/lib/inventory";
+import { adjustInventoryStock, listInventory, requestInventory, type InventoryItem } from "@/lib/inventory";
+import { InventoryRequests } from "@/components/inventory/inventory-requests";
 
 const STOCK_STYLE: Record<string, string> = {
   IN_STOCK: "bg-emerald-50 text-emerald-700",
@@ -16,8 +17,19 @@ const STOCK_LABEL: Record<string, string> = {
   OUT_OF_STOCK: "Out of stock",
 };
 
-/** Stock list with issue / receive. Used by the IT Agent and IT Admin workspaces. */
-export function StockManager({ eyebrow, addHref }: { eyebrow: string; addHref?: string }) {
+/**
+ * Stock list. Admins (canManage) add items, receive and issue stock, and
+ * approve users' requests; users pick an item and request it.
+ */
+export function StockManager({
+  eyebrow,
+  addHref,
+  canManage = false,
+}: {
+  eyebrow: string;
+  addHref?: string;
+  canManage?: boolean;
+}) {
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [query, setQuery] = useState("");
   const [lowOnly, setLowOnly] = useState(false);
@@ -65,7 +77,11 @@ export function StockManager({ eyebrow, addHref }: { eyebrow: string; addHref?: 
         <div>
           <p className="text-[11px] font-semibold text-brand-600">{eyebrow}</p>
           <h1 className="mt-1 text-2xl font-extrabold">Stock &amp; Consumables</h1>
-          <p className="mt-1 text-xs text-slate-500">Issue stock to users and record deliveries. Every change is logged.</p>
+          <p className="mt-1 text-xs text-slate-500">
+            {canManage
+              ? "Approve stock requests, issue stock and record deliveries. Every change is logged."
+              : "Pick an item and request it. Your IT Admin approves and issues it to you."}
+          </p>
         </div>
         {addHref && (
           <Link href={addHref} className="rounded-lg bg-brand-600 px-3 py-2 text-xs font-bold text-white hover:bg-brand-700">
@@ -101,6 +117,16 @@ export function StockManager({ eyebrow, addHref }: { eyebrow: string; addHref?: 
         ))}
       </section>
 
+      <InventoryRequests
+        admin={canManage}
+        refreshKey={refreshKey}
+        onChanged={(message) => {
+          setNotice(message);
+          setError("");
+          setRefreshKey((key) => key + 1);
+        }}
+      />
+
       <section className="ui-surface overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-slate-100 p-4 sm:flex-row sm:items-center">
           <label className="flex-1">
@@ -133,8 +159,15 @@ export function StockManager({ eyebrow, addHref }: { eyebrow: string; addHref?: 
                 <StockRow
                   key={item.id}
                   item={item}
+                  canManage={canManage}
                   open={open === item.id}
                   onToggle={() => setOpen(open === item.id ? null : item.id)}
+                  onRequested={(quantity) => {
+                    setOpen(null);
+                    setNotice(`Requested ${quantity} × ${item.name}. Your IT Admin has been notified.`);
+                    setError("");
+                    setRefreshKey((key) => key + 1);
+                  }}
                   onSaved={(updated, change) => {
                     setOpen(null);
                     setNotice(
@@ -160,14 +193,18 @@ export function StockManager({ eyebrow, addHref }: { eyebrow: string; addHref?: 
 
 function StockRow({
   item,
+  canManage,
   open,
   onToggle,
+  onRequested,
   onSaved,
   onError,
 }: {
   item: InventoryItem;
+  canManage: boolean;
   open: boolean;
   onToggle: () => void;
+  onRequested: (quantity: number) => void;
   onSaved: (item: InventoryItem, change: number) => void;
   onError: (message: string) => void;
 }) {
@@ -184,6 +221,13 @@ function StockRow({
     const change = direction === "out" ? -quantity : quantity;
     setBusy(true);
     try {
+      if (!canManage) {
+        await requestInventory(item.id, quantity, reason.trim());
+        onRequested(quantity);
+        setReason("");
+        setAmount("1");
+        return;
+      }
       onSaved(await adjustInventoryStock(item.id, change, reason.trim()), change);
       setReason("");
       setAmount("1");
@@ -209,7 +253,7 @@ function StockRow({
         </td>
         <td className="px-4 py-3 text-right">
           <button type="button" onClick={onToggle} className="font-semibold text-brand-600 hover:text-brand-700">
-            {open ? "Close" : "Update stock"}
+            {open ? "Close" : canManage ? "Update stock" : "Request"}
           </button>
         </td>
       </tr>
@@ -217,17 +261,21 @@ function StockRow({
         <tr className="bg-slate-50/70">
           <td colSpan={7} className="px-4 py-3">
             <div className="flex flex-wrap items-center gap-2">
-              <label>
-                <span className="sr-only">Direction</span>
-                <select
-                  value={direction}
-                  onChange={(event) => setDirection(event.target.value as "out" | "in")}
-                  className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs"
-                >
-                  <option value="out">Issue (stock out)</option>
-                  <option value="in">Receive (stock in)</option>
-                </select>
-              </label>
+              {canManage ? (
+                <label>
+                  <span className="sr-only">Direction</span>
+                  <select
+                    value={direction}
+                    onChange={(event) => setDirection(event.target.value as "out" | "in")}
+                    className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs"
+                  >
+                    <option value="out">Issue (stock out)</option>
+                    <option value="in">Receive (stock in)</option>
+                  </select>
+                </label>
+              ) : (
+                <span className="text-[11px] font-semibold text-slate-600">Request {item.name}:</span>
+              )}
               <label>
                 <span className="sr-only">Quantity</span>
                 <input
@@ -244,7 +292,7 @@ function StockRow({
                   value={reason}
                   onChange={(event) => setReason(event.target.value)}
                   maxLength={300}
-                  placeholder={direction === "out" ? "Issued to… / for…" : "Delivery / PO number"}
+                  placeholder={!canManage ? "What is it for?" : direction === "out" ? "Issued to… / for…" : "Delivery / PO number"}
                   className="w-64 rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
                 />
               </label>
@@ -254,10 +302,12 @@ function StockRow({
                 onClick={save}
                 className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-brand-700 disabled:opacity-50"
               >
-                {busy ? "Saving…" : "Save"}
+                {busy ? "Saving…" : canManage ? "Save" : "Send request"}
               </button>
               {direction === "out" && quantity > item.quantity && (
-                <span className="text-[11px] text-rose-600">Only {item.quantity} in stock.</span>
+                <span className="text-[11px] text-rose-600">
+                  Only {item.quantity} in stock{canManage ? "." : "; your IT Admin can approve once more arrives."}
+                </span>
               )}
             </div>
           </td>

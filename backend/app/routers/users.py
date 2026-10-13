@@ -294,7 +294,7 @@ def add_agent_to_organization(
     notify(
         db, user,
         title=f"You've been added to {company.name if company else 'an organization'}",
-        message="Your IT Agent dashboard is ready.",
+        message="Your dashboard is ready.",
         link="/agent/dashboard",
         type="SUCCESS",
     )
@@ -396,6 +396,9 @@ def get_user_activity(
     user = query.first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")
+    # Admins review the work of users (employees) only, not of other admins.
+    if current_user.role != PlatformRole.SUPER_ADMIN and user.role != PlatformRole.EMPLOYEE:
+        raise HTTPException(status_code=403, detail="You can review the work of users only, not of other admins.")
 
     actions = dict(
         db.query(AuditLog.action, func.count(AuditLog.id))

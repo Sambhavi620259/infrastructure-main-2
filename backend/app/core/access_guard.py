@@ -1,12 +1,13 @@
 """
-Write guard for scoped roles.
+Access guard for scoped roles.
 
+- EMPLOYEE (shown as "User"): may reach only the areas that hold their own
+  data: assets, tickets, stock requests, reports, notifications and profile,
+  plus the inventory catalogue and department names they pick from. The
+  routers then limit each of those to the user's own records.
 - SUB_ADMIN: may change data only in the modules on their account
   (users.modules, e.g. ["HAM", "SAM"]).
 - REPORTING_USER: read-only, except their own profile, notifications and reports.
-
-Reads (GET) are not restricted here: dashboards and pickers need them, and the
-routers already limit what each role can see.
 """
 from typing import Optional
 
@@ -30,6 +31,7 @@ MODULE_PREFIXES = (
     ("/api/purchase-orders", "HAM"),
     ("/api/vendors", "HAM"),
     ("/api/departments", "HAM"),
+    ("/api/approval-policies", "HAM"),
     ("/api/software", "SAM"),
     ("/api/cloud", "CLOUD"),
     ("/api/discovery", "SCAN"),
@@ -38,6 +40,15 @@ MODULE_PREFIXES = (
 
 # Paths any signed-in user may change (their own account and inbox).
 ALWAYS_ALLOWED = ("/api/profile", "/api/notifications", "/api/auth")
+
+# The only areas a user (EMPLOYEE) may reach. Each router scopes them to the
+# user's own records. Departments are read-only names for the ticket form.
+USER_PREFIXES = ("/api/assets", "/api/asset-requests", "/api/inventory", "/api/reports", "/api/software")
+USER_READ_ONLY = ("/api/departments",)
+
+
+def _under(path: str, prefixes) -> bool:
+    return any(path == prefix or path.startswith(prefix + "/") for prefix in prefixes)
 
 
 def module_for(path: str) -> Optional[str]:
@@ -49,7 +60,9 @@ def module_for(path: str) -> Optional[str]:
 
 class ScopedRoleWriteGuard(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        if request.method in ("GET", "HEAD", "OPTIONS") or request.url.path.startswith(ALWAYS_ALLOWED):
+        path = request.url.path
+        if request.method == "OPTIONS" or not path.startswith("/api/") or path == "/api/health" \
+                or path.startswith(ALWAYS_ALLOWED):
             return await call_next(request)
         auth = request.headers.get("authorization", "")
         token = auth[7:] if auth.lower().startswith("bearer ") else None
@@ -65,7 +78,16 @@ class ScopedRoleWriteGuard(BaseHTTPMiddleware):
         finally:
             session_source.close()
 
-        path = request.url.path
+        reading = request.method in ("GET", "HEAD")
+        if role == PlatformRole.EMPLOYEE and not (
+            _under(path, USER_PREFIXES) or (reading and _under(path, USER_READ_ONLY))
+        ):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Users can only access their own assets, tickets, stock requests and reports."},
+            )
+        if reading:
+            return await call_next(request)
         if role == PlatformRole.REPORTING_USER and module_for(path) != "REPORTS":
             return JSONResponse(status_code=403, content={"detail": "Reporting users have read-only access."})
         if role == PlatformRole.SUB_ADMIN:

@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
-from app.models.models import Asset, PlatformRole, User
+from app.models.models import Asset, PlatformRole, Software, SoftwareLicense, User
 from app.services.notification_service import already_notified, notify
 
 logger = logging.getLogger(__name__)
@@ -34,12 +34,37 @@ def run_warranty_alerts(db: Session) -> int:
                 User.status == "ACTIVE",
             ).all(),
         )
-        title = f"Warranty for {asset.asset_tag} ends on {asset.warranty_end:%d %b %Y}"
+        title = f"Warranty for {asset.label} ends on {asset.warranty_end:%d %b %Y}"
         days = (asset.warranty_end - now).days
         for admin in admins:
             if already_notified(db, admin.id, title):
                 continue
             notify(db, admin, title, f"{asset.name}: {days} day(s) left.", "/assets/warranty", "WARNING")
+            created += 1
+
+    # Software licenses expiring or due for renewal (once per license and date).
+    licenses = (
+        db.query(SoftwareLicense, Software.name)
+        .join(Software, Software.id == SoftwareLicense.software_id)
+        .filter(SoftwareLicense.status == "ACTIVE", SoftwareLicense.expiry_date.isnot(None),
+                SoftwareLicense.expiry_date >= now, SoftwareLicense.expiry_date <= now + timedelta(days=WARN_DAYS))
+        .all()
+    )
+    for item, product in licenses:
+        admins = admins_by_company.setdefault(
+            item.company_id,
+            db.query(User).filter(
+                User.company_id == item.company_id,
+                User.role.in_([PlatformRole.IT_ADMIN, PlatformRole.SUB_ADMIN]),
+                User.status == "ACTIVE",
+            ).all(),
+        )
+        title = f"{product} license ({item.seats} seats) expires on {item.expiry_date:%d %b %Y}"
+        for admin in admins:
+            if already_notified(db, admin.id, title):
+                continue
+            notify(db, admin, title, f"{(item.expiry_date - now).days} day(s) left. Renew it under Software Licenses.",
+                   "/inventory/software", "WARNING")
             created += 1
     db.commit()
     return created

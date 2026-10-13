@@ -41,7 +41,10 @@ export function sectionsFor(role: string, modules: readonly string[] = []): Set<
 export function sectionForPath(pathname: string): Section | null {
   const rules: [string, Section][] = [
     ["/inventory/software", "software"],
+    ["/assets/software", "software"],
     ["/software", "software"],
+    ["/requests", "tickets"],
+    ["/maintenance", "assets"],
     ["/dashboard", "dashboard"],
     ["/assets", "assets"],
     ["/tickets", "tickets"],

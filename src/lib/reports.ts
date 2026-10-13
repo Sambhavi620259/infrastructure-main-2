@@ -94,6 +94,19 @@ export async function deleteSavedReport(configId: string): Promise<void> {
   }
 }
 
+/** Remove a generated report (users: their own; admins: any in the organization). */
+export async function deleteReportRun(runId: string): Promise<void> {
+  const token = window.localStorage.getItem("auth-token");
+  const response = await fetch(apiUrl(`/api/reports/runs/${encodeURIComponent(runId)}`), {
+    method: "DELETE",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!response.ok) {
+    const data = (await response.json().catch(() => ({}))) as { detail?: string };
+    throw new ApiRequestError(data.detail || `Delete failed (${response.status})`, response.status);
+  }
+}
+
 function fileNameFor(run: ReportRun): string {
   const slug = run.name.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "").toLowerCase() || "report";
   return `${slug}-${run.created_at.slice(0, 10)}.csv`;
