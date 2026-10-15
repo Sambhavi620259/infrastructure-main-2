@@ -1,7 +1,8 @@
 export const routes = {
   dashboard: "/dashboard",
   assets: "/assets",
-  assetNew: "/assets/new",
+  assetNew: "/assets/hardware/new",
+  softwareNew: "/assets/software/new",
   assetAssignment: "/assets/assignment",
   assetAudit: "/assets/audit",
   assetLifecycle: "/assets/lifecycle",

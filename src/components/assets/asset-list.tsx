@@ -109,12 +109,22 @@ export function AssetList({ mode }: { mode: "all" | "hardware" }) {
             ))}
           </nav>
         </div>
-        <Link
-          href="/assets/new"
-          className="inline-flex items-center justify-center rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700"
-        >
-          + Add new asset
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href="/assets/hardware/new"
+            className="inline-flex items-center justify-center rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700"
+          >
+            + Add hardware
+          </Link>
+          {mode === "all" && (
+            <Link
+              href="/assets/software/new"
+              className="inline-flex items-center justify-center rounded-lg border border-brand-200 bg-white px-4 py-2.5 text-sm font-semibold text-brand-700 shadow-sm transition hover:bg-brand-50"
+            >
+              + Add software
+            </Link>
+          )}
+        </div>
       </header>
 
       {error && (
@@ -302,7 +312,7 @@ export function AssetList({ mode }: { mode: "all" | "hardware" }) {
             </table>
           </div>
           {software && software.length === 0 && (
-            <div className="p-10 text-center text-sm text-slate-500">No software yet. Use Add new asset and choose Software license.</div>
+            <div className="p-10 text-center text-sm text-slate-500">No software yet. Use Add software to record a license.</div>
           )}
         </section>
       )}

@@ -15,6 +15,8 @@ export type UserCreateInput = {
   location?: string;
   department_id?: string;
   modules?: string[];
+  /** Super Admin only: the company the person joins. */
+  company_id?: string;
 };
 
 function buildQuery(params: Record<string, string | number | undefined>): string {

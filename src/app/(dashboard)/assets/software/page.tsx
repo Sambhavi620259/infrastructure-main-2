@@ -96,8 +96,8 @@ export default function SoftwareAssetsPage() {
             Products, the licenses bought for them, and who holds a seat. Seats are given on approved requests or directly here.
           </p>
         </div>
-        <Link href="/assets/new" className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-brand-700">
-          <PlusIcon className="h-4 w-4" aria-hidden="true" /> Register software
+        <Link href="/assets/software/new" className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-brand-700">
+          <PlusIcon className="h-4 w-4" aria-hidden="true" /> Add software
         </Link>
       </header>
 

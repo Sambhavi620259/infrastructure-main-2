@@ -10,6 +10,7 @@ import {
   CubeIcon,
   ExclamationTriangleIcon,
   InboxStackIcon,
+  KeyIcon,
   PlusIcon,
   ShieldExclamationIcon,
   TicketIcon,
@@ -131,7 +132,8 @@ export default function DashboardPage() {
 
   const quickActions: [string, string, string, typeof CubeIcon, boolean][] = [
     ["/inventory/hardware", "Receive stock", "Record a delivery against an approved PO", CubeIcon, sections.has("inventory") && profile?.role !== "REPORTING_USER"],
-    ["/assets/new", "Register an asset", "A device, or a software license", CubeIcon, sections.has("assets") && profile?.role !== "REPORTING_USER"],
+    ["/assets/hardware/new", "Add hardware", "Register a device", CubeIcon, sections.has("assets") && profile?.role !== "REPORTING_USER"],
+    ["/assets/software/new", "Add software", "License number, count and dates", KeyIcon, sections.has("software") && profile?.role !== "REPORTING_USER"],
     ["/assets/assignment", "Assign an asset", "Hand stock to a user or take it back", CheckCircleIcon, sections.has("assets") && profile?.role !== "REPORTING_USER"],
     ["/users/new", "Create a user", "Set up an account with a password", UserPlusIcon, isAdmin],
     ["/reports", "Run a report", "Download a CSV export", ChartBarIcon, sections.has("reports")],
@@ -167,8 +169,8 @@ export default function DashboardPage() {
             </Link>
           )}
           {sections.has("assets") && profile?.role !== "REPORTING_USER" && (
-            <Link href="/assets/new" className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-sm font-bold text-white shadow-sm hover:bg-brand-700">
-              <PlusIcon className="h-4 w-4" aria-hidden="true" /> Add asset
+            <Link href="/assets/hardware/new" className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-sm font-bold text-white shadow-sm hover:bg-brand-700">
+              <PlusIcon className="h-4 w-4" aria-hidden="true" /> Add hardware
             </Link>
           )}
         </div>

@@ -122,7 +122,7 @@ export default function HardwareStockPage() {
                     {receipt.location ? ` · ${receipt.location}` : ""} · {receipt.registered} of {receipt.quantity} registered
                   </span>
                 </span>
-                <Link href={`/assets/new?receipt=${receipt.id}`} className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-violet-700">
+                <Link href={`/assets/hardware/new?receipt=${receipt.id}`} className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-violet-700">
                   Register device
                 </Link>
               </li>

@@ -35,6 +35,7 @@ export interface AssetFormValues {
   license_number: string;
   license_count: string;
   license_expiry: string;
+  license_renewal: string;
 }
 
 export function emptyAssetForm(): AssetFormValues {
@@ -42,7 +43,7 @@ export function emptyAssetForm(): AssetFormValues {
     asset_tag: "", serial_number: "", name: "", category: "", type: "Hardware", brand: "", model: "", specifications: "",
     condition: "EXCELLENT", department_id: "", vendor_id: "", location_id: "", purchase_date: "", purchase_price: "",
     warranty_start: "", warranty_end: "", description: "", license_type: "PERPETUAL", license_number: "",
-    license_count: "", license_expiry: "",
+    license_count: "", license_expiry: "", license_renewal: "",
   };
 }
 
@@ -85,10 +86,6 @@ export function assetToForm(asset: Asset): AssetFormValues {
   };
 }
 
-/** Software licenses are registered as software (product + license), not as a device record. */
-export function isSoftwareLicense(values: Pick<AssetFormValues, "type" | "category">): boolean {
-  return values.type === "Software" || values.category.trim().toLowerCase() === "software license";
-}
 
 /**
  * Convert form values to an API payload for a hardware asset. Optional text
@@ -134,6 +131,7 @@ export function formToSoftware(values: AssetFormValues): SoftwareInput {
       seats: Number(values.license_count),
       purchase_date: date(values.purchase_date),
       expiry_date: date(values.license_expiry),
+      renewal_date: date(values.license_renewal),
       cost: values.purchase_price ? Number(values.purchase_price) : 0,
       vendor_id: values.vendor_id || undefined,
       notes: values.description.trim() || undefined,
@@ -145,14 +143,17 @@ const TAG_PATTERN = /^[A-Za-z0-9][A-Za-z0-9\-_./]{0,99}$/;
 const LICENSE_NUMBER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9\-_./# ]{2,254}$/;
 
 /** Problems the user can fix before sending; empty when the form is valid. Mirrors the API's checks. */
-export function validateAssetForm(values: AssetFormValues): string {
-  if (!values.name.trim()) return "Give the asset a name.";
-  if (isSoftwareLicense(values)) {
+export function validateAssetForm(values: AssetFormValues, software = false): string {
+  if (!values.name.trim()) return software ? "Give the software a name." : "Give the asset a name.";
+  if (software) {
     if (!/^\d+$/.test(values.license_count.trim()) || Number(values.license_count) < 1) {
       return "License count must be a whole number of at least 1.";
     }
     if (values.license_number.trim() && !LICENSE_NUMBER_PATTERN.test(values.license_number.trim())) {
       return "A license number is 3-255 letters, digits and - _ . / # characters.";
+    }
+    if (values.purchase_date && values.license_expiry && values.license_expiry < values.purchase_date) {
+      return "Expiry date must be after the purchase date.";
     }
   } else {
     // Only the name is required; tag, serial number and category are optional.
@@ -175,6 +176,7 @@ export function AssetForm({
   onSubmit,
   onCancel,
   receipt,
+  kind = "hardware",
 }: {
   initial: AssetFormValues;
   creating: boolean;
@@ -184,6 +186,8 @@ export function AssetForm({
   onCancel: () => void;
   /** Registering a device from this stock receipt: software mode is not offered. */
   receipt?: StockReceipt | null;
+  /** Which record this form creates. Hardware is a device; software is a product with its license. */
+  kind?: "hardware" | "software";
 }) {
   const [values, setValues] = useState<AssetFormValues>(initial);
   const [categories, setCategories] = useState<AssetCategory[]>([]);
@@ -202,12 +206,12 @@ export function AssetForm({
   const set = (key: keyof AssetFormValues) => (event: { target: { value: string } }) =>
     setValues((current) => ({ ...current, [key]: event.target.value }));
 
-  // Software mode is for new records only; existing devices stay devices.
-  const software = creating && !receipt && isSoftwareLicense(values);
+  // Software is for new records only; existing devices stay devices.
+  const software = creating && !receipt && kind === "software";
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const problem = validateAssetForm(values);
+    const problem = validateAssetForm(values, software);
     setError(problem);
     if (!problem) onSubmit(values);
   };
@@ -221,36 +225,11 @@ export function AssetForm({
 
   return (
     <form onSubmit={submit} className="rounded-2xl border border-slate-200 bg-white shadow-sm" noValidate>
-      {creating && !receipt && (
-        <div className="border-b border-slate-100 px-5 pt-5">
-          <p className="text-xs font-bold text-slate-700">What are you registering?</p>
-          <div role="radiogroup" aria-label="Asset type" className="mt-2 inline-flex rounded-lg border border-slate-200 p-0.5 text-sm font-semibold">
-            {(
-              [
-                ["Hardware", "Hardware device"],
-                ["Software", "Software license"],
-              ] as const
-            ).map(([value, text]) => (
-              <button
-                key={value}
-                type="button"
-                role="radio"
-                aria-checked={values.type === value}
-                onClick={() => setValues((current) => ({ ...current, type: value }))}
-                className={`rounded-md px-4 py-2 ${values.type === value ? "bg-brand-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}
-              >
-                {text}
-              </button>
-            ))}
-          </div>
-          <p className="mt-1 pb-1 text-[11px] text-slate-400">The asset type is set automatically: {software ? "Software" : "Hardware"}.</p>
-        </div>
-      )}
       <Fieldset
         title="Identity"
         hint={
           software
-            ? "A software license is recorded as a product with its purchased seats, not as a device."
+            ? "Only the name and License Count are required. The software is recorded with its purchased seats."
             : "Only the name is required. Serial number and asset tag are optional; when given they must be unique."
         }
       >
@@ -363,6 +342,10 @@ export function AssetForm({
             <input type="date" value={values.license_expiry} onChange={set("license_expiry")} className={input} />
           </label>
           <label className={label}>
+            Renewal date
+            <input type="date" value={values.license_renewal} onChange={set("license_renewal")} className={input} />
+          </label>
+          <label className={label}>
             Vendor
             <select value={values.vendor_id} onChange={set("vendor_id")} className={input}>
               <option value="">Not specified</option>
@@ -444,7 +427,7 @@ export function AssetForm({
           Cancel
         </button>
         <button type="submit" disabled={busy} className="rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-brand-700 disabled:opacity-60">
-          {busy ? "Saving…" : software ? "Register software license" : submitLabel}
+          {busy ? "Saving…" : submitLabel}
         </button>
       </div>
     </form>

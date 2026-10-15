@@ -30,7 +30,6 @@ import {
   UserGroupIcon,
   UsersIcon,
   XMarkIcon,
-  PlusCircleIcon,
   UserPlusIcon,
   Bars3Icon,
 } from "@heroicons/react/24/outline";
@@ -60,7 +59,6 @@ const itMenu: readonly MenuEntry[] = [
       { label: "All Assets", href: routes.assets, icon: Squares2X2Icon, section: "assets", badge: "assets" },
       { label: "Hardware Assets", href: "/assets/hardware", icon: ComputerDesktopIcon, section: "assets" },
       { label: "Software Assets", href: "/assets/software", icon: RectangleStackIcon, section: "software" },
-      { label: "Add New Asset", href: routes.assetNew, icon: PlusCircleIcon, section: "assets" },
       { label: "Asset Assignments", href: routes.assetAssignment, icon: UserGroupIcon, section: "assets" },
       { label: "Asset Audit", href: routes.assetAudit, icon: ClipboardDocumentCheckIcon, section: "assets" },
       { label: "Asset Lifecycle", href: routes.assetLifecycle, icon: ArrowPathRoundedSquareIcon, section: "assets" },
@@ -92,6 +90,8 @@ const itMenu: readonly MenuEntry[] = [
 
 // Pages reached from inside other pages; listed so the search box still finds them.
 const itMorePages: readonly NavigationItem[] = [
+  ["Add hardware asset", routes.assetNew, "", ComputerDesktopIcon],
+  ["Add software asset", routes.softwareNew, "", KeyIcon],
   ["Warranty / AMC", routes.assetWarranty, "", ShieldCheckIcon],
   ["Consumables stock", routes.inventoryStock, "", FolderIcon],
   ["Purchase orders", routes.inventoryPurchaseOrders, "", DocumentChartBarIcon],
@@ -122,6 +122,7 @@ const superNavigation: readonly NavigationItem[] = [
   ["Companies", routes.superCompanies, "", BuildingOffice2Icon],
   ["Subscriptions", routes.superSubscriptions, "", DocumentChartBarIcon],
   ["Tenant management", routes.superTenants, "", UsersIcon],
+  ["Team work", "/super-admin/work", "", UserGroupIcon],
   ["Platform admins", routes.superAdmins, "", ShieldCheckIcon],
   ["Audit logs", routes.superAudit, "", FolderIcon],
   ["Platform settings", routes.superSettings, "", Cog6ToothIcon],

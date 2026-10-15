@@ -138,11 +138,14 @@ def create_user(
     """
     target_company_id = user_in.company_id if current_user.role == PlatformRole.SUPER_ADMIN else (tenant_company_id or current_user.company_id)
 
-    if not target_company_id and current_user.role != PlatformRole.SUPER_ADMIN:
+    if not target_company_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Target company context must be provided."
+            detail="Choose the company this person belongs to." if current_user.role == PlatformRole.SUPER_ADMIN
+            else "Target company context must be provided."
         )
+    if current_user.role == PlatformRole.SUPER_ADMIN and not db.query(Company.id).filter(Company.id == target_company_id).first():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown company.")
 
     # Check for existing email across system
     existing_user = db.query(User).filter(func.lower(User.email) == user_in.email.lower()).first()

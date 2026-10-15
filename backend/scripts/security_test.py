@@ -38,6 +38,7 @@ Base.metadata.create_all(engine)
 
 TOKENS: dict = {}
 IDS: dict = {}
+COMPANIES: dict = {}
 with Session() as db:
     for org in ("A", "B"):
         company = Company(name=f"Org {org}", code=org)
@@ -59,6 +60,13 @@ with Session() as db:
             db.flush()
             TOKENS[f"{key}{org}"] = create_access_token({"sub": user.id})
             IDS[f"{key}{org}"] = user.id
+        COMPANIES[org] = company.id
+    # A platform Super Admin, outside any company.
+    boss = User(email="super@example.com", hashed_password="x", full_name="Super", role=PlatformRole.SUPER_ADMIN, status="ACTIVE")
+    db.add(boss)
+    db.flush()
+    TOKENS["super"] = create_access_token({"sub": boss.id})
+    IDS["super"] = boss.id
     db.commit()
 
 
@@ -268,6 +276,26 @@ for other in ("samA", "hamA", "reportA"):
     check(f"an IT Admin cannot review another admin's work ({other})", code == 403, data)
 code, data = call("hamA", "GET", f"/users/{IDS['adminA']}/activity")
 check("a sub-admin cannot review the IT Admin's work", code == 403, data)
+for person in ("adminA", "adminB", "hamA", "agentA"):
+    code, data = call("super", "GET", f"/users/{IDS[person]}/activity")
+    check(f"the Super Admin reviews anyone's work ({person})", code == 200, data)
+code, data = call("super", "GET", "/users?limit=2000")
+check("the Super Admin lists people in every company",
+      code == 200 and {IDS["adminA"], IDS["adminB"], IDS["agentA"]} <= {u["id"] for u in data}, data)
+code, data = call("super", "POST", "/users", {"email": "newadmin.b@example.com", "full_name": "New Admin", "password": "password123",
+                                           "role": "IT_ADMIN", "company_id": COMPANIES["B"]})
+check("the Super Admin adds an IT Admin to a company", code == 201 and data.get("company_id") == COMPANIES["B"], data)
+code, data = call("super", "POST", "/users", {"email": "newuser.a@example.com", "full_name": "New User", "password": "password123",
+                                           "role": "EMPLOYEE", "company_id": COMPANIES["A"]})
+check("the Super Admin adds a user to a company", code == 201 and data.get("agent_id"), data)
+code, data = call("super", "POST", "/users", {"email": "nocompany@example.com", "full_name": "No Co", "password": "password123", "role": "EMPLOYEE"})
+check("the Super Admin must choose a company", code == 400, data)
+code, data = call("super", "POST", "/users", {"email": "ghost@example.com", "full_name": "Ghost", "password": "password123",
+                                           "role": "EMPLOYEE", "company_id": "no-such-company"})
+check("the Super Admin cannot add to an unknown company", code == 400, data)
+code, data = call("adminA", "POST", "/users", {"email": "sneak@example.com", "full_name": "Sneak", "password": "password123",
+                                            "role": "EMPLOYEE", "company_id": COMPANIES["B"]})
+check("an IT Admin cannot add people to another company", code == 201 and data.get("company_id") == COMPANIES["A"], data)
 
 # --- Privilege escalation ---------------------------------------------------
 print("Privilege escalation")
