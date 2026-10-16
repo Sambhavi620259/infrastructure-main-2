@@ -17,6 +17,7 @@ FEATURES: Dict[str, str] = {
     "SOFTWARE": "Software assets & licenses",
     "REPORTS": "Reports & analytics",
     "CLOUD": "Cloud",
+    "ACCESS": "Access management",
 }
 
 # API path prefix -> the feature it belongs to.
@@ -27,6 +28,7 @@ FEATURE_PREFIXES = (
     ("/api/software", "SOFTWARE"),
     ("/api/reports", "REPORTS"),
     ("/api/cloud", "CLOUD"),
+    ("/api/access", "ACCESS"),
 )
 
 _KEY = "plan_features"
@@ -39,21 +41,31 @@ def feature_for(path: str) -> Optional[str]:
     return None
 
 
+# Features that existed before "_known" was stored; anything newer starts switched on for every plan.
+_ORIGINAL_FEATURES = ("INVENTORY", "SOFTWARE", "REPORTS", "CLOUD")
+
+
 def get_plan_features(db: Session) -> Dict[str, List[str]]:
     row = db.query(PlatformSetting).filter(PlatformSetting.name == _KEY).first()
     stored = json.loads(row.value) if row else {}
-    return {plan: [f for f in stored.get(plan, list(FEATURES)) if f in FEATURES] for plan in PLANS}
+    known = set(stored.get("_known", _ORIGINAL_FEATURES)) if row else set(FEATURES)
+    added = [f for f in FEATURES if f not in known]
+    return {
+        plan: [f for f in stored.get(plan, list(FEATURES)) if f in FEATURES] + [f for f in added if f not in stored.get(plan, [])]
+        for plan in PLANS
+    }
 
 
 def set_plan_features(db: Session, plans: Dict[str, List[str]], user_id: Optional[str]) -> Dict[str, List[str]]:
     """The caller validates and commits."""
     value = {plan: sorted(set(plans.get(plan, []))) for plan in PLANS}
+    stored = {**value, "_known": sorted(FEATURES)}
     row = db.query(PlatformSetting).filter(PlatformSetting.name == _KEY).first()
     if row:
-        row.value = json.dumps(value)
+        row.value = json.dumps(stored)
         row.updated_by = user_id
     else:
-        db.add(PlatformSetting(name=_KEY, value=json.dumps(value), updated_by=user_id))
+        db.add(PlatformSetting(name=_KEY, value=json.dumps(stored), updated_by=user_id))
     return value
 
 

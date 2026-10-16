@@ -147,8 +147,10 @@ export default function AgentDashboardPage() {
         <Link href="/agent/tickets" className="ui-surface flex items-center gap-3 p-4 transition hover:border-brand-200">
           <WrenchScrewdriverIcon className="h-6 w-6 text-emerald-500" aria-hidden="true" />
           <div>
-            <p className="text-xl font-extrabold">{tickets?.approved ?? "—"}</p>
-            <p className="text-[10px] text-slate-500">Approved, waiting for stock</p>
+            <p className="text-xl font-extrabold">
+              {tickets ? tickets.approved + (tickets.waiting_inventory ?? 0) + (tickets.waiting_license ?? 0) : "—"}
+            </p>
+            <p className="text-[10px] text-slate-500">Approved or waiting for stock / license</p>
           </div>
         </Link>
         {onPlan("/agent/inventory") && (
@@ -226,7 +228,8 @@ function MyTicketsCard({ onChanged }: { onChanged: () => void }) {
   useEffect(() => {
     // The API returns only this user's tickets.
     listAssetRequests({ limit: 50 })
-      .then((data) => setTickets(data.filter((ticket) => isOpenTicket(ticket.status)).slice(0, 6)))
+      // Open tickets, and resolved ones waiting for the user to confirm.
+      .then((data) => setTickets(data.filter((ticket) => isOpenTicket(ticket.status) || ticket.status === "FULFILLED").slice(0, 6)))
       .catch((caught) => setError(caught instanceof Error ? caught.message : "Could not load your tickets."));
   }, [refreshKey]);
 
@@ -313,16 +316,27 @@ function MyTicketsCard({ onChanged }: { onChanged: () => void }) {
           {tickets.map((ticket) => (
             <li key={ticket.id} className="flex items-start justify-between gap-3 px-4 py-3 text-xs">
               <div className="min-w-0">
-                <p className="font-semibold text-slate-700">
+                <Link href={`/agent/tickets/${ticket.id}`} className="block font-semibold text-slate-700 hover:text-brand-700">
                   {ticketNumber(ticket)} ·{" "}
-                  {ticket.asset ? `Problem with ${assetLabel(ticket.asset)}` : (ticket.category_name ?? "Asset request")}
-                </p>
+                  {ticket.ticket_type === "ACCESS"
+                    ? `${ticket.access_level} access to ${ticket.access_resource_name}`
+                    : ticket.ticket_type === "SOFTWARE"
+                      ? ticket.software_name ?? "Software"
+                      : ticket.asset
+                        ? `Problem with ${assetLabel(ticket.asset)}`
+                        : (ticket.category_name ?? "Asset request")}
+                </Link>
+                {ticket.status === "FULFILLED" && (
+                  <Link href={`/agent/tickets/${ticket.id}`} className="text-[11px] font-semibold text-emerald-700">
+                    Resolved: confirm or reopen
+                  </Link>
+                )}
                 <p className="truncate text-slate-500">{ticket.reason}</p>
                 <p className="text-[11px] text-slate-400">{timeAgo(ticket.created_at)}</p>
               </div>
               <span className="flex shrink-0 flex-col items-end gap-1.5">
                 <TicketStatusBadge status={ticket.status} ticketType={ticket.ticket_type} />
-                {confirming === ticket.id ? (
+                {ticket.status === "FULFILLED" ? null : confirming === ticket.id ? (
                   <span className="flex items-center gap-2">
                     <span className="font-semibold text-slate-600">Remove?</span>
                     <button

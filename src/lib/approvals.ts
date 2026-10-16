@@ -2,7 +2,7 @@ import { apiFetch } from "@/lib/api";
 
 /** Who may approve one kind of request in the organization (mirrors PolicyResponse). */
 export interface ApprovalPolicy {
-  request_type: "ASSET" | "SOFTWARE" | "RETURN" | "ISSUE" | "STOCK" | "PURCHASE_ORDER";
+  request_type: "ASSET" | "SOFTWARE" | "ACCESS" | "RETURN" | "ISSUE" | "STOCK" | "PURCHASE_ORDER";
   approver_roles: string[];
   allow_self_approval: boolean;
   /** False while the default rule applies. */
@@ -12,6 +12,7 @@ export interface ApprovalPolicy {
 export const POLICY_LABEL: Record<ApprovalPolicy["request_type"], [string, string]> = {
   ASSET: ["Asset requests", "A user asks for a device."],
   SOFTWARE: ["Software access", "A user asks for a seat of a product."],
+  ACCESS: ["Access requests", "A user asks for access to an application or resource (the resource owner approves too)."],
   RETURN: ["Device returns", "A user hands a device back."],
   ISSUE: ["Problems with assets", "Resolving a reported problem."],
   STOCK: ["Stock requests", "A user asks for consumables."],

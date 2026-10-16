@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
 from app.models.models import Asset, PlatformRole, Software, SoftwareLicense, User
+from app.services.access_service import expire_access_grants
 from app.services.notification_service import already_notified, notify
 
 logger = logging.getLogger(__name__)
@@ -66,6 +67,8 @@ def run_warranty_alerts(db: Session) -> int:
             notify(db, admin, title, f"{(item.expiry_date - now).days} day(s) left. Renew it under Software Licenses.",
                    "/inventory/software", "WARNING")
             created += 1
+    # Access grants past their end date are ended (and the user told).
+    created += expire_access_grants(db)
     db.commit()
     return created
 

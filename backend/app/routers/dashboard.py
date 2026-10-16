@@ -68,7 +68,9 @@ def get_dashboard_overview(
     seats_assigned = seat_q.count()
     # Everything waiting for a decision: open tickets, stock requests and unapproved POs.
     pending_approvals = (
-        req_q.filter(AssetRequest.status.in_([RequestStatusEnum.PENDING, RequestStatusEnum.IN_PROGRESS])).count()
+        req_q.filter(AssetRequest.status.in_([
+            RequestStatusEnum.PENDING, RequestStatusEnum.UNDER_REVIEW, RequestStatusEnum.PENDING_APPROVAL,
+        ])).count()
         + stock_req_q.count() + po_q.count()
     )
 

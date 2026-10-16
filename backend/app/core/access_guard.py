@@ -35,6 +35,7 @@ MODULE_PREFIXES = (
     ("/api/vendors", "HAM"),
     ("/api/departments", "HAM"),
     ("/api/approval-policies", "HAM"),
+    ("/api/access", "HAM"),
     ("/api/software", "SAM"),
     ("/api/cloud", "CLOUD"),
     ("/api/discovery", "SCAN"),
@@ -46,7 +47,7 @@ ALWAYS_ALLOWED = ("/api/profile", "/api/notifications", "/api/auth")
 
 # The only areas a user (EMPLOYEE) may reach. Each router scopes them to the
 # user's own records. Departments are read-only names for the ticket form.
-USER_PREFIXES = ("/api/assets", "/api/asset-requests", "/api/inventory", "/api/reports", "/api/software")
+USER_PREFIXES = ("/api/assets", "/api/asset-requests", "/api/inventory", "/api/reports", "/api/software", "/api/access")
 USER_READ_ONLY = ("/api/departments",)
 
 

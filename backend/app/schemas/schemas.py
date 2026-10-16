@@ -350,11 +350,23 @@ class AssetAssignRequest(BaseModel):
 
 # --- Request & Return Schemas ---
 
+TicketPriority = Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+
+
 class AssetRequestCreate(BaseModel):
     # REQUEST asks for an asset of a category; ISSUE reports a problem with an
     # asset the requester holds (asset_id); SOFTWARE asks for a seat of a
-    # product (software_id); RETURN hands back an asset the requester holds.
-    ticket_type: Literal["REQUEST", "ISSUE", "SOFTWARE", "RETURN"] = "REQUEST"
+    # product (software_id); RETURN hands back an asset the requester holds;
+    # ACCESS asks for a level of access to a resource (access_resource_id).
+    ticket_type: Literal["REQUEST", "ISSUE", "SOFTWARE", "RETURN", "ACCESS"] = "REQUEST"
+    priority: TicketPriority = "MEDIUM"
+    # When the requester needs it by (today or later).
+    required_date: Optional[datetime] = None
+    additional_comments: Optional[str] = Field(None, max_length=2000)
+    access_resource_id: Optional[str] = None
+    access_level: Optional[str] = Field(None, max_length=50)
+    # ACCESS: how long it is needed for (blank = no end date, within the resource's limit).
+    access_until: Optional[datetime] = None
     asset_category_id: Optional[str] = None
     asset_id: Optional[str] = None
     software_id: Optional[str] = None
@@ -365,7 +377,7 @@ class AssetRequestCreate(BaseModel):
     # is assigned to them on approval. Defaults to the caller.
     requested_for_user_id: Optional[str] = None
     department_id: Optional[str] = None
-    reason: str
+    reason: str = Field(..., min_length=1, max_length=2000)
 
 
 class AssetRequestUpdate(BaseModel):
@@ -380,6 +392,87 @@ class AssetRequestUpdate(BaseModel):
     software_id: Optional[str] = None
     # RETURN fulfilment: the condition the device came back in.
     return_condition: Optional[Literal["EXCELLENT", "GOOD", "FAIR", "POOR", "DAMAGED"]] = None
+    # REQUEST approval: hold this in-stock device for the requester until handover.
+    reserve_asset_id: Optional[str] = None
+    # WAITING_INVENTORY / WAITING_LICENSE: when it is expected and what is being bought.
+    expected_date: Optional[datetime] = None
+    procurement_note: Optional[str] = Field(None, max_length=2000)
+    # A note with the change: what is needed (WAITING_USER), why (approval), or for the history.
+    note: Optional[str] = Field(None, max_length=2000)
+    # SOFTWARE fulfilment: installation status as known now (no deployment system is connected).
+    deployment_status: Optional[Literal["NOT_REQUIRED", "PENDING", "INSTALLED", "FAILED"]] = None
+    # ACCESS fulfilment: when the access ends (overrides what was asked, within the resource's limit).
+    access_until: Optional[datetime] = None
+
+
+class TicketAssign(BaseModel):
+    # The IT team member to work the ticket; null unassigns it.
+    assignee_id: Optional[str] = None
+
+
+class TicketReopen(BaseModel):
+    reason: str = Field(..., min_length=3, max_length=2000)
+
+
+class TicketCommentCreate(BaseModel):
+    body: str = Field(..., min_length=1, max_length=4000)
+    # Internal notes are seen by the IT team only.
+    internal: bool = False
+
+
+class TicketCommentResponse(BaseModel):
+    id: str
+    ticket_id: str
+    author_id: str
+    author_name: Optional[str] = None
+    author_is_staff: bool = False
+    body: str
+    internal: bool
+    created_at: datetime
+
+
+class TicketAttachmentCreate(BaseModel):
+    filename: str = Field(..., min_length=1, max_length=255)
+    content_type: str = Field(..., max_length=100)
+    # Base64 file content (the data: prefix is optional).
+    data: str
+
+
+class TicketAttachmentResponse(BaseModel):
+    id: str
+    ticket_id: str
+    filename: str
+    content_type: str
+    size: int
+    uploaded_by: str
+    uploaded_by_name: Optional[str] = None
+    created_at: datetime
+
+
+class TicketEventResponse(BaseModel):
+    id: str
+    action: str
+    from_status: Optional[str] = None
+    to_status: Optional[str] = None
+    note: Optional[str] = None
+    actor_name: Optional[str] = None
+    internal: bool = False
+    created_at: datetime
+
+
+class TicketApprovalResponse(BaseModel):
+    id: str
+    approver_id: str
+    approver_name: Optional[str] = None
+    kind: str
+    decision: str
+    note: Optional[str] = None
+    created_at: datetime
+
+
+class OwnerDecision(BaseModel):
+    decision: Literal["APPROVED", "REJECTED"]
+    note: Optional[str] = Field(None, max_length=2000)
 
 
 class TicketAsset(BaseModel):
@@ -427,8 +520,38 @@ class AssetRequestResponse(BaseModel):
     requested_software_name: Optional[str] = None
     license_assignment_id: Optional[str] = None
     return_condition: Optional[str] = None
+    ticket_no: Optional[int] = None
+    priority: str = "MEDIUM"
+    required_date: Optional[datetime] = None
+    additional_comments: Optional[str] = None
+    assignee_id: Optional[str] = None
+    assignee_name: Optional[str] = None
+    expected_date: Optional[datetime] = None
+    procurement_note: Optional[str] = None
+    resolved_at: Optional[datetime] = None
+    closed_at: Optional[datetime] = None
+    reopen_count: int = 0
+    access_resource_id: Optional[str] = None
+    access_resource_name: Optional[str] = None
+    access_level: Optional[str] = None
+    access_until: Optional[datetime] = None
+    access_grant_id: Optional[str] = None
+    # The requester's employee ID (their profile employee code, else their user ID).
+    requester_employee_id: Optional[str] = None
+    # ACCESS tickets: the resource owner who must also approve, and whether they still have to.
+    owner_id: Optional[str] = None
+    owner_name: Optional[str] = None
+    needs_owner_approval: bool = False
+    approvals: List[TicketApprovalResponse] = []
+    attachment_count: int = 0
+    comment_count: int = 0
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class TicketPage(BaseModel):
+    items: List[AssetRequestResponse]
+    total: int
 
 
 class AssetReturnCreate(BaseModel):

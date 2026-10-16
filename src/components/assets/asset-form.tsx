@@ -40,6 +40,8 @@ export interface AssetFormValues {
   license_count: string;
   license_expiry: string;
   license_renewal: string;
+  /** Software only: requests need approval before a seat is given. */
+  approval_required: boolean;
 }
 
 export function emptyAssetForm(): AssetFormValues {
@@ -47,7 +49,7 @@ export function emptyAssetForm(): AssetFormValues {
     asset_tag: "", serial_number: "", name: "", category: "", type: "Hardware", brand: "", model: "", specifications: "",
     condition: "EXCELLENT", department_id: "", vendor_id: "", location_id: "", purchase_date: "", purchase_price: "",
     warranty_start: "", warranty_end: "", amc_vendor_id: "", amc_start: "", amc_end: "", amc_cost: "", description: "", license_type: "", license_number: "",
-    license_count: "", license_expiry: "", license_renewal: "",
+    license_count: "", license_expiry: "", license_renewal: "", approval_required: true,
   };
 }
 
@@ -155,6 +157,7 @@ export function formToSoftware(values: AssetFormValues): SoftwareInput {
       vendor_id: values.vendor_id || undefined,
       notes: values.description.trim() || undefined,
     },
+    approval_required: values.approval_required,
   };
 }
 
@@ -377,6 +380,14 @@ export function AssetForm({
           <label className={label}>
             Renewal date
             <input type="date" value={values.license_renewal} onChange={set("license_renewal")} className={input} />
+          </label>
+          <label className={`${label} flex items-center gap-2 sm:col-span-2 lg:col-span-3`}>
+            <input
+              type="checkbox"
+              checked={values.approval_required}
+              onChange={(event) => setValues((current) => ({ ...current, approval_required: event.target.checked }))}
+            />
+            Requests for this software need approval before a seat is given
           </label>
           <label className={label}>
             Vendor

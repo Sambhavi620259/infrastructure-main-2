@@ -14,8 +14,8 @@ from app.models.models import ApprovalPolicy, PlatformRole, User
 
 # ASSET: asset requests; SOFTWARE: software access; RETURN: device returns;
 # ISSUE: problems with an asset; STOCK: consumable stock requests;
-# PURCHASE_ORDER: approving (ordering) a purchase order.
-REQUEST_TYPES = ("ASSET", "SOFTWARE", "RETURN", "ISSUE", "STOCK", "PURCHASE_ORDER")
+# PURCHASE_ORDER: approving (ordering) a purchase order; ACCESS: access to a resource.
+REQUEST_TYPES = ("ASSET", "SOFTWARE", "ACCESS", "RETURN", "ISSUE", "STOCK", "PURCHASE_ORDER")
 
 # Roles that may ever be approvers. Users (EMPLOYEE) and reporting users never approve.
 APPROVER_ROLES = (PlatformRole.SUPER_ADMIN.value, PlatformRole.IT_ADMIN.value, PlatformRole.SUB_ADMIN.value)
@@ -23,7 +23,9 @@ APPROVER_ROLES = (PlatformRole.SUPER_ADMIN.value, PlatformRole.IT_ADMIN.value, P
 DEFAULT_APPROVERS: List[str] = list(APPROVER_ROLES)
 
 # Ticket type (asset_requests.ticket_type) -> approval request type.
-TICKET_REQUEST_TYPE: Dict[str, str] = {"REQUEST": "ASSET", "SOFTWARE": "SOFTWARE", "RETURN": "RETURN", "ISSUE": "ISSUE"}
+TICKET_REQUEST_TYPE: Dict[str, str] = {
+    "REQUEST": "ASSET", "SOFTWARE": "SOFTWARE", "RETURN": "RETURN", "ISSUE": "ISSUE", "ACCESS": "ACCESS",
+}
 
 
 def policy_for(db: Session, company_id: str, request_type: str) -> Dict:

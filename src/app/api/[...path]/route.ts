@@ -32,8 +32,11 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
     });
 
     const responseHeaders = new Headers();
-    const responseContentType = response.headers.get("content-type");
-    if (responseContentType) responseHeaders.set("content-type", responseContentType);
+    // Downloads (e.g. ticket attachments) keep their file name and no-sniff header.
+    for (const name of ["content-type", "content-disposition", "x-content-type-options", "cache-control"]) {
+      const value = response.headers.get(name);
+      if (value) responseHeaders.set(name, value);
+    }
 
     return new NextResponse(response.body, {
       status: response.status,

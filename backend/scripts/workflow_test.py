@@ -238,7 +238,7 @@ code, body = call("u1A", "GET", "/software")
 check("users cannot list the organization's licenses", code == 403, body)
 code, catalog = call("u1A", "GET", "/software/catalog")
 check("users see the catalogue (names only) to request from",
-      code == 200 and catalog and set(catalog[0]) == {"id", "name", "vendor", "version"}, catalog)
+      code == 200 and catalog and set(catalog[0]) == {"id", "name", "vendor", "version", "approval_required"}, catalog)
 
 code, sw_ticket = call("u1A", "POST", "/asset-requests", {"ticket_type": "SOFTWARE", "software_id": sw_id, "reason": "Need Office"})
 check("a user requests software access", code == 201 and sw_ticket["software_name"] == "Microsoft 365", sw_ticket)
@@ -305,7 +305,8 @@ check("the ledger holds receipts, registrations, assignments, returns, transfers
 
 print("Approval rules")
 code, policies = call("adminA", "GET", "/approval-policies")
-check("approval rules are listed for every request type", code == 200 and len(policies) == 6, policies)
+check("approval rules are listed for every request type (incl. access)",
+      code == 200 and len(policies) == 7 and "ACCESS" in [p["request_type"] for p in policies], policies)
 code, body = call("hamA", "PUT", "/approval-policies/SOFTWARE", {"approver_roles": ["SUB_ADMIN"]})
 check("sub-admins cannot change approval rules", code == 403, body)
 code, body = call("adminA", "PUT", "/approval-policies/SOFTWARE", {"approver_roles": ["EMPLOYEE"]})

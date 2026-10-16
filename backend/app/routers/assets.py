@@ -692,9 +692,12 @@ def assign_asset_to_user(
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found.")
 
-    if asset.status not in [AssetStatusEnum.IN_STOCK, AssetStatusEnum.REQUESTED]:
+    if asset.status == AssetStatusEnum.REQUESTED:
+        # Reserved for an approved ticket: it is handed over from that ticket.
+        raise HTTPException(status_code=400, detail="This asset is reserved for a ticket. Hand it over from that ticket.")
+    if asset.status != AssetStatusEnum.IN_STOCK:
         raise HTTPException(
-            status_code=400, 
+            status_code=400,
             detail=f"Asset cannot be assigned because its status is currently {asset.status.value}."
         )
 

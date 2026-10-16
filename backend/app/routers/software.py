@@ -95,6 +95,8 @@ class SoftwareCreate(BaseModel):
     version: Optional[str] = Field(None, max_length=50)
     # The first license, e.g. from the asset form's License Number / License Count.
     license: Optional[LicenseInput] = None
+    # Whether requests for it must be approved before a seat is given.
+    approval_required: bool = True
     # Older clients sent the seat count and terms on the product itself.
     license_type: Optional[LicenseType] = None
     total_licenses: Optional[int] = Field(None, ge=1)
@@ -106,6 +108,13 @@ class SoftwareUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=150)
     vendor: Optional[str] = Field(None, max_length=150)
     version: Optional[str] = Field(None, max_length=50)
+    approval_required: Optional[bool] = None
+
+
+class DeploymentUpdate(BaseModel):
+    # Recorded by an admin: no deployment system is connected, so this is never set automatically.
+    status: Literal["NOT_REQUIRED", "PENDING", "INSTALLED", "FAILED"]
+    note: Optional[str] = Field(None, max_length=1000)
 
 
 class LicenseResponse(BaseModel):
@@ -148,6 +157,10 @@ class SeatResponse(BaseModel):
     is_active: bool
     released_at: Optional[datetime] = None
     released_by_name: Optional[str] = None
+    # Installation as recorded by an admin (None = not tracked).
+    deployment_status: Optional[str] = None
+    deployment_note: Optional[str] = None
+    deployment_updated_at: Optional[datetime] = None
 
 
 class SoftwareResponse(BaseModel):
@@ -165,6 +178,7 @@ class SoftwareResponse(BaseModel):
     cost: Decimal
     expiry_date: Optional[datetime] = None
     status: str
+    approval_required: bool = True
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -185,6 +199,7 @@ class CatalogEntry(BaseModel):
     name: str
     vendor: Optional[str] = None
     version: Optional[str] = None
+    approval_required: bool = True
 
 
 def _company(user: User, tenant_company_id: Optional[str]) -> str:
@@ -277,6 +292,8 @@ def _seat_responses(db: Session, seats: List[SoftwareLicenseAssignment]) -> List
             asset_label=devices.get(seat.asset_id), assigned_at=seat.assigned_at,
             assigned_by_name=names.get(seat.assigned_by), is_active=bool(seat.is_active),
             released_at=seat.released_at, released_by_name=names.get(seat.released_by),
+            deployment_status=seat.deployment_status, deployment_note=seat.deployment_note,
+            deployment_updated_at=seat.deployment_updated_at,
         ))
     return out
 
@@ -441,6 +458,49 @@ def release_assignment(
     return _seat_responses(db, [seat])[0]
 
 
+@router.put("/assignments/{assignment_id}/deployment", response_model=SeatResponse)
+def update_deployment(
+    assignment_id: str,
+    body: DeploymentUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(_managers),
+    tenant_company_id: Optional[str] = Depends(get_tenant_company_id),
+):
+    """
+    Record the installation status of a seat. No deployment system is
+    connected: an admin records what happened; "Installed" means they
+    confirmed it, never that the system installed it.
+    """
+    company_id = _company(current_user, tenant_company_id)
+    seat = db.query(SoftwareLicenseAssignment).filter(
+        SoftwareLicenseAssignment.id == assignment_id, SoftwareLicenseAssignment.company_id == company_id
+    ).first()
+    if not seat:
+        raise HTTPException(status_code=404, detail="Seat assignment not found.")
+    if not seat.is_active:
+        raise HTTPException(status_code=400, detail="This seat has been released.")
+    if body.status == "FAILED" and not (body.note or "").strip():
+        raise HTTPException(status_code=400, detail="Say what went wrong with the installation.")
+    old = seat.deployment_status
+    seat.deployment_status = body.status
+    seat.deployment_note = (body.note or "").strip() or None
+    seat.deployment_updated_at = datetime.utcnow()
+    seat.deployment_updated_by = current_user.id
+    software = db.query(Software).filter(Software.id == seat.software_id).first()
+    holder = db.query(User).filter(User.id == seat.user_id).first()
+    if holder and holder.id != current_user.id and body.status in ("INSTALLED", "FAILED"):
+        notify(db, holder,
+               title=f"{software.name if software else 'Software'} " + ("is installed" if body.status == "INSTALLED" else "could not be installed"),
+               message=f"{current_user.full_name}: {seat.deployment_note or 'recorded the installation.'}"[:300],
+               link=home_link(holder, "/profile", "/agent/software"),
+               type="SUCCESS" if body.status == "INSTALLED" else "WARNING")
+    db.commit()
+    log_audit_event(db=db, action="UPDATE_SOFTWARE_DEPLOYMENT", entity="SoftwareLicenseAssignment", company_id=company_id,
+                    user_id=current_user.id, entity_id=seat.id,
+                    old_value=old, new_value=f"{software.name if software else seat.software_id}: {body.status}")
+    return _seat_responses(db, [seat])[0]
+
+
 # --- Products -----------------------------------------------------------------
 
 @router.post("", response_model=SoftwareDetail, status_code=status.HTTP_201_CREATED)
@@ -464,6 +524,7 @@ def create_software(
     software = Software(
         company_id=company_id, name=software_in.name.strip(), vendor=(software_in.vendor or "").strip() or None,
         version=(software_in.version or "").strip() or None, status="ACTIVE", total_licenses=0, used_licenses=0,
+        approval_required=software_in.approval_required,
     )
     db.add(software)
     db.flush()
@@ -535,6 +596,8 @@ def update_software(
     for field, value in update_in.model_dump(exclude_unset=True).items():
         if field == "name":
             software.name = value.strip()
+        elif field == "approval_required":
+            software.approval_required = bool(value)
         else:
             setattr(software, field, (value or "").strip() or None)
     db.commit()

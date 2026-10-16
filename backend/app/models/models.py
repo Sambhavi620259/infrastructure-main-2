@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from enum import Enum as PyEnum
 from sqlalchemy import (
-    Column, String, DateTime, Float, ForeignKey, Integer, JSON, Numeric, Text, Boolean, Enum, Index, text
+    Column, String, DateTime, Float, ForeignKey, Integer, JSON, LargeBinary, Numeric, Text, Boolean, Enum, Index, text
 )
 from sqlalchemy.orm import relationship
 from app.core.database import Base
@@ -36,12 +36,20 @@ class AssetStatusEnum(str, PyEnum):
 
 
 class RequestStatusEnum(str, PyEnum):
-    # Ticket flow: PENDING -> IN_PROGRESS -> APPROVED (waiting for stock) -> FULFILLED,
-    # or REJECTED / CANCELLED. Return requests use PENDING / APPROVED / REJECTED.
+    # Ticket flow (labels in brackets): PENDING (Submitted) -> UNDER_REVIEW ->
+    # PENDING_APPROVAL -> APPROVED -> IN_PROGRESS -> FULFILLED (Resolved) -> CLOSED.
+    # Side states: WAITING_INVENTORY, WAITING_LICENSE, WAITING_USER; REJECTED and
+    # CANCELLED end a ticket. Stock and return requests use PENDING / APPROVED / REJECTED.
     PENDING = "PENDING"
+    UNDER_REVIEW = "UNDER_REVIEW"
+    PENDING_APPROVAL = "PENDING_APPROVAL"
     IN_PROGRESS = "IN_PROGRESS"
     APPROVED = "APPROVED"
+    WAITING_INVENTORY = "WAITING_INVENTORY"
+    WAITING_LICENSE = "WAITING_LICENSE"
+    WAITING_USER = "WAITING_USER"
     FULFILLED = "FULFILLED"
+    CLOSED = "CLOSED"
     REJECTED = "REJECTED"
     CANCELLED = "CANCELLED"
 
@@ -281,6 +289,25 @@ class AssetRequest(Base):
     ticket_type = Column(String(20), default="REQUEST", nullable=False, index=True)
     asset_id = Column(String, ForeignKey("assets.id"), nullable=True, index=True)
     resolution_note = Column(Text, nullable=True)
+    # Per-organization ticket number shown as TKT-000123.
+    ticket_no = Column(Integer, nullable=True)
+    priority = Column(String(10), default="MEDIUM", nullable=False)
+    required_date = Column(DateTime, nullable=True)
+    additional_comments = Column(Text, nullable=True)
+    # The IT team member working the ticket.
+    assignee_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
+    # Waiting for inventory / license: when it is expected and what is being bought.
+    expected_date = Column(DateTime, nullable=True)
+    procurement_note = Column(Text, nullable=True)
+    resolved_at = Column(DateTime, nullable=True)
+    closed_at = Column(DateTime, nullable=True)
+    reopen_count = Column(Integer, default=0, nullable=False)
+    # ACCESS tickets: the resource, the level asked for and until when; the grant on fulfilment.
+    access_resource_id = Column(String, ForeignKey("access_resources.id"), nullable=True, index=True)
+    access_level = Column(String(50), nullable=True)
+    access_until = Column(DateTime, nullable=True)
+    # use_alter: access_grants also points back at asset_requests.
+    access_grant_id = Column(String, ForeignKey("access_grants.id", use_alter=True, name="fk_ticket_access_grant"), nullable=True)
     # SOFTWARE tickets: the product asked for, and the seat given on fulfilment.
     software_id = Column(String, ForeignKey("software.id"), nullable=True, index=True)
     # Software asked for by name because it is not registered yet; the admin links it on fulfilment.
@@ -300,6 +327,10 @@ class AssetRequest(Base):
     processed_by = Column(String, ForeignKey("users.id"), nullable=True, index=True)
     processed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("uix_company_ticket_no", "company_id", "ticket_no", unique=True),
+    )
 
 
 class AssetReturnRequest(Base):
@@ -384,6 +415,8 @@ class Software(Base):
     status = Column(String(20), default="ACTIVE")
     expiry_date = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    # Whether a request for this product must be approved before a seat is given.
+    approval_required = Column(Boolean, default=True, nullable=False)
 
 
 class SoftwareLicense(Base):
@@ -428,10 +461,131 @@ class SoftwareLicenseAssignment(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     released_at = Column(DateTime, nullable=True)
     released_by = Column(String, ForeignKey("users.id"), nullable=True)
+    # Installation, as recorded by an admin (no deployment system is connected):
+    # None = not tracked, NOT_REQUIRED, PENDING, INSTALLED or FAILED.
+    deployment_status = Column(String(20), nullable=True)
+    deployment_note = Column(Text, nullable=True)
+    deployment_updated_at = Column(DateTime, nullable=True)
+    deployment_updated_by = Column(String, ForeignKey("users.id"), nullable=True)
 
     __table_args__ = (
         # One active seat per user per license.
         Index("uix_license_user_active", "license_id", "user_id", unique=True,
+              postgresql_where=text("is_active"), sqlite_where=text("is_active")),
+    )
+
+
+# --- Ticket conversation, files, history and approvals ---
+
+class TicketComment(Base):
+    """A comment on a ticket. Internal notes are seen by the IT team only."""
+    __tablename__ = "ticket_comments"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    company_id = Column(String, ForeignKey("companies.id"), nullable=False, index=True)
+    ticket_id = Column(String, ForeignKey("asset_requests.id"), nullable=False, index=True)
+    author_id = Column(String, ForeignKey("users.id"), nullable=False)
+    body = Column(Text, nullable=False)
+    internal = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class TicketAttachment(Base):
+    """A small file on a ticket (image or PDF), stored in the database."""
+    __tablename__ = "ticket_attachments"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    company_id = Column(String, ForeignKey("companies.id"), nullable=False, index=True)
+    ticket_id = Column(String, ForeignKey("asset_requests.id"), nullable=False, index=True)
+    uploaded_by = Column(String, ForeignKey("users.id"), nullable=False)
+    filename = Column(String(255), nullable=False)
+    content_type = Column(String(100), nullable=False)
+    size = Column(Integer, nullable=False)
+    data = Column(LargeBinary, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class TicketEvent(Base):
+    """One step in a ticket's history: created, status changes, assignment, approvals, grants."""
+    __tablename__ = "ticket_events"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    company_id = Column(String, ForeignKey("companies.id"), nullable=False, index=True)
+    ticket_id = Column(String, ForeignKey("asset_requests.id"), nullable=False, index=True)
+    actor_id = Column(String, ForeignKey("users.id"), nullable=True)
+    action = Column(String(40), nullable=False)
+    from_status = Column(String(30), nullable=True)
+    to_status = Column(String(30), nullable=True)
+    note = Column(Text, nullable=True)
+    # Internal events (e.g. assignment to a team member) are hidden from the requester.
+    internal = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class TicketApproval(Base):
+    """A recorded approval decision on a ticket: by an approver (IT) or by the resource owner."""
+    __tablename__ = "ticket_approvals"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    company_id = Column(String, ForeignKey("companies.id"), nullable=False, index=True)
+    ticket_id = Column(String, ForeignKey("asset_requests.id"), nullable=False, index=True)
+    approver_id = Column(String, ForeignKey("users.id"), nullable=False)
+    kind = Column(String(20), nullable=False)  # APPROVER or OWNER
+    decision = Column(String(20), nullable=False)  # APPROVED or REJECTED
+    note = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# --- Access management ---
+
+class AccessResource(Base):
+    """Something people request access to: an application, database, VPN, shared folder, mailbox..."""
+    __tablename__ = "access_resources"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    company_id = Column(String, ForeignKey("companies.id"), nullable=False, index=True)
+    name = Column(String(150), nullable=False)
+    # APPLICATION, DATABASE, VPN, SHARED_FOLDER, EMAIL or OTHER.
+    resource_type = Column(String(30), nullable=False, default="APPLICATION")
+    description = Column(Text, nullable=True)
+    # The person who must also approve access (optional).
+    owner_id = Column(String, ForeignKey("users.id"), nullable=True)
+    # Levels people can ask for, least to most privileged, e.g. ["Read", "Write", "Admin"].
+    access_levels = Column(JSON, nullable=False, default=list)
+    # Levels treated as privileged: always need the owner's approval too (when an owner is set).
+    privileged_levels = Column(JSON, nullable=False, default=list)
+    # Longest grant allowed, in days (None = no limit).
+    max_days = Column(Integer, nullable=True)
+    status = Column(String(20), default="ACTIVE", nullable=False)
+    created_by = Column(String, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("uix_access_resource_name", "company_id", "name", unique=True),
+    )
+
+
+class AccessGrant(Base):
+    """Access given to a user on a resource. Recorded by an admin; nothing is granted automatically."""
+    __tablename__ = "access_grants"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    company_id = Column(String, ForeignKey("companies.id"), nullable=False, index=True)
+    resource_id = Column(String, ForeignKey("access_resources.id"), nullable=False, index=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    access_level = Column(String(50), nullable=False)
+    ticket_id = Column(String, ForeignKey("asset_requests.id"), nullable=True)
+    granted_by = Column(String, ForeignKey("users.id"), nullable=False)
+    granted_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+    revoked_at = Column(DateTime, nullable=True)
+    revoked_by = Column(String, ForeignKey("users.id"), nullable=True)
+    revoke_reason = Column(Text, nullable=True)
+
+    __table_args__ = (
+        # One active grant per user per resource.
+        Index("uix_access_grant_active", "resource_id", "user_id", unique=True,
               postgresql_where=text("is_active"), sqlite_where=text("is_active")),
     )
 

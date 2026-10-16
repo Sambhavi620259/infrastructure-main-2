@@ -13,15 +13,22 @@ import {
   releaseTicket,
   resolveTicket,
   startTicket,
+  ticketNumber as numberOf,
   ticketStatusLabel,
   ticketStatusStyle,
   type AssetRequest,
 } from "@/lib/tickets";
 import { assetStatusLabel, formatDate, type Asset, type AssetStatus, assetLabel } from "@/types/asset";
 import { listSoftware, type Software } from "@/lib/software";
+import { isOpenTicket as isOpenStatus } from "@/lib/tickets";
 
 export function ticketNumber(ticket: AssetRequest): string {
-  return `#${ticket.id.slice(0, 6).toUpperCase()}`;
+  return numberOf(ticket);
+}
+
+/** Where a ticket's detail page is, for the admin or the user workspace. */
+export function ticketHref(ticket: Pick<AssetRequest, "id">, admin: boolean): string {
+  return `${admin ? "/tickets" : "/agent/tickets"}/${ticket.id}`;
 }
 
 export function TicketStatusBadge({ status, ticketType }: { status: string; ticketType?: string }) {
@@ -37,7 +44,8 @@ const TYPE_CHIP: Record<string, [string, string]> = {
   ISSUE: ["Problem", "bg-orange-50 text-orange-700 ring-1 ring-inset ring-orange-200"],
   SOFTWARE: ["Software", "bg-indigo-50 text-indigo-700 ring-1 ring-inset ring-indigo-200"],
   RETURN: ["Return", "bg-sky-50 text-sky-700 ring-1 ring-inset ring-sky-200"],
-  REQUEST: ["Asset request", "bg-slate-100 text-slate-600"],
+  ACCESS: ["Access", "bg-teal-50 text-teal-700 ring-1 ring-inset ring-teal-200"],
+  REQUEST: ["Hardware", "bg-slate-100 text-slate-600"],
 };
 
 /** "Asset request", "Problem", "Software" or "Return" chip. */
@@ -46,13 +54,17 @@ export function TicketTypeChip({ ticketType }: { ticketType: string }) {
   return <span className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-bold ${style}`}>{text}</span>;
 }
 
-const REQUEST_STEPS = ["PENDING", "IN_PROGRESS", "APPROVED", "FULFILLED"];
-const ISSUE_STEPS = ["PENDING", "IN_PROGRESS", "FULFILLED"];
+// Submitted -> Under review -> (Pending approval) -> Approved -> In progress -> Resolved -> Closed.
+const STEP_OF: Record<string, number> = {
+  PENDING: 0, UNDER_REVIEW: 1, WAITING_USER: 1, PENDING_APPROVAL: 2, APPROVED: 3,
+  IN_PROGRESS: 4, WAITING_INVENTORY: 4, WAITING_LICENSE: 4, FULFILLED: 5, CLOSED: 6,
+};
+const STEPS = ["PENDING", "UNDER_REVIEW", "PENDING_APPROVAL", "APPROVED", "IN_PROGRESS", "FULFILLED", "CLOSED"];
 
 /** Badge plus a bar showing how far the ticket has got. */
 export function TicketProgress({ status, ticketType }: { status: string; ticketType?: string }) {
-  const steps = ticketType === "ISSUE" ? ISSUE_STEPS : REQUEST_STEPS;
-  const reached = steps.indexOf(status);
+  const steps = STEPS;
+  const reached = STEP_OF[status] ?? -1;
   return (
     <div className="space-y-1.5">
       <TicketStatusBadge status={status} ticketType={ticketType} />
@@ -62,7 +74,7 @@ export function TicketProgress({ status, ticketType }: { status: string; ticketT
             <span
               key={step}
               className={`h-1 flex-1 rounded-full ${
-                index > reached ? "bg-slate-200" : status === "FULFILLED" ? "bg-emerald-500" : "bg-brand-500"
+                index > reached ? "bg-slate-200" : status === "FULFILLED" || status === "CLOSED" ? "bg-emerald-500" : "bg-brand-500"
               }`}
             />
           ))}
@@ -75,7 +87,10 @@ export function TicketProgress({ status, ticketType }: { status: string; ticketT
 /** Who did what last, e.g. "In progress with Asha" or "Fulfilled by Ravi". */
 export function ticketHandler(ticket: AssetRequest): string | null {
   if (!ticket.processed_by_name) return null;
+  if (ticket.assignee_name && isOpenStatus(ticket.status)) return `Assigned to ${ticket.assignee_name}`;
   switch (ticket.status) {
+    case "UNDER_REVIEW":
+      return `Under review by ${ticket.processed_by_name}`;
     case "IN_PROGRESS":
       return `Being handled by ${ticket.processed_by_name}`;
     case "APPROVED":
@@ -164,7 +179,14 @@ export function TicketActions({
   };
 
   const status = ticket.status;
-  if (status !== "PENDING" && status !== "IN_PROGRESS" && status !== "APPROVED") return null;
+  // Other steps (review, approval, waiting, confirm / reopen) are worked on the ticket's page.
+  if (status !== "PENDING" && status !== "IN_PROGRESS" && status !== "APPROVED") {
+    return isOpenStatus(status) || status === "FULFILLED" ? (
+      <Link href={ticketHref(ticket, canHandle)} className="text-xs font-semibold text-brand-600 hover:text-brand-700">
+        Open ticket
+      </Link>
+    ) : null;
+  }
 
   // Suggest stock in the ticket's category first.
   const category = ticket.category_name?.toLowerCase() ?? "";

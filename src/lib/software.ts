@@ -23,6 +23,8 @@ export interface Software {
   cost: string | number;
   expiry_date: string | null;
   status: string;
+  /** Requests must be approved before a seat is given. */
+  approval_required: boolean;
 }
 
 /** A purchased license entitlement (mirrors LicenseResponse). */
@@ -65,7 +67,18 @@ export interface SoftwareSeat {
   is_active: boolean;
   released_at: string | null;
   released_by_name: string | null;
+  /** Installation as recorded by an admin: NOT_REQUIRED, PENDING, INSTALLED, FAILED, or null (not tracked). */
+  deployment_status?: string | null;
+  deployment_note?: string | null;
+  deployment_updated_at?: string | null;
 }
+
+export const DEPLOYMENT_LABEL: Record<string, string> = {
+  NOT_REQUIRED: "No installation needed",
+  PENDING: "Installation pending",
+  INSTALLED: "Installed",
+  FAILED: "Installation failed",
+};
 
 export interface SoftwareDetail extends Software {
   licenses: SoftwareLicense[];
@@ -77,6 +90,7 @@ export interface CatalogEntry {
   name: string;
   vendor: string | null;
   version: string | null;
+  approval_required?: boolean;
 }
 
 export type LicenseInput = {
@@ -98,6 +112,8 @@ export type SoftwareInput = {
   version?: string;
   /** The first license (License Number / License Count). */
   license?: LicenseInput;
+  /** Defaults to true: requests need approval before a seat is given. */
+  approval_required?: boolean;
 };
 
 const enc = encodeURIComponent;
@@ -114,8 +130,23 @@ export function createSoftware(input: SoftwareInput): Promise<SoftwareDetail> {
   return apiFetch<SoftwareDetail>("/api/software", { method: "POST", body: JSON.stringify(input) });
 }
 
-export function updateSoftware(id: string, input: { name?: string; vendor?: string; version?: string }): Promise<SoftwareDetail> {
+export function updateSoftware(
+  id: string,
+  input: { name?: string; vendor?: string; version?: string; approval_required?: boolean },
+): Promise<SoftwareDetail> {
   return apiFetch<SoftwareDetail>(`/api/software/${enc(id)}`, { method: "PUT", body: JSON.stringify(input) });
+}
+
+/** Record a seat's installation status. No deployment system is connected: an admin records what happened. */
+export function updateDeployment(
+  assignmentId: string,
+  status: "NOT_REQUIRED" | "PENDING" | "INSTALLED" | "FAILED",
+  note?: string,
+): Promise<SoftwareSeat> {
+  return apiFetch<SoftwareSeat>(`/api/software/assignments/${enc(assignmentId)}/deployment`, {
+    method: "PUT",
+    body: JSON.stringify({ status, note }),
+  });
 }
 
 export async function deleteSoftware(id: string): Promise<void> {

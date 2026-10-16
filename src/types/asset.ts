@@ -108,7 +108,8 @@ export interface DashboardMetrics {
 
 const STATUS_LABEL: Record<AssetStatus, string> = {
   IN_STOCK: "In stock",
-  REQUESTED: "Requested",
+  // Held for an approved ticket until it is handed over.
+  REQUESTED: "Reserved",
   ASSIGNED: "Assigned",
   IN_USE: "In use",
   RETURN_REQUESTED: "Return requested",

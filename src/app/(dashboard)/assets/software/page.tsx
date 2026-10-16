@@ -11,7 +11,10 @@ import {
   licenseTypeLabel,
   listSoftware,
   releaseSeat,
+  updateDeployment,
   updateLicense,
+  updateSoftware,
+  DEPLOYMENT_LABEL,
   type Software,
   type SoftwareDetail,
   type SoftwareLicense,
@@ -239,6 +242,27 @@ function ProductPanel({
           <div>
             <h2 className="text-lg font-extrabold text-slate-900">{detail.name}</h2>
             <p className="text-sm text-slate-500">{[detail.vendor, detail.version].filter(Boolean).join(" · ") || "No publisher recorded"}</p>
+            <label className="mt-2 flex items-center gap-1.5 text-xs text-slate-600">
+              <input
+                type="checkbox"
+                checked={detail.approval_required}
+                disabled={busy}
+                onChange={async (event) => {
+                  setBusy(true);
+                  try {
+                    await updateSoftware(detail.id, { approval_required: event.target.checked });
+                    onChanged(event.target.checked
+                      ? `Requests for ${detail.name} now need approval before a seat is given.`
+                      : `${detail.name} can be given without approval.`);
+                  } catch (caught) {
+                    onError(caught instanceof Error ? caught.message : "Could not change the setting.");
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              />
+              Requests need approval before a seat is given
+            </label>
           </div>
           <Utilization used={detail.used_licenses} total={detail.total_licenses} />
         </div>
@@ -314,9 +338,40 @@ function ProductPanel({
                     {seat.assigned_by_name ? ` · by ${seat.assigned_by_name}` : ""}
                   </span>
                 </span>
-                <button type="button" disabled={busy} onClick={() => release(seat.id, seat.user_name)} className="text-xs font-bold text-rose-600 hover:text-rose-700 disabled:opacity-50">
-                  Release
-                </button>
+                <span className="flex shrink-0 items-center gap-3">
+                  <label>
+                    <span className="sr-only">Installation for {seat.user_name}</span>
+                    <select
+                      value={seat.deployment_status ?? ""}
+                      disabled={busy}
+                      onChange={async (event) => {
+                        const value = event.target.value as "NOT_REQUIRED" | "PENDING" | "INSTALLED" | "FAILED";
+                        if (!value) return;
+                        const note = value === "FAILED" ? window.prompt("What went wrong with the installation?") ?? "" : undefined;
+                        if (value === "FAILED" && !note?.trim()) return;
+                        setBusy(true);
+                        try {
+                          await updateDeployment(seat.id, value, note);
+                          onChanged(`${detail.name} for ${seat.user_name}: ${DEPLOYMENT_LABEL[value].toLowerCase()}.`);
+                        } catch (caught) {
+                          onError(caught instanceof Error ? caught.message : "Could not record the installation.");
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                      className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
+                      title="Recorded by you: no deployment system is connected"
+                    >
+                      <option value="">Installation not tracked</option>
+                      {Object.entries(DEPLOYMENT_LABEL).map(([value, label]) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <button type="button" disabled={busy} onClick={() => release(seat.id, seat.user_name)} className="text-xs font-bold text-rose-600 hover:text-rose-700 disabled:opacity-50">
+                    Release
+                  </button>
+                </span>
               </li>
             ))}
           </ul>

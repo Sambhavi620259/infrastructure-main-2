@@ -14,15 +14,16 @@ export type Section =
   | "discovery"
   | "cloud"
   | "reports"
+  | "access"
   | "settings";
 
 const ALL: Section[] = [
-  "dashboard", "assets", "tickets", "users", "inventory", "software", "finance", "discovery", "cloud", "reports", "settings",
+  "dashboard", "assets", "tickets", "users", "inventory", "software", "finance", "discovery", "cloud", "reports", "access", "settings",
 ];
 
 /** Sub-admin module -> sections it unlocks. */
 const MODULE_SECTIONS: Record<string, Section[]> = {
-  HAM: ["assets", "tickets", "inventory", "finance"],
+  HAM: ["assets", "tickets", "inventory", "finance", "access"],
   SAM: ["software"],
   CLOUD: ["cloud"],
   SCAN: ["discovery"],
@@ -35,6 +36,7 @@ const FEATURE_SECTIONS: Record<string, Section[]> = {
   SOFTWARE: ["software"],
   REPORTS: ["reports"],
   CLOUD: ["cloud"],
+  ACCESS: ["access"],
 };
 
 /** User-workspace pages that belong to a plan feature. */
@@ -42,6 +44,7 @@ const USER_PAGE_FEATURES: [string, string][] = [
   ["/agent/software", "SOFTWARE"],
   ["/agent/inventory", "INVENTORY"],
   ["/agent/reports", "REPORTS"],
+  ["/agent/access", "ACCESS"],
 ];
 
 /**
@@ -87,6 +90,7 @@ export function sectionForPath(pathname: string): Section | null {
     ["/discovery", "discovery"],
     ["/cloud", "cloud"],
     ["/reports", "reports"],
+    ["/access", "access"],
     ["/settings", "settings"],
   ];
   const match = rules.find(([prefix]) => pathname === prefix || pathname.startsWith(`${prefix}/`));

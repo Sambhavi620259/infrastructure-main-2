@@ -27,6 +27,7 @@ import {
   UserGroupIcon,
   UsersIcon,
   XMarkIcon,
+  LockOpenIcon,
   MapPinIcon,
   UserPlusIcon,
   Bars3Icon,
@@ -70,6 +71,7 @@ const itMenu: readonly MenuEntry[] = [
     ],
   },
   { kind: "link", label: "Requests & Approvals", href: "/requests", icon: ClipboardDocumentCheckIcon, section: "tickets", badge: "tickets" },
+  { kind: "link", label: "Access Management", href: "/access", icon: LockOpenIcon, section: "access" },
   { kind: "link", label: "Reports & Analytics", href: routes.reports, icon: ChartBarIcon, section: "reports" },
   { kind: "heading", label: "Administration" },
   {
@@ -101,6 +103,7 @@ const agentNavigation: readonly NavigationItem[] = [
   ["Dashboard", routes.agentDashboard, "", Squares2X2Icon],
   ["My Assets", routes.agentAssets, "", CubeIcon],
   ["My Software", "/agent/software", "", KeyIcon],
+  ["My Access", "/agent/access", "", LockOpenIcon],
   ["Tickets", routes.agentTickets, "", TicketIcon],
   ["Inventory", routes.agentInventory, "", FolderIcon],
   ["Reports", routes.agentReports, "", DocumentChartBarIcon],

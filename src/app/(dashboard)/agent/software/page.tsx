@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { PlusIcon } from "@heroicons/react/24/outline";
-import { licenseTypeLabel, mySoftware, type SoftwareSeat } from "@/lib/software";
+import { DEPLOYMENT_LABEL, licenseTypeLabel, mySoftware, type SoftwareSeat } from "@/lib/software";
 import { isOpenTicket, listAssetCategories, listAssetRequests, type AssetCategory, type AssetRequest } from "@/lib/tickets";
 import { listDepartments } from "@/lib/users";
 import type { Department } from "@/types/user";
@@ -98,6 +98,12 @@ export default function MySoftwarePage() {
                       {seat.license_number ? ` · ${seat.license_number}` : ""}
                       {seat.asset_label ? ` · on ${seat.asset_label}` : ""} · since {formatDate(seat.assigned_at)}
                     </span>
+                    {seat.deployment_status && (
+                      <span className={`mt-0.5 block font-semibold ${seat.deployment_status === "FAILED" ? "text-rose-600" : seat.deployment_status === "PENDING" ? "text-amber-700" : "text-emerald-700"}`}>
+                        {DEPLOYMENT_LABEL[seat.deployment_status] ?? seat.deployment_status}
+                        {seat.deployment_note ? `: ${seat.deployment_note}` : ""}
+                      </span>
+                    )}
                   </span>
                   <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${expired ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700"}`}>
                     {seat.expiry_date ? `${expired ? "Expired" : "Valid until"} ${formatDate(seat.expiry_date)}` : "No expiry"}

@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
 from app.models.models import (
-    Asset, AssetAssignment, AssetCategory, AssetLifecycle, AssetRequest, AssetStatusEnum, AuditScanRecord,
+    AccessResource, Asset, AssetAssignment, AssetCategory, AssetLifecycle, AssetRequest, AssetStatusEnum, AuditScanRecord,
     AuditSession, Department, InventoryItem, InventoryRequest, Software, User,
 )
 
@@ -251,6 +251,24 @@ def _my_assets(db: Session, company_id: str, f: ReportFilters, user_id: str = ""
     )
 
 
+TICKET_KIND = {"REQUEST": "Asset request", "ISSUE": "Problem with asset", "SOFTWARE": "Software access",
+               "RETURN": "Return", "ACCESS": "Access request"}
+
+
+def _ticket_no(t: AssetRequest) -> str:
+    return f"TKT-{t.ticket_no:06d}" if t.ticket_no else f"#{t.id[:6].upper()}"
+
+
+def _ticket_status(t: AssetRequest) -> str:
+    """Status as people read it, e.g. SUBMITTED, WAITING FOR LICENSE, SEAT ASSIGNED."""
+    status = t.status.value
+    if status == "FULFILLED":
+        return {"ISSUE": "RESOLVED", "RETURN": "RETURNED", "SOFTWARE": "SEAT ASSIGNED",
+                "ACCESS": "ACCESS GRANTED"}.get(t.ticket_type, "FULFILLED")
+    return {"PENDING": "SUBMITTED", "WAITING_INVENTORY": "WAITING FOR INVENTORY",
+            "WAITING_LICENSE": "WAITING FOR LICENSE", "WAITING_USER": "WAITING FOR USER"}.get(status, status.replace("_", " "))
+
+
 def _my_tickets(db: Session, company_id: str, f: ReportFilters, user_id: str = "") -> ReportTable:
     query = db.query(AssetRequest).filter(
         AssetRequest.company_id == company_id,
@@ -265,15 +283,14 @@ def _my_tickets(db: Session, company_id: str, f: ReportFilters, user_id: str = "
     handler_ids = {t.processed_by for t in tickets if t.processed_by}
     handlers = dict(db.query(User.id, User.full_name).filter(User.id.in_(handler_ids)).all()) if handler_ids else {}
     asset_ids = {t.assigned_asset_id for t in tickets if t.assigned_asset_id} | {t.asset_id for t in tickets if t.asset_id}
-    tags = dict(db.query(Asset.id, Asset.asset_tag).filter(Asset.id.in_(asset_ids)).all()) if asset_ids else {}
+    tags = {a.id: a.label for a in db.query(Asset).filter(Asset.id.in_(asset_ids)).all()} if asset_ids else {}
     return ReportTable(
-        header=["Ticket", "Type", "Raised", "Category", "Asset", "Description", "Status", "Handled by",
+        header=["Ticket", "Type", "Priority", "Raised", "Category", "Asset", "Description", "Status", "Handled by",
                 "Outcome"],
         rows=[
-            [f"#{t.id[:6].upper()}", "Problem with asset" if t.ticket_type == "ISSUE" else "Asset request",
+            [_ticket_no(t), TICKET_KIND.get(t.ticket_type, t.ticket_type), (t.priority or "MEDIUM").title(),
              _stamp(t.created_at), categories.get(t.asset_category_id, ""),
-             tags.get(t.asset_id or t.assigned_asset_id, ""), t.reason,
-             ("RESOLVED" if t.ticket_type == "ISSUE" and t.status.value == "FULFILLED" else t.status.value),
+             tags.get(t.asset_id or t.assigned_asset_id, ""), t.reason, _ticket_status(t),
              handlers.get(t.processed_by, ""), t.resolution_note or t.rejection_reason or ""]
             for t in tickets
         ],
@@ -309,21 +326,23 @@ def _approvals(db: Session, company_id: str, f: ReportFilters, user_id: str = ""
     items = dict(db.query(InventoryItem.id, InventoryItem.name).filter(
         InventoryItem.id.in_({r.item_id for r in stock})).all()) if stock else {}
 
-    kind_label = {"REQUEST": "Asset request", "ISSUE": "Problem", "SOFTWARE": "Software access", "RETURN": "Return"}
+    kind_label = {**TICKET_KIND, "ISSUE": "Problem"}
+    resources = dict(db.query(AccessResource.id, AccessResource.name).filter(
+        AccessResource.id.in_({t.access_resource_id for t in tickets if t.access_resource_id})).all())
     rows = []
     for t in tickets:
-        status = t.status.value
-        if status == "FULFILLED":
-            status = {"ISSUE": "RESOLVED", "RETURN": "RETURNED", "SOFTWARE": "SEAT ASSIGNED"}.get(t.ticket_type, "FULFILLED")
-        what = (products.get(t.software_id) if t.ticket_type == "SOFTWARE"
+        status = _ticket_status(t)
+        what = (f"{resources.get(t.access_resource_id, '')} ({t.access_level})" if t.ticket_type == "ACCESS"
+                else (products.get(t.software_id) or t.requested_software_name) if t.ticket_type == "SOFTWARE"
                 else tags.get(t.asset_id) if t.ticket_type in ("ISSUE", "RETURN")
                 else categories.get(t.asset_category_id, ""))
         work = (t.rejection_reason and f"Rejected: {t.rejection_reason}") or t.resolution_note \
             or (t.return_condition and f"Returned in {t.return_condition.lower()} condition") \
             or (t.assigned_asset_id and f"Assigned {tags.get(t.assigned_asset_id, '')}") \
-            or (t.license_assignment_id and "Seat assigned") or ""
+            or (t.license_assignment_id and "Seat assigned") or (t.access_grant_id and "Access recorded as granted") \
+            or (t.procurement_note and f"Waiting: {t.procurement_note}") or ""
         rows.append((t.processed_at, [
-            f"#{t.id[:6].upper()}", kind_label.get(t.ticket_type, t.ticket_type), names.get(t.requested_by, ""),
+            _ticket_no(t), kind_label.get(t.ticket_type, t.ticket_type), names.get(t.requested_by, ""),
             what or "", t.reason, _stamp(t.created_at), status, names.get(t.processed_by, ""), _stamp(t.processed_at), work,
         ]))
     for r in stock:

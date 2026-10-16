@@ -3,13 +3,23 @@
 import { assetLabel } from "@/types/asset";
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { PlusIcon } from "@heroicons/react/24/outline";
+import Link from "next/link";
+import { ChevronDownIcon, ChevronUpIcon, PlusIcon } from "@heroicons/react/24/outline";
 import {
+  PRIORITIES,
+  PRIORITY_STYLE,
+  TICKET_STATUSES,
+  TICKET_TYPE_LABEL,
+  type Priority,
+  type TicketSearch,
   type TicketType,
   createAssetRequest,
   getAssetRequestCounts,
   listAssetCategories,
-  listAssetRequests,
+  priorityLabel,
+  searchTickets,
+  ticketStatusLabel,
+  uploadAttachment,
   type AssetCategory,
   type AssetRequest,
   type AssetRequestCounts,
@@ -19,26 +29,24 @@ import { listDepartments, type DirectoryEntry } from "@/lib/users";
 import type { Asset } from "@/types/asset";
 import type { Department } from "@/types/user";
 import { CategoryPicker, resolveCategoryId } from "@/components/tickets/category-picker";
-import {
-  TicketActions,
-  TicketAssetDetails,
-  TicketProgress,
-  TicketTypeChip,
-  ticketHandler,
-  ticketNumber,
-} from "@/components/tickets/ticket-actions";
+import { TicketStatusBadge, TicketTypeChip, ticketHandler, ticketHref, ticketNumber } from "@/components/tickets/ticket-actions";
 import { getProfile } from "@/lib/profile";
 import { softwareCatalog, type CatalogEntry } from "@/lib/software";
+import { accessCatalog, type AccessResource } from "@/lib/access-management";
+import { formatDate } from "@/types/asset";
 
-const TABS = [
-  ["PENDING", "Pending"],
-  ["IN_PROGRESS", "In progress"],
-  ["APPROVED", "Awaiting stock"],
-  ["FULFILLED", "Fulfilled"],
-  ["REJECTED", "Rejected"],
-  ["CANCELLED", "Cancelled"],
+const PAGE_SIZE = 25;
+
+// Quick views over the status filter.
+const VIEWS: [string, string][] = [
+  ["PENDING,UNDER_REVIEW,PENDING_APPROVAL,APPROVED,IN_PROGRESS", "Needs action"],
+  ["PENDING", "Submitted"],
+  ["PENDING_APPROVAL", "Awaiting approval"],
+  ["WAITING_INVENTORY,WAITING_LICENSE", "Awaiting stock / license"],
+  ["WAITING_USER", "Waiting for user"],
+  ["FULFILLED,CLOSED", "Resolved & closed"],
   ["", "All"],
-] as const;
+];
 
 function timeAgo(value: string): string {
   const minutes = Math.round((Date.now() - new Date(value).getTime()) / 60000);
@@ -50,9 +58,10 @@ function timeAgo(value: string): string {
 }
 
 /**
- * The asset-request queue with approve / reject and new-ticket form. Used by
- * the IT Admin's All Tickets and My Tickets, and (read-only apart from
- * cancelling) by the user workspace.
+ * The ticket table: search, filters (ticket ID, requester, type, department,
+ * priority, status, creation date), sorting and pages; each row opens the
+ * ticket. IT Admins see the organization's tickets; users see their own and
+ * raise new ones.
  */
 export function TicketQueue({
   eyebrow,
@@ -61,15 +70,22 @@ export function TicketQueue({
 }: {
   eyebrow: string;
   title?: string;
-  /** False in the user workspace: users see their own tickets and can only cancel them. */
+  /** False in the user workspace: users see their own tickets and raise new ones. */
   canHandle?: boolean;
 }) {
-  const [tab, setTab] = useState<string>(!canHandle ? "" : "PENDING");
+  const [filters, setFilters] = useState<TicketSearch>({
+    status: canHandle ? VIEWS[0][0] : "",
+    sort: "created_at",
+    order: "desc",
+  });
+  const [query, setQuery] = useState("");
+  const [requester, setRequester] = useState("");
+  const [page, setPage] = useState(0);
   const [tickets, setTickets] = useState<AssetRequest[]>([]);
+  const [total, setTotal] = useState(0);
   const [counts, setCounts] = useState<AssetRequestCounts | null>(null);
   const [categories, setCategories] = useState<AssetCategory[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
-  const [stock, setStock] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -78,23 +94,27 @@ export function TicketQueue({
 
   useEffect(() => {
     listAssetCategories().then(setCategories).catch(() => undefined);
-    // Only admins raise tickets on someone else's behalf.
     listDepartments().then(setDepartments).catch(() => undefined);
-  }, [canHandle]);
+  }, []);
+
+  // Typing waits a moment before searching.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setFilters((current) => ({ ...current, q: query.trim() || undefined, requester: requester.trim() || undefined }));
+      setPage(0);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [query, requester]);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    Promise.all([
-      listAssetRequests({ status: tab || undefined, limit: 200 }),
-      getAssetRequestCounts(),
-      canHandle ? listAssets({ status: "IN_STOCK", limit: 200 }) : Promise.resolve([]),
-    ])
-      .then(([ticketData, countData, stockData]) => {
+    Promise.all([searchTickets({ ...filters, skip: page * PAGE_SIZE, limit: PAGE_SIZE }), getAssetRequestCounts()])
+      .then(([pageData, countData]) => {
         if (cancelled) return;
-        setTickets(ticketData);
+        setTickets(pageData.items);
+        setTotal(pageData.total);
         setCounts(countData);
-        setStock(stockData);
         setError("");
       })
       .catch((caught) => {
@@ -106,13 +126,40 @@ export function TicketQueue({
     return () => {
       cancelled = true;
     };
-  }, [tab, refreshKey, canHandle]);
+  }, [filters, page, refreshKey]);
 
   const done = useCallback((message: string) => {
     setNotice(message);
     setError("");
     setRefreshKey((key) => key + 1);
   }, []);
+
+  const set = (patch: Partial<TicketSearch>) => {
+    setFilters((current) => ({ ...current, ...patch }));
+    setPage(0);
+  };
+  const sortBy = (sort: NonNullable<TicketSearch["sort"]>) =>
+    set({ sort, order: filters.sort === sort && filters.order === "desc" ? "asc" : "desc" });
+  const filterClass = "rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs";
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  const tiles: [string, number | undefined, string, string][] = canHandle
+    ? [
+        ["Total tickets", counts?.total, "text-slate-900", ""],
+        ["New (submitted)", counts?.submitted, "text-amber-600", "PENDING"],
+        ["Under review", counts?.under_review, "text-blue-600", "UNDER_REVIEW"],
+        ["Awaiting approval", counts?.pending_approval, "text-fuchsia-600", "PENDING_APPROVAL"],
+        ["Awaiting inventory", counts?.waiting_inventory, "text-orange-600", "WAITING_INVENTORY"],
+        ["Awaiting license", counts?.waiting_license, "text-orange-600", "WAITING_LICENSE"],
+        ["In progress", counts?.in_progress, "text-sky-600", "IN_PROGRESS"],
+        ["Resolved / closed", counts ? counts.resolved + counts.closed : undefined, "text-emerald-600", "FULFILLED,CLOSED"],
+      ]
+    : [
+        ["Open", counts?.open, "text-slate-900", "PENDING,UNDER_REVIEW,PENDING_APPROVAL,APPROVED,IN_PROGRESS,WAITING_INVENTORY,WAITING_LICENSE,WAITING_USER"],
+        ["Waiting for you", counts?.waiting_user, "text-yellow-700", "WAITING_USER"],
+        ["Resolved", counts?.resolved, "text-emerald-600", "FULFILLED"],
+        ["Closed", counts?.closed, "text-slate-600", "CLOSED"],
+      ];
 
   return (
     <main className="mx-auto max-w-[1400px] space-y-4">
@@ -122,8 +169,8 @@ export function TicketQueue({
           <h1 className="mt-1 text-2xl font-extrabold">{title}</h1>
           <p className="mt-1 text-xs text-slate-500">
             {canHandle
-              ? "Asset requests and problems reported on assets. Fulfil a request with an in-stock asset (or approve it to wait for stock); resolve a problem with a note."
-              : "Request a new asset or report a problem with one of yours. Your IT Admin handles each ticket; you are notified at every step."}
+              ? "Hardware, software and access requests, problems and returns. Open a ticket to review, approve, fulfil and resolve it."
+              : "Request hardware, software or access, or report a problem with one of your assets. You are notified at every step."}
           </p>
         </div>
         {/* Users raise tickets; IT Admins only work and resolve them. */}
@@ -134,7 +181,7 @@ export function TicketQueue({
             disabled={formOpen}
             className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-xs font-bold text-white hover:bg-brand-700 disabled:opacity-60"
           >
-            <PlusIcon className="h-4 w-4" /> New ticket
+            <PlusIcon className="h-4 w-4" /> New request
           </button>
         )}
       </header>
@@ -163,119 +210,234 @@ export function TicketQueue({
           onCancel={() => setFormOpen(false)}
           onCreated={(ticket) => {
             setFormOpen(false);
-            done(`Ticket ${ticketNumber(ticket)} raised for ${ticket.requested_by_name ?? ticket.requested_for}.`);
+            done(`Ticket ${ticketNumber(ticket)} submitted. Track it below.`);
           }}
         />
       )}
 
-      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {[
-          ["Pending", counts?.pending, "text-amber-600"],
-          ["In progress", counts?.in_progress, "text-blue-600"],
-          ["Awaiting stock", counts?.approved, "text-violet-600"],
-          ["Fulfilled", counts?.fulfilled, "text-emerald-600"],
-        ].map(([label, value, color]) => (
-          <div key={String(label)} className="ui-surface p-4">
+      <section className={`grid grid-cols-2 gap-3 ${canHandle ? "md:grid-cols-4 xl:grid-cols-8" : "lg:grid-cols-4"}`}>
+        {tiles.map(([label, value, color, status]) => (
+          <button
+            key={label}
+            type="button"
+            onClick={() => set({ status })}
+            aria-pressed={filters.status === status}
+            className={`ui-surface p-3 text-left transition hover:border-brand-200 ${filters.status === status ? "ring-2 ring-brand-200" : ""}`}
+          >
             <p className="text-[10px] text-slate-500">{label}</p>
             <p className={`mt-1 text-xl font-extrabold ${color}`}>{value ?? "—"}</p>
-          </div>
+          </button>
         ))}
       </section>
+      {canHandle && counts && counts.high_priority > 0 && (
+        <button
+          type="button"
+          onClick={() => set({ priority: "HIGH,CRITICAL", status: VIEWS[0][0] })}
+          className="w-full rounded-lg border border-rose-200 bg-rose-50 px-4 py-2 text-left text-xs font-semibold text-rose-800"
+        >
+          {counts.high_priority} open high-priority ticket{counts.high_priority === 1 ? "" : "s"}: show them
+        </button>
+      )}
 
       <section className="ui-surface overflow-hidden">
-        <div className="flex flex-col gap-3 border-b border-slate-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-          <div role="tablist" aria-label="Ticket status" className="flex flex-wrap gap-1">
-            {TABS.map(([value, label]) => (
-              <button
-                key={label}
-                type="button"
-                role="tab"
-                aria-selected={tab === value}
-                onClick={() => setTab(value)}
-                className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                  tab === value ? "bg-brand-600 text-white" : "text-slate-600 hover:bg-slate-100"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
+        <div className="space-y-3 border-b border-slate-100 px-4 py-3">
+          {canHandle && (
+            <div role="tablist" aria-label="Ticket views" className="flex flex-wrap gap-1">
+              {VIEWS.map(([value, label]) => (
+                <button
+                  key={label}
+                  type="button"
+                  role="tab"
+                  aria-selected={filters.status === value}
+                  onClick={() => set({ status: value })}
+                  className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                    filters.status === value ? "bg-brand-600 text-white" : "text-slate-600 hover:bg-slate-100"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Ticket ID (TKT-000012) or text"
+              aria-label="Search tickets"
+              className={`${filterClass} w-full sm:w-56`}
+            />
+            {canHandle && (
+              <input
+                value={requester}
+                onChange={(e) => setRequester(e.target.value)}
+                placeholder="Requester"
+                aria-label="Filter by requester"
+                className={`${filterClass} w-full sm:w-40`}
+              />
+            )}
+            <select value={filters.ticket_type ?? ""} onChange={(e) => set({ ticket_type: e.target.value || undefined })} aria-label="Filter by type" className={filterClass}>
+              <option value="">All types</option>
+              {Object.entries(TICKET_TYPE_LABEL).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+            <select value={filters.priority ?? ""} onChange={(e) => set({ priority: e.target.value || undefined })} aria-label="Filter by priority" className={filterClass}>
+              <option value="">All priorities</option>
+              <option value="HIGH,CRITICAL">High and critical</option>
+              {PRIORITIES.map((p) => (
+                <option key={p} value={p}>
+                  {priorityLabel(p)}
+                </option>
+              ))}
+            </select>
+            <select value={filters.status ?? ""} onChange={(e) => set({ status: e.target.value })} aria-label="Filter by status" className={filterClass}>
+              <option value="">All statuses</option>
+              {VIEWS.slice(0, -1).filter(([v]) => v.includes(",")).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+              {TICKET_STATUSES.map((st) => (
+                <option key={st} value={st}>
+                  {ticketStatusLabel(st)}
+                </option>
+              ))}
+            </select>
+            {canHandle && (
+              <select value={filters.department_id ?? ""} onChange={(e) => set({ department_id: e.target.value || undefined })} aria-label="Filter by department" className={filterClass}>
+                <option value="">All departments</option>
+                {departments.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name}
+                  </option>
+                ))}
+              </select>
+            )}
+            {canHandle && (
+              <select value={filters.assignee_id ?? ""} onChange={(e) => set({ assignee_id: e.target.value || undefined })} aria-label="Filter by assignee" className={filterClass}>
+                <option value="">Anyone</option>
+                <option value="me">Assigned to me</option>
+              </select>
+            )}
+            <label className="flex items-center gap-1 text-[11px] text-slate-500">
+              From
+              <input type="date" value={filters.created_from?.slice(0, 10) ?? ""} onChange={(e) => set({ created_from: e.target.value ? `${e.target.value}T00:00:00` : undefined })} className={filterClass} />
+            </label>
+            <label className="flex items-center gap-1 text-[11px] text-slate-500">
+              To
+              <input type="date" value={filters.created_to?.slice(0, 10) ?? ""} onChange={(e) => set({ created_to: e.target.value ? `${e.target.value}T00:00:00` : undefined })} className={filterClass} />
+            </label>
           </div>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[900px] text-left text-xs">
+          <table className="w-full min-w-[960px] text-left text-xs">
             <thead className="bg-slate-50 text-[10px] uppercase text-slate-400">
               <tr>
-                {["Ticket", "Requester", "Type / category", "Details", "Status", "Raised", ""].map((heading) => (
-                  <th key={heading} className="px-4 py-2 font-bold">
-                    {heading}
-                  </th>
-                ))}
+                <SortHeader label="Ticket" column="ticket_no" filters={filters} onSort={sortBy} />
+                {canHandle && <th className="px-4 py-2 font-bold">Requester</th>}
+                <th className="px-4 py-2 font-bold">Request</th>
+                <SortHeader label="Priority" column="priority" filters={filters} onSort={sortBy} />
+                <SortHeader label="Status" column="status" filters={filters} onSort={sortBy} />
+                <SortHeader label="Needed by" column="required_date" filters={filters} onSort={sortBy} />
+                <SortHeader label="Created" column="created_at" filters={filters} onSort={sortBy} />
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {tickets.map((ticket) => (
-                <TicketRow key={ticket.id} ticket={ticket} stock={stock} onDone={done} onError={setError} canHandle={canHandle} />
+                <TicketRow key={ticket.id} ticket={ticket} canHandle={canHandle} />
               ))}
             </tbody>
           </table>
         </div>
-        {!loading && tickets.length === 0 && !error && (
-          <p className="p-8 text-center text-xs text-slate-500">No tickets here.</p>
-        )}
+        {!loading && tickets.length === 0 && !error && <p className="p-8 text-center text-xs text-slate-500">No tickets match.</p>}
+        <footer className="flex items-center justify-between border-t border-slate-100 px-4 py-3 text-xs text-slate-500">
+          <span>
+            {loading ? "Loading…" : `${total} ticket${total === 1 ? "" : "s"} · page ${page + 1} of ${pages}`}
+          </span>
+          <span className="space-x-2">
+            <button type="button" disabled={page === 0 || loading} onClick={() => setPage((p) => p - 1)} className="rounded-md border border-slate-200 px-3 py-1.5 disabled:opacity-50">
+              Previous
+            </button>
+            <button type="button" disabled={page + 1 >= pages || loading} onClick={() => setPage((p) => p + 1)} className="rounded-md border border-slate-200 px-3 py-1.5 disabled:opacity-50">
+              Next
+            </button>
+          </span>
+        </footer>
       </section>
     </main>
   );
 }
 
-function TicketRow({
-  ticket,
-  stock,
-  onDone,
-  onError,
-  canHandle,
+function SortHeader({
+  label,
+  column,
+  filters,
+  onSort,
 }: {
-  ticket: AssetRequest;
-  stock: Asset[];
-  onDone: (message: string) => void;
-  onError: (message: string) => void;
-  canHandle: boolean;
+  label: string;
+  column: NonNullable<TicketSearch["sort"]>;
+  filters: TicketSearch;
+  onSort: (column: NonNullable<TicketSearch["sort"]>) => void;
 }) {
-  const handler = ticketHandler(ticket);
+  const active = filters.sort === column;
+  const Icon = active && filters.order === "asc" ? ChevronUpIcon : ChevronDownIcon;
   return (
-    <tr className="align-top hover:bg-slate-50">
-      <td className="px-4 py-3 font-mono font-semibold text-slate-700">{ticketNumber(ticket)}</td>
+    <th className="px-4 py-2 font-bold" aria-sort={active ? (filters.order === "asc" ? "ascending" : "descending") : "none"}>
+      <button type="button" onClick={() => onSort(column)} className={`inline-flex items-center gap-1 uppercase ${active ? "text-slate-700" : ""}`}>
+        {label}
+        <Icon className={`h-3 w-3 ${active ? "" : "opacity-30"}`} aria-hidden="true" />
+      </button>
+    </th>
+  );
+}
+
+function TicketRow({ ticket, canHandle }: { ticket: AssetRequest; canHandle: boolean }) {
+  const handler = ticketHandler(ticket);
+  const subject =
+    ticket.ticket_type === "ACCESS"
+      ? `${ticket.access_level} access · ${ticket.access_resource_name}`
+      : ticket.ticket_type === "SOFTWARE"
+        ? ticket.software_name ?? "Software"
+        : ticket.asset
+          ? `${assetLabel(ticket.asset)} · ${ticket.asset.name}`
+          : ticket.category_name ?? "—";
+  const href = ticketHref(ticket, canHandle);
+  return (
+    <tr className="cursor-pointer align-top hover:bg-slate-50" onClick={() => (window.location.href = href)}>
       <td className="px-4 py-3">
-        <p className="font-semibold text-slate-700">{ticket.requested_by_name ?? ticket.requested_for}</p>
-        {ticket.raised_by_name && ticket.raised_by_name !== ticket.requested_by_name && (
-          <p className="text-[11px] text-slate-500">Raised by {ticket.raised_by_name}</p>
-        )}
+        <Link href={href} onClick={(e) => e.stopPropagation()} className="font-mono font-semibold text-brand-700 hover:underline">
+          {ticketNumber(ticket)}
+        </Link>
+        {(ticket.comment_count ?? 0) > 0 && <p className="text-[10px] text-slate-400">{ticket.comment_count} comment(s)</p>}
       </td>
-      <td className="px-4 py-3 text-slate-600">
-        <TicketTypeChip ticketType={ticket.ticket_type} />
-        <p className="mt-1">{ticket.category_name ?? "—"}</p>
-        {ticket.department_name && <p className="text-[11px] text-slate-400">{ticket.department_name}</p>}
-      </td>
-      <td className="max-w-xs px-4 py-3 text-slate-600">
-        {ticket.reason}
-        <TicketAssetDetails ticket={ticket} link={canHandle} />
-        {ticket.software_name && <p className="mt-1 text-[11px] font-semibold text-indigo-700">Software: {ticket.software_name}</p>}
-        {ticket.return_condition && (
-          <p className="mt-1 text-[11px] text-sky-700">Returned in {ticket.return_condition.toLowerCase()} condition</p>
-        )}
-        {ticket.resolution_note && (
-          <p className="mt-1 text-[11px] text-emerald-700">Resolution: {ticket.resolution_note}</p>
-        )}
-        {ticket.rejection_reason && <p className="mt-1 text-[11px] text-rose-600">Rejected: {ticket.rejection_reason}</p>}
-        {ticket.assigned_asset_tag && <p className="mt-1 text-[11px] text-emerald-700">Assigned {ticket.assigned_asset_tag}</p>}
+      {canHandle && (
+        <td className="px-4 py-3">
+          <p className="font-semibold text-slate-700">{ticket.requested_by_name ?? ticket.requested_for}</p>
+          {ticket.department_name && <p className="text-[11px] text-slate-400">{ticket.department_name}</p>}
+        </td>
+      )}
+      <td className="max-w-sm px-4 py-3 text-slate-600">
+        <p className="flex items-center gap-1.5">
+          <TicketTypeChip ticketType={ticket.ticket_type} />
+          <span className="truncate font-semibold text-slate-800">{subject}</span>
+        </p>
+        <p className="mt-1 line-clamp-2">{ticket.reason}</p>
         {handler && <p className="mt-1 text-[11px] text-slate-400">{handler}</p>}
       </td>
       <td className="px-4 py-3">
-        <TicketProgress status={ticket.status} ticketType={ticket.ticket_type} />
+        <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${PRIORITY_STYLE[ticket.priority ?? "MEDIUM"]}`}>
+          {priorityLabel(ticket.priority ?? "MEDIUM")}
+        </span>
       </td>
+      <td className="px-4 py-3">
+        <TicketStatusBadge status={ticket.status} ticketType={ticket.ticket_type} />
+        {ticket.needs_owner_approval && <p className="mt-1 text-[10px] text-amber-700">Owner approval pending</p>}
+      </td>
+      <td className="whitespace-nowrap px-4 py-3 text-slate-500">{ticket.required_date ? formatDate(ticket.required_date) : "—"}</td>
       <td className="whitespace-nowrap px-4 py-3 text-slate-500">{timeAgo(ticket.created_at)}</td>
-      <td className="w-60 px-4 py-3 text-right">
-        <TicketActions ticket={ticket} stock={stock} onDone={onDone} onError={onError} canHandle={canHandle} />
-      </td>
     </tr>
   );
 }
@@ -317,6 +479,14 @@ export function NewTicketForm({
   const [departmentId, setDepartmentId] = useState("");
   const [userId, setUserId] = useState("");
   const [reason, setReason] = useState("");
+  const [priority, setPriority] = useState<Priority>("MEDIUM");
+  const [requiredDate, setRequiredDate] = useState("");
+  const [comments, setComments] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
+  const [resources, setResources] = useState<AccessResource[]>([]);
+  const [resourceId, setResourceId] = useState("");
+  const [accessLevel, setAccessLevel] = useState("");
+  const [accessUntil, setAccessUntil] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -344,11 +514,59 @@ export function NewTicketForm({
       .finally(() => setCatalogLoaded(true));
   }, [ticketType, catalogLoaded]);
 
+  useEffect(() => {
+    if (ticketType === "ACCESS" && resources.length === 0) accessCatalog().then(setResources).catch(() => undefined);
+  }, [ticketType, resources.length]);
+
   // With nothing registered, or "Not in the list" chosen, the user types the name.
   const typingSoftware = softwareId === "OTHER" || (catalogLoaded && catalog.length === 0);
+  const resource = resources.find((r) => r.id === resourceId);
+
+  // Fields every request type shares.
+  const common = () => ({
+    department_id: departmentId || undefined,
+    reason: reason.trim(),
+    requested_for_user_id: userId || undefined,
+    priority,
+    required_date: requiredDate ? `${requiredDate}T00:00:00` : undefined,
+    additional_comments: comments.trim() || undefined,
+  });
+
+  // Create the ticket, then attach the chosen files to it.
+  const raise = async (input: Parameters<typeof createAssetRequest>[0]) => {
+    const bad = files.find((file) => file.size > 2 * 1024 * 1024);
+    if (bad) throw new Error(`${bad.name} is larger than 2 MB.`);
+    const ticket = await createAssetRequest(input);
+    for (const file of files) await uploadAttachment(ticket.id, file);
+    onCreated(ticket);
+  };
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (requiredDate && requiredDate < new Date().toISOString().slice(0, 10)) {
+      return setError("The required date cannot be in the past.");
+    }
+    if (ticketType === "ACCESS") {
+      if (!resource) return setError("Choose the application or resource.");
+      if (!accessLevel) return setError("Choose the access level you need.");
+      if (resource.max_days && !accessUntil) return setError(`Give an end date (at most ${resource.max_days} days).`);
+      if (!reason.trim()) return setError("Give the business justification.");
+      setBusy(true);
+      try {
+        await raise({
+          ticket_type: "ACCESS",
+          access_resource_id: resource.id,
+          access_level: accessLevel,
+          access_until: accessUntil ? `${accessUntil}T00:00:00` : undefined,
+          ...common(),
+        });
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : "Could not raise the ticket.");
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     if (ticketType === "SOFTWARE") {
       if (typingSoftware ? !softwareName.trim() : !softwareId) {
         return setError(typingSoftware ? "Type the name of the software you need." : "Choose the software you need.");
@@ -356,15 +574,11 @@ export function NewTicketForm({
       if (!reason.trim()) return setError("Say what you need it for.");
       setBusy(true);
       try {
-        onCreated(
-          await createAssetRequest({
-            ticket_type: "SOFTWARE",
-            ...(typingSoftware ? { requested_software_name: softwareName.trim() } : { software_id: softwareId }),
-            department_id: departmentId || undefined,
-            reason: reason.trim(),
-            requested_for_user_id: userId || undefined,
-          }),
-        );
+        await raise({
+          ticket_type: "SOFTWARE",
+          ...(typingSoftware ? { requested_software_name: softwareName.trim() } : { software_id: softwareId }),
+          ...common(),
+        });
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "Could not raise the ticket.");
       } finally {
@@ -377,15 +591,7 @@ export function NewTicketForm({
       if (!reason.trim()) return setError("Describe the problem.");
       setBusy(true);
       try {
-        onCreated(
-          await createAssetRequest({
-            ticket_type: "ISSUE",
-            asset_id: assetId,
-            department_id: departmentId || undefined,
-            reason: reason.trim(),
-            requested_for_user_id: userId || undefined,
-          }),
-        );
+        await raise({ ticket_type: "ISSUE", asset_id: assetId, ...common() });
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "Could not raise the ticket.");
       } finally {
@@ -401,14 +607,7 @@ export function NewTicketForm({
         setError("Choose a category, or type a name for a new one.");
         return;
       }
-      onCreated(
-        await createAssetRequest({
-          asset_category_id: assetCategoryId,
-          department_id: departmentId || undefined,
-          reason: reason.trim(),
-          requested_for_user_id: userId || undefined,
-        }),
-      );
+      await raise({ asset_category_id: assetCategoryId, ...common() });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not raise the ticket.");
     } finally {
@@ -420,12 +619,13 @@ export function NewTicketForm({
 
   return (
     <form onSubmit={submit} className="ui-surface space-y-3 p-4">
-      <h2 className="text-sm font-bold">New ticket</h2>
+      <h2 className="text-sm font-bold">New request</h2>
       <div role="radiogroup" aria-label="Ticket type" className="inline-flex flex-wrap rounded-lg border border-slate-200 p-0.5 text-xs font-semibold">
         {(
           [
-            ["REQUEST", "Request a new asset"],
-            ["SOFTWARE", "Software access"],
+            ["REQUEST", "Hardware"],
+            ["SOFTWARE", "Software"],
+            ["ACCESS", "Access"],
             ["ISSUE", "Problem with my asset"],
           ] as const
         ).map(([value, label]) => (
@@ -446,7 +646,54 @@ export function NewTicketForm({
       </div>
       {/* Without the "For user" picker (users), the reason gets a full row. */}
       <div className={`grid gap-3 sm:grid-cols-2 ${forOthers ? "lg:grid-cols-4" : ""}`}>
-        {ticketType === "SOFTWARE" ? (
+        {ticketType === "ACCESS" ? (
+          <>
+            <label className="block text-[11px] font-semibold text-slate-600">
+              Application or resource
+              <select
+                value={resourceId}
+                onChange={(event) => {
+                  setResourceId(event.target.value);
+                  setAccessLevel("");
+                }}
+                className={inputClass}
+              >
+                <option value="">{resources.length ? "Choose…" : "No resources set up yet"}</option>
+                {resources.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name}
+                  </option>
+                ))}
+              </select>
+              {resource?.description && <span className="mt-1 block font-normal text-slate-400">{resource.description}</span>}
+            </label>
+            <label className="block text-[11px] font-semibold text-slate-600">
+              Access level
+              <select value={accessLevel} onChange={(event) => setAccessLevel(event.target.value)} className={inputClass} disabled={!resource}>
+                <option value="">Choose…</option>
+                {resource?.access_levels.map((level) => (
+                  <option key={level} value={level}>
+                    {level}
+                    {resource.privileged_levels.includes(level) ? " (privileged)" : ""}
+                  </option>
+                ))}
+              </select>
+              {resource?.owner_name && (
+                <span className="mt-1 block font-normal text-slate-400">{resource.owner_name} (owner) also approves.</span>
+              )}
+            </label>
+            <label className="block text-[11px] font-semibold text-slate-600">
+              Needed until {resource?.max_days ? `(max ${resource.max_days} days)` : "(optional)"}
+              <input
+                type="date"
+                min={new Date().toISOString().slice(0, 10)}
+                value={accessUntil}
+                onChange={(event) => setAccessUntil(event.target.value)}
+                className={inputClass}
+              />
+            </label>
+          </>
+        ) : ticketType === "SOFTWARE" ? (
           <div className="space-y-2">
             {catalog.length > 0 && (
               <label className="block text-[11px] font-semibold text-slate-600">
@@ -534,12 +781,53 @@ export function NewTicketForm({
           </label>
         )}
         <label className={`block text-[11px] font-semibold text-slate-600 ${forOthers ? "" : "sm:col-span-2"}`}>
-          {ticketType === "ISSUE" ? "What is the problem?" : ticketType === "SOFTWARE" ? "What do you need it for?" : "What is needed and why"}
+          {ticketType === "ISSUE" ? "What is the problem?" : "Business justification"}
           <input
             value={reason}
             onChange={(event) => setReason(event.target.value)}
-            placeholder={ticketType === "ISSUE" ? "e.g. Battery drains in an hour, screen flickers" : "e.g. Laptop for new joiner"}
+            maxLength={2000}
+            placeholder={
+              ticketType === "ISSUE"
+                ? "e.g. Battery drains in an hour, screen flickers"
+                : ticketType === "ACCESS"
+                  ? "e.g. Month-end reporting for the finance team"
+                  : "e.g. Laptop for new joiner"
+            }
             className={inputClass}
+          />
+        </label>
+        <label className="block text-[11px] font-semibold text-slate-600">
+          Priority
+          <select value={priority} onChange={(event) => setPriority(event.target.value as Priority)} className={inputClass}>
+            {PRIORITIES.map((p) => (
+              <option key={p} value={p}>
+                {priorityLabel(p)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block text-[11px] font-semibold text-slate-600">
+          Needed by <span className="font-normal text-slate-400">(optional)</span>
+          <input
+            type="date"
+            min={new Date().toISOString().slice(0, 10)}
+            value={requiredDate}
+            onChange={(event) => setRequiredDate(event.target.value)}
+            className={inputClass}
+          />
+        </label>
+        <label className="block text-[11px] font-semibold text-slate-600 sm:col-span-2">
+          Additional comments <span className="font-normal text-slate-400">(optional)</span>
+          <textarea value={comments} onChange={(event) => setComments(event.target.value)} rows={2} maxLength={2000} className={inputClass} />
+        </label>
+        <label className="block text-[11px] font-semibold text-slate-600 sm:col-span-2">
+          Attachments <span className="font-normal text-slate-400">(optional: images or PDFs, up to 2 MB each)</span>
+          <input
+            type="file"
+            multiple
+            accept="image/png,image/jpeg,image/gif,image/webp,application/pdf"
+            onChange={(event) => setFiles(Array.from(event.target.files ?? []).slice(0, 10))}
+            className="mt-1 block text-xs font-normal"
           />
         </label>
       </div>
@@ -554,7 +842,7 @@ export function NewTicketForm({
           disabled={busy}
           className="rounded-lg bg-brand-600 px-3 py-2 text-xs font-bold text-white hover:bg-brand-700 disabled:opacity-50"
         >
-          {busy ? "Raising…" : "Raise ticket"}
+          {busy ? "Submitting…" : "Submit request"}
         </button>
         <button type="button" onClick={onCancel} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700">
           Cancel

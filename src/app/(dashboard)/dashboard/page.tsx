@@ -11,6 +11,7 @@ import {
   InboxStackIcon,
   KeyIcon,
   PlusIcon,
+  ShieldExclamationIcon,
   TicketIcon,
   UserPlusIcon,
   WrenchScrewdriverIcon,
@@ -118,6 +119,8 @@ export default function DashboardPage() {
   ];
 
   const attention: [string, number | undefined, string, typeof TicketIcon, string, boolean][] = [
+    ["Needs admin action", ticketCounts?.needs_action, "Submitted, in review, approved or in progress", TicketIcon, "/requests", sections.has("tickets")],
+    ["High priority", ticketCounts?.high_priority, "Open High or Critical tickets", ShieldExclamationIcon, "/requests", sections.has("tickets")],
     ["Pending approvals", metrics?.pending_approvals ?? ticketCounts?.pending, "Tickets, stock and POs", TicketIcon, "/requests", sections.has("tickets")],
     ["Problems to resolve", problems, "Reported on users' assets", WrenchScrewdriverIcon, "/requests", sections.has("tickets")],
     ["Stock requests", stockRequests?.length, "Waiting for approval", InboxStackIcon, "/requests?tab=stock", sections.has("inventory")],
@@ -207,6 +210,34 @@ export default function DashboardPage() {
             })}
         </div>
       </section>
+
+      {sections.has("tickets") && ticketCounts && (
+        <section aria-label="Tickets by status" className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-bold text-slate-900">Tickets by status</h2>
+            <Link href="/requests" className="text-xs font-semibold text-brand-600 hover:text-brand-700">Open the queue</Link>
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-8">
+            {(
+              [
+                ["Total", ticketCounts.total, "text-slate-900"],
+                ["New", ticketCounts.submitted, "text-amber-600"],
+                ["Under review", ticketCounts.under_review, "text-blue-600"],
+                ["Awaiting approval", ticketCounts.pending_approval, "text-fuchsia-600"],
+                ["Awaiting inventory", ticketCounts.waiting_inventory, "text-orange-600"],
+                ["Awaiting license", ticketCounts.waiting_license, "text-orange-600"],
+                ["In progress", ticketCounts.in_progress + ticketCounts.approved, "text-sky-600"],
+                ["Resolved / closed", ticketCounts.resolved + ticketCounts.closed, "text-emerald-600"],
+              ] as [string, number, string][]
+            ).map(([label, value, color]) => (
+              <div key={label} className="rounded-lg bg-slate-50 px-3 py-2">
+                <p className="text-[10px] font-semibold text-slate-500">{label}</p>
+                <p className={`text-lg font-extrabold ${color}`}>{value}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="grid gap-4 xl:grid-cols-[1.4fr_1fr]">
         {sections.has("tickets") && (
