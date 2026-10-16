@@ -2,7 +2,7 @@
 
 import { assetLabel } from "@/types/asset";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { ChevronDownIcon, ChevronUpIcon, PlusIcon } from "@heroicons/react/24/outline";
 import {
@@ -16,8 +16,15 @@ import {
   createAssetRequest,
   getAssetRequestCounts,
   listAssetCategories,
+  addComment,
+  deleteTicket,
+  isOpenTicket,
+  userCanDelete,
   priorityLabel,
+  reviewTicket,
   searchTickets,
+  ATTACHMENT_TYPES,
+  MAX_ATTACHMENT_BYTES,
   ticketStatusLabel,
   uploadAttachment,
   type AssetCategory,
@@ -91,10 +98,15 @@ export function TicketQueue({
   const [notice, setNotice] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  // Only IT Admins (not sub-admins or reporting users) delete other people's tickets.
+  const [adminDeletes, setAdminDeletes] = useState(false);
 
   useEffect(() => {
     listAssetCategories().then(setCategories).catch(() => undefined);
     listDepartments().then(setDepartments).catch(() => undefined);
+    getProfile()
+      .then((p) => setAdminDeletes(p.role === "IT_ADMIN" || p.role === "SUPER_ADMIN"))
+      .catch(() => undefined);
   }, []);
 
   // Typing waits a moment before searching.
@@ -208,9 +220,9 @@ export function TicketQueue({
           users={[]}
           forOthers={false}
           onCancel={() => setFormOpen(false)}
-          onCreated={(ticket) => {
+          onCreated={(ticket, fileProblem) => {
             setFormOpen(false);
-            done(`Ticket ${ticketNumber(ticket)} submitted. Track it below.`);
+            done(`Ticket ${ticketNumber(ticket)} submitted. Track it below.${fileProblem ? ` ${fileProblem}` : ""}`);
           }}
         />
       )}
@@ -343,11 +355,12 @@ export function TicketQueue({
                 <SortHeader label="Status" column="status" filters={filters} onSort={sortBy} />
                 <SortHeader label="Needed by" column="required_date" filters={filters} onSort={sortBy} />
                 <SortHeader label="Created" column="created_at" filters={filters} onSort={sortBy} />
+                <th className="px-4 py-2 text-right font-bold">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {tickets.map((ticket) => (
-                <TicketRow key={ticket.id} ticket={ticket} canHandle={canHandle} />
+                <TicketRow key={ticket.id} ticket={ticket} canHandle={canHandle} adminDeletes={adminDeletes} onUpdated={done} onError={setError} />
               ))}
             </tbody>
           </table>
@@ -394,8 +407,35 @@ function SortHeader({
   );
 }
 
-function TicketRow({ ticket, canHandle }: { ticket: AssetRequest; canHandle: boolean }) {
+function TicketRow({
+  ticket,
+  canHandle,
+  adminDeletes,
+  onUpdated,
+  onError,
+}: {
+  ticket: AssetRequest;
+  canHandle: boolean;
+  adminDeletes: boolean;
+  onUpdated: (message: string) => void;
+  onError: (message: string) => void;
+}) {
+  const [updating, setUpdating] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const handler = ticketHandler(ticket);
+  const canDelete = canHandle ? adminDeletes : userCanDelete(ticket.status);
+  const remove = async () => {
+    setDeleting(true);
+    try {
+      await deleteTicket(ticket.id);
+      onUpdated(`${ticketNumber(ticket)} deleted.`);
+    } catch (caught) {
+      onError(caught instanceof Error ? caught.message : "Could not delete the ticket.");
+      setDeleting(false);
+      setConfirmDelete(false);
+    }
+  };
   const subject =
     ticket.ticket_type === "ACCESS"
       ? `${ticket.access_level} access · ${ticket.access_resource_name}`
@@ -406,6 +446,7 @@ function TicketRow({ ticket, canHandle }: { ticket: AssetRequest; canHandle: boo
           : ticket.category_name ?? "—";
   const href = ticketHref(ticket, canHandle);
   return (
+    <>
     <tr className="cursor-pointer align-top hover:bg-slate-50" onClick={() => (window.location.href = href)}>
       <td className="px-4 py-3">
         <Link href={href} onClick={(e) => e.stopPropagation()} className="font-mono font-semibold text-brand-700 hover:underline">
@@ -438,7 +479,157 @@ function TicketRow({ ticket, canHandle }: { ticket: AssetRequest; canHandle: boo
       </td>
       <td className="whitespace-nowrap px-4 py-3 text-slate-500">{ticket.required_date ? formatDate(ticket.required_date) : "—"}</td>
       <td className="whitespace-nowrap px-4 py-3 text-slate-500">{timeAgo(ticket.created_at)}</td>
+      <td className="whitespace-nowrap px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
+        {confirmDelete ? (
+          <span className="inline-flex items-center gap-2 text-[11px]">
+            <span className="font-semibold text-slate-700">Delete {ticketNumber(ticket)} for good?</span>
+            <button type="button" disabled={deleting} onClick={remove} className="rounded-lg bg-rose-600 px-2.5 py-1.5 font-bold text-white hover:bg-rose-700 disabled:opacity-50">
+              {deleting ? "Deleting…" : "Yes, delete"}
+            </button>
+            <button type="button" onClick={() => setConfirmDelete(false)} className="font-semibold text-slate-600">
+              No
+            </button>
+          </span>
+        ) : (
+          <span className="inline-flex gap-2">
+            <Link href={href} className="rounded-lg bg-brand-600 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-brand-700">
+              Open
+            </Link>
+            {canHandle && isOpenTicket(ticket.status) && (
+              <button
+                type="button"
+                onClick={() => setUpdating((v) => !v)}
+                aria-expanded={updating}
+                className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-[11px] font-bold text-slate-700 hover:bg-slate-50"
+              >
+                Update requester
+              </button>
+            )}
+            {canDelete && (
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(true)}
+                className="rounded-lg border border-rose-200 px-2.5 py-1.5 text-[11px] font-bold text-rose-600 hover:bg-rose-50"
+              >
+                Delete
+              </button>
+            )}
+          </span>
+        )}
+      </td>
     </tr>
+    {updating && (
+      <tr className="bg-slate-50">
+        <td colSpan={8} className="px-4 py-3">
+          <QuickUpdate
+            ticket={ticket}
+            onCancel={() => setUpdating(false)}
+            onSent={(message) => {
+              setUpdating(false);
+              onUpdated(message);
+            }}
+            onError={onError}
+          />
+        </td>
+      </tr>
+    )}
+    </>
+  );
+}
+
+/**
+ * Tell the requester where their ticket stands without opening it: a short
+ * message (sent as a comment, which notifies them). A submitted ticket moves
+ * to Under review at the same time.
+ */
+function QuickUpdate({
+  ticket,
+  onCancel,
+  onSent,
+  onError,
+}: {
+  ticket: AssetRequest;
+  onCancel: () => void;
+  onSent: (message: string) => void;
+  onError: (message: string) => void;
+}) {
+  const [text, setText] = useState("");
+  const [date, setDate] = useState("");
+  const [busy, setBusy] = useState(false);
+  const number = ticketNumber(ticket);
+  const by = date ? new Date(`${date}T00:00:00`).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" }) : "";
+  const templates = [
+    "We have received your request and are reviewing it.",
+    by ? `Your request will be resolved by ${by}.` : "Your request will be resolved shortly.",
+    "We are waiting for stock / a license. We will update you as soon as it arrives.",
+    "Your request is pending approval. We will let you know once it is decided.",
+  ];
+
+  const send = async () => {
+    if (!text.trim()) return;
+    setBusy(true);
+    try {
+      await addComment(ticket.id, text.trim());
+      if (ticket.status === "PENDING") await reviewTicket(ticket.id);
+      onSent(`${ticket.requested_by_name ?? "The requester"} was updated on ${number}.`);
+    } catch (caught) {
+      onError(caught instanceof Error ? caught.message : "Could not send the update.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2 text-xs">
+      <p className="font-semibold text-slate-700">
+        Message {ticket.requested_by_name ?? "the requester"} about {number}
+        <span className="font-normal text-slate-500"> (they are notified; full actions are on the ticket page)</span>
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        {templates.map((template) => (
+          <button
+            key={template}
+            type="button"
+            onClick={() => setText(template)}
+            className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] text-slate-600 hover:border-brand-200 hover:text-brand-700"
+          >
+            {template.length > 48 ? `${template.slice(0, 46)}…` : template}
+          </button>
+        ))}
+        <label className="flex items-center gap-1 text-[11px] text-slate-500">
+          Resolve by
+          <input
+            type="date"
+            min={new Date().toISOString().slice(0, 10)}
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className="rounded-lg border border-slate-200 bg-white px-2 py-1"
+          />
+        </label>
+      </div>
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        rows={2}
+        maxLength={4000}
+        placeholder="Write an update for the requester"
+        aria-label="Update for the requester"
+        className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5"
+      />
+      <div className="flex gap-2">
+        <button
+          type="button"
+          disabled={busy || !text.trim()}
+          onClick={send}
+          className="rounded-lg bg-brand-600 px-3 py-1.5 font-bold text-white hover:bg-brand-700 disabled:opacity-50"
+        >
+          {busy ? "Sending…" : ticket.status === "PENDING" ? "Send & mark under review" : "Send update"}
+        </button>
+        <button type="button" onClick={onCancel} className="rounded-lg border border-slate-200 px-3 py-1.5 font-semibold text-slate-700">
+          Cancel
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -459,7 +650,8 @@ export function NewTicketForm({
   users: DirectoryEntry[];
   forOthers: boolean;
   onCancel: () => void;
-  onCreated: (ticket: AssetRequest) => void;
+  /** `fileProblem` is set when the ticket was created but a file could not be attached. */
+  onCreated: (ticket: AssetRequest, fileProblem?: string) => void;
   /** Open as a problem report for this asset (e.g. from My Assets). */
   initialAssetId?: string;
   /** Open on a given ticket type, e.g. SOFTWARE from My Software. */
@@ -533,16 +725,48 @@ export function NewTicketForm({
   });
 
   // Create the ticket, then attach the chosen files to it.
-  const raise = async (input: Parameters<typeof createAssetRequest>[0]) => {
-    const bad = files.find((file) => file.size > 2 * 1024 * 1024);
-    if (bad) throw new Error(`${bad.name} is larger than 2 MB.`);
-    const ticket = await createAssetRequest(input);
-    for (const file of files) await uploadAttachment(ticket.id, file);
-    onCreated(ticket);
+  // Check the files before anything is created, so a bad file never leaves a half-submitted ticket.
+  const fileError = (): string => {
+    const wrongType = files.find((file) => !ATTACHMENT_TYPES.includes(file.type));
+    if (wrongType) return `${wrongType.name}: attach images (PNG, JPEG, GIF, WebP) or PDFs only.`;
+    const tooBig = files.find((file) => file.size > MAX_ATTACHMENT_BYTES);
+    if (tooBig) return `${tooBig.name} is larger than 2 MB.`;
+    return "";
   };
+
+  // Create the ticket, then attach the files. Once the ticket exists the form
+  // always closes: a file that fails to upload is reported, never retried by
+  // submitting again (which would create a second ticket).
+  const raise = async (input: Parameters<typeof createAssetRequest>[0]) => {
+    const ticket = await createAssetRequest(input);
+    const failed: string[] = [];
+    for (const file of files) {
+      try {
+        await uploadAttachment(ticket.id, file);
+      } catch {
+        failed.push(file.name);
+      }
+    }
+    onCreated(ticket, failed.length ? `Could not attach ${failed.join(", ")}: add it on the ticket's page.` : undefined);
+  };
+
+  // A double click must not submit twice.
+  const submitting = useRef(false);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (submitting.current) return;
+    const problem = fileError();
+    if (problem) return setError(problem);
+    submitting.current = true;
+    try {
+      await submitRequest();
+    } finally {
+      submitting.current = false;
+    }
+  };
+
+  const submitRequest = async () => {
     if (requiredDate && requiredDate < new Date().toISOString().slice(0, 10)) {
       return setError("The required date cannot be in the past.");
     }

@@ -71,9 +71,9 @@ export default function MySoftwarePage() {
           forOthers={false}
           initialType="SOFTWARE"
           onCancel={() => setFormOpen(false)}
-          onCreated={(ticket) => {
+          onCreated={(ticket, fileProblem) => {
             setFormOpen(false);
-            setNotice(`Request ${ticketNumber(ticket)} for ${ticket.software_name ?? "software"} sent. You will be notified when it is approved.`);
+            setNotice(`Request ${ticketNumber(ticket)} for ${ticket.software_name ?? "software"} sent. You will be notified when it is approved.${fileProblem ? ` ${fileProblem}` : ""}`);
             load();
           }}
         />

@@ -450,6 +450,16 @@ export function cancelTicket(id: string): Promise<AssetRequest> {
   return moveTicket(id, { status: "CANCELLED" });
 }
 
+/** Users delete their own ticket only while Submitted, or after it was Cancelled or Rejected (the API enforces it). */
+export function userCanDelete(status: string): boolean {
+  return ["PENDING", "CANCELLED", "REJECTED"].includes(status);
+}
+
+/** Delete a ticket with its comments, files and history. IT Admins: any ticket; users: see userCanDelete. */
+export async function deleteTicket(id: string): Promise<void> {
+  await apiFetch<unknown>(`/api/asset-requests/${enc(id)}`, { method: "DELETE" });
+}
+
 export function assignTicket(id: string, assigneeId: string | null): Promise<AssetRequest> {
   return apiFetch<AssetRequest>(`/api/asset-requests/${enc(id)}/assign`, {
     method: "POST",

@@ -314,6 +314,28 @@ def create_asset_request(
     ).first():
         raise HTTPException(status_code=400, detail="Unknown department.")
 
+    # The same request twice (e.g. submitted again after an error) is refused while the first is open.
+    open_mine = db.query(AssetRequest).filter(
+        AssetRequest.company_id == company_id, AssetRequest.requested_by == requester.id,
+        AssetRequest.ticket_type == request_in.ticket_type, AssetRequest.status.in_(OPEN_TICKET_STATUSES),
+    )
+    duplicate = None
+    if request_in.ticket_type == "SOFTWARE":
+        duplicate = open_mine.filter(
+            AssetRequest.software_id == software.id if software
+            else func.lower(func.trim(AssetRequest.requested_software_name)) == requested_name.lower()
+        ).first()
+    elif request_in.ticket_type == "ISSUE":
+        duplicate = open_mine.filter(AssetRequest.asset_id == issue_asset.id).first()
+    elif request_in.ticket_type == "REQUEST":
+        duplicate = open_mine.filter(
+            AssetRequest.asset_category_id == category_id,
+            func.lower(func.trim(AssetRequest.reason)) == request_in.reason.strip().lower(),
+        ).first()
+    if duplicate:
+        raise HTTPException(status_code=400, detail=f"You already have an open request for this ({_number(duplicate)}). "
+                                                    "Add details or files to that ticket instead.")
+
     new_request = AssetRequest(
         company_id=company_id,
         priority=request_in.priority,
@@ -1389,6 +1411,50 @@ def download_attachment(
             "Cache-Control": "private, no-store",
         },
     )
+
+
+# Users may delete their own ticket only before anyone has worked on it, or once it has ended without result.
+_USER_DELETABLE = {S.PENDING, S.CANCELLED, S.REJECTED}
+
+
+@router.delete("/{request_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_ticket(
+    request_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
+):
+    """
+    Delete a ticket with its comments, files, history and approvals.
+    A user may delete their own ticket while it is still submitted, or after
+    it was cancelled or rejected; IT Admins may delete any ticket in their
+    organization. A device reserved for the ticket goes back to stock; devices,
+    seats and access already given are not taken back. Recorded in the audit log.
+    """
+    is_admin = current_user.role in (PlatformRole.IT_ADMIN, PlatformRole.SUPER_ADMIN)
+    if not is_admin and current_user.role != PlatformRole.EMPLOYEE:
+        raise HTTPException(status_code=403, detail="Only IT Admins and the requester can delete a ticket.")
+    req = _visible_ticket(db, request_id, current_user, tenant_company_id)
+    if not is_admin:
+        if req.requested_by != current_user.id and req.raised_by != current_user.id:
+            raise HTTPException(status_code=403, detail="You can delete only your own tickets.")
+        if req.status not in _USER_DELETABLE:
+            raise HTTPException(status_code=400, detail="Your IT team is already working on this ticket. Cancel it instead.")
+
+    _release_reservation(db, req, current_user)
+    summary = f"{_number(req)} ({req.ticket_type.lower()}, {STATUS_LABEL[req.status]}): {req.reason[:150]}"
+    company_id = req.company_id
+    for model in (TicketComment, TicketAttachment, TicketEvent, TicketApproval):
+        db.query(model).filter(model.ticket_id == req.id).delete(synchronize_session=False)
+    # Access already given keeps its record; it just no longer points at the ticket.
+    db.query(AccessGrant).filter(AccessGrant.ticket_id == req.id).update({"ticket_id": None}, synchronize_session=False)
+    req.access_grant_id = None
+    db.flush()
+    db.delete(req)
+    db.commit()
+    log_audit_event(db=db, action="DELETE_TICKET", entity="AssetRequest", company_id=company_id,
+                    user_id=current_user.id, entity_id=request_id, old_value=summary)
+    return None
 
 
 @router.post("/returns", status_code=status.HTTP_201_CREATED)

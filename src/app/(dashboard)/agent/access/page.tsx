@@ -81,9 +81,9 @@ export default function MyAccessPage() {
           forOthers={false}
           initialType="ACCESS"
           onCancel={() => setFormOpen(false)}
-          onCreated={(ticket) => {
+          onCreated={(ticket, fileProblem) => {
             setFormOpen(false);
-            setNotice(`Request ${ticketNumber(ticket)} for ${ticket.access_level} access to ${ticket.access_resource_name} submitted.`);
+            setNotice(`Request ${ticketNumber(ticket)} for ${ticket.access_level} access to ${ticket.access_resource_name} submitted.${fileProblem ? ` ${fileProblem}` : ""}`);
             load();
           }}
         />

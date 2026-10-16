@@ -18,6 +18,8 @@ import {
   assignTicket,
   cancelTicket,
   closeTicket,
+  deleteTicket,
+  userCanDelete,
   confirmReturnTicket,
   confirmTicket,
   downloadAttachment,
@@ -265,6 +267,10 @@ export function TicketDetail({ ticketId, workspace }: { ticketId: string; worksp
               <UserActions ticket={ticket} isRequester={isRequester} isOwner={isOwner} onDone={done} onError={setError} />
             )}
             {!open && !staff && !isRequester && <p className="text-xs text-slate-500">Nothing to do on this ticket.</p>}
+            {((staff && profile.role !== "SUB_ADMIN" && profile.role !== "REPORTING_USER") ||
+              (isRequester && userCanDelete(ticket.status))) && (
+              <DeleteTicket ticket={ticket} backHref={backHref} admin={staff} onError={setError} />
+            )}
           </Section>
 
           {(ticket.approvals?.length || ticket.needs_owner_approval) && (
@@ -317,6 +323,47 @@ export function TicketDetail({ ticketId, workspace }: { ticketId: string; worksp
         </div>
       </div>
     </main>
+  );
+}
+
+/** Delete the ticket after confirming, then go back to the list. */
+function DeleteTicket({ ticket, backHref, admin, onError }: { ticket: AssetRequest; backHref: string; admin: boolean; onError: (m: string) => void }) {
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const remove = async () => {
+    setBusy(true);
+    try {
+      await deleteTicket(ticket.id);
+      window.location.href = backHref;
+    } catch (caught) {
+      onError(caught instanceof Error ? caught.message : "Could not delete the ticket.");
+      setBusy(false);
+      setConfirming(false);
+    }
+  };
+  return (
+    <div className="mt-4 border-t border-slate-100 pt-3">
+      {confirming ? (
+        <div className="space-y-2 text-xs">
+          <p className="font-semibold text-slate-700">
+            Delete {ticketNumber(ticket)} with its messages, files and history? This cannot be undone.
+            {admin && " A reserved device goes back to stock; anything already given stays with the person."}
+          </p>
+          <div className="flex gap-2">
+            <button type="button" disabled={busy} onClick={remove} className={danger}>
+              {busy ? "Deleting…" : "Yes, delete ticket"}
+            </button>
+            <button type="button" onClick={() => setConfirming(false)} className={secondary}>
+              Keep it
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button type="button" onClick={() => setConfirming(true)} className="text-xs font-semibold text-rose-600 hover:text-rose-700">
+          Delete ticket
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -796,7 +843,7 @@ function Comments({
     onAdded(internal ? "Internal note added." : "Comment added.");
   }, onError);
   return (
-    <Section title={`Conversation (${comments.length})`} icon={<ChatBubbleLeftRightIcon className="h-4 w-4" aria-hidden="true" />}>
+    <Section title={staff ? `Messages with the requester (${comments.length})` : `Conversation (${comments.length})`} icon={<ChatBubbleLeftRightIcon className="h-4 w-4" aria-hidden="true" />}>
       {comments.length === 0 ? (
         <p className="text-xs text-slate-500">No comments yet.</p>
       ) : (
@@ -832,7 +879,7 @@ function Comments({
             onChange={(e) => setBody(e.target.value)}
             rows={2}
             maxLength={4000}
-            placeholder={staff ? (internal ? "Internal note (IT team only)" : "Reply to the requester") : "Write a comment"}
+            placeholder={staff ? (internal ? "Internal note (IT team only)" : "Message the requester, e.g. expected resolution date (they are notified)") : "Write a comment"}
             aria-label="Comment"
             className={field}
           />

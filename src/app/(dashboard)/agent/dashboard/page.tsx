@@ -290,9 +290,9 @@ function MyTicketsCard({ onChanged }: { onChanged: () => void }) {
             users={[]}
             forOthers={false}
             onCancel={() => setFormOpen(false)}
-            onCreated={(ticket) => {
+            onCreated={(ticket, fileProblem) => {
               setFormOpen(false);
-              changed(`Ticket ${ticketNumber(ticket)} raised. Your IT Admin has been notified.`);
+              changed(`Ticket ${ticketNumber(ticket)} raised. Your IT Admin has been notified.${fileProblem ? ` ${fileProblem}` : ""}`);
             }}
           />
         </div>
