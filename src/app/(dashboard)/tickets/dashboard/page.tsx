@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { PlusIcon, ArrowPathIcon, ExclamationTriangleIcon, CheckCircleIcon, ClockIcon } from "@heroicons/react/24/outline";
+import { ArrowPathIcon, ExclamationTriangleIcon, CheckCircleIcon, ClockIcon } from "@heroicons/react/24/outline";
 import { listAssetRequests, getAssetRequestCounts, type AssetRequest, type AssetRequestCounts } from "@/lib/tickets";
 import { TicketStatusBadge } from "@/components/tickets/ticket-actions";
 
@@ -44,10 +44,10 @@ export default function TicketDashboardPage() {
           <p className="mt-1 text-sm text-slate-500">Monitor service requests and incident response across your organization.</p>
         </div>
         <Link
-          href="/tickets/new"
+          href="/requests"
           className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-brand-700"
         >
-          <PlusIcon className="h-4 w-4" /> Create ticket
+          Open Requests &amp; Approvals
         </Link>
       </header>
 

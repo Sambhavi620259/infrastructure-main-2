@@ -18,6 +18,7 @@ from app.core.deps import get_current_user, profile_role
 from app.models.models import AuditLog, PlatformRole, User
 from app.schemas.schemas import UserProfile, UserProfileResponse
 from app.services.audit_service import log_audit_event
+from app.services.plan_features_service import FEATURES, company_features
 
 router = APIRouter(prefix="/profile", tags=["Profile"])
 
@@ -83,6 +84,7 @@ def _profile(db: Session, user: User) -> UserProfileResponse:
             bio=user.bio,
             organizationName=user.profile_org_name,
             organizationId=user.profile_org_code,
+            planFeatures=sorted(FEATURES) if user.role == PlatformRole.SUPER_ADMIN else sorted(company_features(db, user.company_id)),
         )
     )
 

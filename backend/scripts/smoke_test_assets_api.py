@@ -179,6 +179,36 @@ async def run_checks():
           await ws_rejected(f"{WS_BASE}/assets/ws/other-company?token={TOKEN}"))
     check("audit WS without token is rejected", await ws_rejected(f"{WS_BASE}/physical-audit/ws/{SESSION_ID}"))
 
+    # Created before the asset socket opens, so it does not disturb the broadcast checks below.
+    code, nw = call("POST", "/assets", {"name": "No warranty end", "warranty_start": "2026-01-01T00:00:00"})
+    check("warranty end date is optional when creating an asset", code == 201 and nw.get("warranty_end") is None, nw)
+    if code == 201:
+        call("DELETE", f"/assets/{nw['id']}")  # keep later counts unchanged
+    code, amc = call("POST", "/assets", {"name": "AMC laptop", "amc_start": "2026-01-01T00:00:00",
+                                         "amc_end": "2026-12-31T00:00:00", "amc_cost": "1200.50"})
+    check("asset saves its AMC details",
+          code == 201 and amc.get("amc_end", "").startswith("2026-12-31") and str(amc.get("amc_cost")) in ("1200.50", "1200.5"), amc)
+    if code == 201:
+        code, body = call("PUT", f"/assets/{amc['id']}", {"amc_end": "2025-06-01T00:00:00"})
+        check("AMC end before AMC start is refused", code == 400 and "AMC" in str(body), body)
+        code, body = call("PUT", f"/assets/{amc['id']}", {"amc_end": None, "amc_start": None, "amc_cost": None})
+        check("AMC details can be cleared", code == 200 and body.get("amc_end") is None and body.get("amc_cost") is None, body)
+        call("DELETE", f"/assets/{amc['id']}")
+    code, lic = call("POST", "/assets", {"name": "Licensed laptop", "license_type": "OEM",
+                                         "license_number": "WIN11-PRO-ABCD-7Q2X", "license_expiry": "2030-01-01T00:00:00"})
+    check("hardware asset saves its license", code == 201 and lic.get("license_number") == "WIN11-PRO-ABCD-7Q2X"
+          and lic.get("license_type") == "OEM", lic)
+    if code == 201:
+        code, body = call("PUT", f"/assets/{lic['id']}", {"license_number": "bad key!"})
+        check("license number format is checked", code == 422, body)
+        code, body = call("PUT", f"/assets/{lic['id']}", {"license_type": "MAGIC"})
+        check("license type must be a known type", code == 422, body)
+        code, body = call("PUT", f"/assets/{lic['id']}", {"purchase_date": "2031-01-01T00:00:00"})
+        check("license expiry before the purchase date is refused", code == 400, body)
+        code, body = call("PUT", f"/assets/{lic['id']}", {"license_number": "", "license_type": None, "license_expiry": None})
+        check("license details can be cleared", code == 200 and body.get("license_number") is None, body)
+        call("DELETE", f"/assets/{lic['id']}")
+
     async with websockets.connect(f"{WS_BASE}/assets/ws/{COMPANY_ID}?token={TOKEN}") as ws:
         print("Assets")
         code, body = call("POST", "/assets", {"asset_tag": "SMK-1", "serial_number": "SN-1",
@@ -481,13 +511,16 @@ async def run_checks():
         ACTING["user_id"] = None
         code, body = call("POST", "/asset-requests", {"asset_category_id": category_id,
                                                       "requested_for_user_id": neha_id,
+                                                      "reason": "New joiner needs a laptop"})
+        check("admin cannot raise a ticket, not even for a user (403)", code == 403, body)
+        ACTING["user_id"] = neha_id
+        code, body = call("POST", "/asset-requests", {"asset_category_id": category_id,
                                                       "department_id": support_dept,
                                                       "reason": "New joiner needs a laptop"})
         check("ticket records its department", code == 201 and body.get("department_name") == "Support", body)
-        check("admin raises a ticket on behalf of a user (recorded as raised by the admin)",
-              code == 201 and body.get("requested_by") == neha_id and body.get("raised_by_name") == "Smoke Admin"
-              and body.get("category_name") == "Laptops"
-              and body.get("requested_by_name") == "Neha Verma", body)
+        check("a user raises their own ticket",
+              code == 201 and body.get("requested_by") == neha_id and body.get("raised_by_name") == "Neha Verma"
+              and body.get("category_name") == "Laptops", body)
         ticket_id = body.get("id", "")
         ACTING["user_id"] = rahul_id
         code, body = call("POST", "/asset-requests", {"asset_category_id": category_id, "reason": "Spare"})
@@ -597,6 +630,17 @@ async def run_checks():
         check("user cannot hand their asset back by changing its status (403)", code == 403, body)
         code, body = call("PUT", f"/assets/{own_asset_id}", {"purchase_price": "1"})
         check("user cannot edit asset purchase details (403)", code == 403, body)
+        ACTING["user_id"] = None
+        call("PUT", f"/assets/{own_asset_id}", {"license_type": "OEM", "license_number": "WIN11-PRO-ABCD-7Q2X"})
+        ACTING["user_id"] = rahul_id
+        code, body = call("GET", f"/assets/{own_asset_id}")
+        check("user sees only the last 4 characters of their device's license",
+              code == 200 and body.get("license_number") == "••••-7Q2X", body)
+        code, body = call("GET", "/assets")
+        check("masked in the user's asset list too",
+              code == 200 and all(a.get("license_number") in (None, "••••-7Q2X") for a in body), body)
+        code, body = call("PUT", f"/assets/{own_asset_id}", {"license_number": "X-123"})
+        check("user cannot change a device's license (403)", code == 403, body)
 
         # Problem tickets: raised on an asset the user holds, resolved by the admin.
         code, body = call("POST", "/asset-requests", {"ticket_type": "ISSUE", "reason": "Broken"})
@@ -953,7 +997,8 @@ async def run_checks():
 
     print("Super Admin key")
     code, body = call("GET", "/auth/super-admin-key")
-    check("no Super Admin key exists yet", code == 200 and body == {"exists": False}, body)
+    check("no Super Admin key exists yet; registration is open",
+          code == 200 and body == {"exists": False, "registration_open": True}, body)
     def register_super(email, key, confirm=None):
         return call("POST", "/auth/register", {"name": "Super Person", "email": email, "password": "password123",
                                                "role": "SUPER_ADMIN", "registrationKey": key,
@@ -965,17 +1010,24 @@ async def run_checks():
     code, body = register_super("sa1@example.com", "my-platform-key", "my-platform-key")
     check("first Super Admin registers and creates the key", code == 200 and body.get("role") == "SUPER_ADMIN", body)
     code, body = call("GET", "/auth/super-admin-key")
-    check("key now exists (value never returned)", code == 200 and body == {"exists": True}, body)
+    check("key now exists (value never returned); registration is closed",
+          code == 200 and body == {"exists": True, "registration_open": False}, body)
     with TestSession() as db:
         from app.models.models import PlatformSetting
         stored = db.get(PlatformSetting, "super_admin_key_hash").value
     check("only a hash of the key is stored", "my-platform-key" not in stored and stored.startswith("$2"), stored[:10])
-    code, body = register_super("sa2@example.com", "wrong-key-123")
-    check("later Super Admin with the wrong key is refused", code == 400, body)
     code, body = register_super("sa2@example.com", "my-platform-key")
-    check("later Super Admin with the right key registers", code == 200, body)
+    check("only one Super Admin: a second cannot register, even with the key", code == 403 and "one Super Admin" in str(body), body)
     code, body = call("PUT", "/auth/super-admin-key", {"current_key": "my-platform-key", "new_key": "another-key-99"})
     check("an IT Admin cannot change the Super Admin key (403)", code == 403, body)
+    code, body = call("POST", "/auth/login", {"email": "sa1@example.com", "password": "password123", "role": "SUPER_ADMIN"})
+    check("Super Admin sign-in without the key is refused (401)", code == 401 and "key" in str(body), body)
+    code, body = call("POST", "/auth/login", {"email": "sa1@example.com", "password": "password123", "super_admin_key": "wrong-key-123"})
+    check("Super Admin sign-in with the wrong key is refused (401)", code == 401, body)
+    code, body = call("POST", "/auth/login", {"email": "sa1@example.com", "password": "password123", "super_admin_key": "my-platform-key"})
+    check("Super Admin signs in with password and key", code == 200 and body.get("role") == "SUPER_ADMIN", body)
+    code, body = call("POST", "/auth/login", {"email": "sa1@example.com", "password": "wrongpass1", "super_admin_key": "my-platform-key"})
+    check("the key does not replace the password (401)", code == 401, body)
 
     print("Super Admin workspace")
     with TestSession() as db:
@@ -1013,15 +1065,14 @@ async def run_checks():
         code, body = call("POST", "/auth/login", {"email": "it@orbit.example.com", "password": "password123"})
         check("reactivated company can sign in again", code == 200, body)
 
-        code, body = call("GET", "/super-admin/admins")
-        check("list Super Admins", code == 200 and len(body) == 2, body)
         code, body = call("POST", "/super-admin/admins", {"name": "Third Admin", "email": "sa3@example.com", "password": "password123"})
-        check("add a Super Admin", code == 201 and body.get("role") == "SUPER_ADMIN", body)
-        third_id = body.get("id", "")
-        code, body = call("POST", f"/super-admin/admins/{third_id}/deactivate")
-        check("deactivate a Super Admin", code == 200 and body.get("status") == "INACTIVE", body)
-        code, body = call("POST", f"/super-admin/admins/{boss_id}/deactivate")
-        check("cannot deactivate yourself", code == 400, body)
+        check("the Super Admin cannot add another Super Admin", code in (404, 405), body)
+        code, body = call("POST", "/users", {"email": "sa4@example.com", "full_name": "Sneaky", "password": "password123",
+                                             "role": "SUPER_ADMIN", "company_id": orbit_id})
+        check("no Super Admin can be created through Users either", code == 403, body)
+        with TestSession() as db:
+            supers = db.query(User).filter(User.role == PlatformRole.SUPER_ADMIN).count()
+        check("the platform has exactly one Super Admin", supers == 1, supers)
 
         code, body = call("GET", "/super-admin/audit-logs?search=Orbit")
         check("platform audit log with names",

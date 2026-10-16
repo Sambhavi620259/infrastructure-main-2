@@ -8,6 +8,7 @@ import {
   EnvelopeIcon,
   EyeIcon,
   EyeSlashIcon,
+  KeyIcon,
   LockClosedIcon,
 } from "@heroicons/react/24/outline";
 import { ROLE_REDIRECT_MAP, type UserRole } from "@/lib/roles";
@@ -36,6 +37,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [superKey, setSuperKey] = useState("");
   const [remember, setRemember] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -60,13 +62,14 @@ export default function LoginPage() {
     event.preventDefault();
     if (!/^\S+@\S+\.\S+$/.test(email)) return setError("Enter a valid email address.");
     if (password.length < 8) return setError("Password must be at least 8 characters.");
+    if (role === "SUPER_ADMIN" && !superKey) return setError("Enter the Super Admin key.");
     setError("");
     setSubmitting(true);
     try {
       clearAuth();
       const data = await apiFetch<LoginResponse>("/api/auth/login", {
         method: "POST",
-        body: JSON.stringify({ email, password, role }),
+        body: JSON.stringify({ email, password, role, super_admin_key: role === "SUPER_ADMIN" ? superKey : undefined }),
       });
       const authenticatedRole = validRoles.includes(data.role) ? data.role : role;
       localStorage.setItem("auth-token", data.access_token);
@@ -136,6 +139,18 @@ export default function LoginPage() {
             </button>
           }
         />
+
+        {role === "SUPER_ADMIN" && (
+          <IconField
+            label="Super Admin Key"
+            icon={KeyIcon}
+            type="password"
+            autoComplete="off"
+            value={superKey}
+            onChange={(event) => setSuperKey(event.target.value)}
+            placeholder="The platform's Super Admin key"
+          />
+        )}
 
         <div className="flex flex-wrap items-center justify-between gap-2">
           <label className="flex items-center gap-2 text-sm text-slate-600">

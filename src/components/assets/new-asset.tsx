@@ -18,7 +18,9 @@ import { createSoftware } from "@/lib/software";
 /** Create page for one kind of asset: a hardware device or a software license. */
 export function NewAsset({ kind }: { kind: "hardware" | "software" }) {
   const router = useRouter();
-  const [initial, setInitial] = useState(emptyAssetForm);
+  const [initial, setInitial] = useState(() =>
+    kind === "software" ? { ...emptyAssetForm(), license_type: "PERPETUAL" } : emptyAssetForm(),
+  );
   const [receipt, setReceipt] = useState<StockReceipt | null>(null);
   const [formKey, setFormKey] = useState(0);
   const [error, setError] = useState("");

@@ -11,6 +11,11 @@ export default function VendorsPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
 
+  // /inventory/vendors?new=1 (the dashboard's "Add a vendor") opens the form straight away.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("new") === "1") setFormOpen(true);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     listVendors()

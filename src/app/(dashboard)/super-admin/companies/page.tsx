@@ -11,6 +11,8 @@ import {
   type Company,
   type Plan,
 } from "@/lib/super-admin";
+import { LocationMap } from "@/components/maps/location-map";
+import { mapSearchLink } from "@/lib/maps";
 
 export default function CompaniesPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -23,6 +25,7 @@ export default function CompaniesPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [confirming, setConfirming] = useState("");
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
+  const [editingContact, setEditingContact] = useState<Company | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
@@ -69,7 +72,10 @@ export default function CompaniesPage() {
         <div>
           <p className="text-[11px] font-bold uppercase tracking-wider text-violet-600">Super Admin · Companies</p>
           <h1 className="mt-1 text-2xl font-extrabold text-slate-950">Company management</h1>
-          <p className="mt-1 text-sm text-slate-500">Create organizations, give them their first IT Admin, and suspend or reactivate them.</p>
+          <p className="mt-1 text-sm text-slate-500">
+            Create organizations, give them their first IT Admin, set their contact details and office location, and suspend or
+            reactivate them.
+          </p>
         </div>
         <button
           type="button"
@@ -103,6 +109,20 @@ export default function CompaniesPage() {
             setNotice(
               `${company.name} created${company.primary_admin ? ` with IT Admin ${company.primary_admin.email}` : ""}.`,
             );
+            setError("");
+            setRefreshKey((key) => key + 1);
+          }}
+        />
+      )}
+
+      {editingContact && (
+        <ContactForm
+          key={editingContact.id}
+          company={editingContact}
+          onCancel={() => setEditingContact(null)}
+          onSaved={(company) => {
+            setEditingContact(null);
+            setNotice(`Contact details for ${company.name} saved.`);
             setError("");
             setRefreshKey((key) => key + 1);
           }}
@@ -185,6 +205,11 @@ export default function CompaniesPage() {
                         <p className="text-[11px] text-slate-500">
                           <span className="font-mono">{company.code}</span> · since {formatDay(company.created_at)}
                         </p>
+                        {(company.contact_email || company.contact_phone) && (
+                          <p className="text-[11px] text-slate-500">
+                            {[company.contact_email, company.contact_phone].filter(Boolean).join(" · ")}
+                          </p>
+                        )}
                       </>
                     )}
                   </td>
@@ -234,6 +259,9 @@ export default function CompaniesPage() {
                       <span className="inline-flex gap-3">
                         <button type="button" onClick={() => setRenaming({ id: company.id, name: company.name })} className="text-slate-600">
                           Rename
+                        </button>
+                        <button type="button" onClick={() => setEditingContact(company)} className="text-brand-600">
+                          Contact
                         </button>
                         {company.status === "ACTIVE" ? (
                           <button type="button" onClick={() => setConfirming(company.id)} className="text-rose-600">
@@ -362,6 +390,133 @@ function CompanyForm({ onCancel, onCreated }: { onCancel: () => void; onCreated:
       <div className="mt-4 flex gap-2">
         <button type="submit" disabled={busy} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-bold text-white hover:bg-brand-700 disabled:opacity-50">
           {busy ? "Creating…" : "Create organization"}
+        </button>
+        <button type="button" onClick={onCancel} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700">
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
+/** Contact email, phone, address and office location pin for one organization. */
+function ContactForm({ company, onCancel, onSaved }: { company: Company; onCancel: () => void; onSaved: (company: Company) => void }) {
+  const [email, setEmail] = useState(company.contact_email ?? "");
+  const [phone, setPhone] = useState(company.contact_phone ?? "");
+  const [address, setAddress] = useState(company.address ?? "");
+  const [latitude, setLatitude] = useState(company.latitude?.toString() ?? "");
+  const [longitude, setLongitude] = useState(company.longitude?.toString() ?? "");
+  const [busy, setBusy] = useState(false);
+  const [locating, setLocating] = useState(false);
+  const [error, setError] = useState("");
+
+  const lat = latitude.trim() === "" ? null : Number(latitude);
+  const lng = longitude.trim() === "" ? null : Number(longitude);
+  const pinValid = lat !== null && lng !== null && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && !Number.isNaN(lat) && !Number.isNaN(lng);
+
+  const useMyLocation = () => {
+    if (!navigator.geolocation) return setError("This browser cannot share its location.");
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setLatitude(position.coords.latitude.toFixed(6));
+        setLongitude(position.coords.longitude.toFixed(6));
+        setLocating(false);
+      },
+      () => {
+        setError("Could not get your location. Allow location access, or type the coordinates.");
+        setLocating(false);
+      },
+    );
+  };
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (email.trim() && !/^\S+@\S+\.\S+$/.test(email.trim())) return setError("Enter a valid contact email.");
+    if ((lat === null) !== (lng === null)) return setError("Give both latitude and longitude for the pin, or neither.");
+    if (lat !== null && !pinValid) return setError("Latitude is -90 to 90 and longitude is -180 to 180.");
+    setError("");
+    setBusy(true);
+    try {
+      onSaved(
+        await updateCompany(company.id, {
+          contact_email: email.trim() || null,
+          contact_phone: phone.trim() || null,
+          address: address.trim() || null,
+          latitude: lat,
+          longitude: lng,
+        }),
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not save the contact details.");
+      setBusy(false);
+    }
+  };
+
+  const inputClass = "mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal";
+
+  return (
+    <form onSubmit={submit} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm" noValidate>
+      <h2 className="text-sm font-bold text-slate-900">Contact details · {company.name}</h2>
+      <p className="mt-0.5 text-xs text-slate-500">Shown to the organization&rsquo;s IT Admins and in the contact directory report.</p>
+      <div className="mt-4 grid gap-5 lg:grid-cols-2">
+        <div className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="block text-xs font-semibold text-slate-600">
+              Contact email
+              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="it@company.com" className={inputClass} />
+            </label>
+            <label className="block text-xs font-semibold text-slate-600">
+              Contact phone
+              <input value={phone} onChange={(e) => setPhone(e.target.value)} maxLength={50} placeholder="+91 98765 43210" className={inputClass} />
+            </label>
+          </div>
+          <label className="block text-xs font-semibold text-slate-600">
+            Office address
+            <textarea value={address} onChange={(e) => setAddress(e.target.value)} rows={3} maxLength={1000} className={inputClass} />
+          </label>
+          <fieldset>
+            <legend className="text-xs font-semibold text-slate-600">Location pin</legend>
+            <div className="mt-1 grid grid-cols-2 gap-3">
+              <input value={latitude} onChange={(e) => setLatitude(e.target.value)} inputMode="decimal" placeholder="Latitude, e.g. 18.5204" aria-label="Latitude" className={inputClass} />
+              <input value={longitude} onChange={(e) => setLongitude(e.target.value)} inputMode="decimal" placeholder="Longitude, e.g. 73.8567" aria-label="Longitude" className={inputClass} />
+            </div>
+            <div className="mt-2 flex flex-wrap gap-3 text-xs font-semibold">
+              <button type="button" onClick={useMyLocation} disabled={locating} className="text-brand-600 hover:text-brand-700 disabled:opacity-50">
+                {locating ? "Locating…" : "Use my current location"}
+              </button>
+              {address.trim() && (
+                <a href={mapSearchLink(address)} target="_blank" rel="noreferrer" className="text-brand-600 hover:text-brand-700">
+                  Find this address on the map
+                </a>
+              )}
+              {(latitude || longitude) && (
+                <button type="button" onClick={() => { setLatitude(""); setLongitude(""); }} className="text-slate-500">
+                  Remove pin
+                </button>
+              )}
+            </div>
+            <p className="mt-1 text-[11px] text-slate-400">Tip: on the map, right-click the office and choose &ldquo;Show address&rdquo; to copy its coordinates.</p>
+          </fieldset>
+        </div>
+        <div>
+          {pinValid ? (
+            <LocationMap latitude={lat!} longitude={lng!} label={company.name} />
+          ) : (
+            <div className="grid h-48 place-items-center rounded-lg border border-dashed border-slate-200 text-xs text-slate-400">
+              Add latitude and longitude to see the pin.
+            </div>
+          )}
+        </div>
+      </div>
+      {error && (
+        <p role="alert" className="mt-3 text-sm text-red-700">
+          {error}
+        </p>
+      )}
+      <div className="mt-4 flex gap-2">
+        <button type="submit" disabled={busy} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-bold text-white hover:bg-brand-700 disabled:opacity-50">
+          {busy ? "Saving…" : "Save contact details"}
         </button>
         <button type="button" onClick={onCancel} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700">
           Cancel

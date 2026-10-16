@@ -237,7 +237,7 @@ function ReceiveForm({ onCancel, onReceived }: { onCancel: () => void; onReceive
       {orders.length === 0 && (
         <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
           No approved purchase orders. Raise and approve one under{" "}
-          <Link href="/inventory/movements?tab=orders" className="font-semibold underline">Purchase &amp; Stock Movements</Link>.
+          <Link href="/inventory/movements?tab=orders" className="font-semibold underline">Purchase orders</Link>.
         </p>
       )}
       <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

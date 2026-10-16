@@ -40,6 +40,13 @@ export type AssetCreateInput = {
   purchase_price?: number;
   warranty_start?: string;
   warranty_end?: string;
+  amc_vendor_id?: string;
+  amc_start?: string;
+  amc_end?: string;
+  amc_cost?: number;
+  license_type?: string;
+  license_number?: string;
+  license_expiry?: string;
 };
 
 function buildQuery(params: Record<string, string | number | undefined>): string {
@@ -86,8 +93,15 @@ export type AssetUpdateInput = Partial<
     | "purchase_date"
     | "warranty_start"
     | "warranty_end"
+    | "amc_vendor_id"
+    | "amc_start"
+    | "amc_end"
+    | "license_type"
+    | "license_number"
+    | "license_expiry"
   >
 > & {
+  amc_cost?: number | null;
   /** Add, change or clear ("") the tag. */
   asset_tag?: string;
   serial_number?: string | null;

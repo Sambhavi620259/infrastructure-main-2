@@ -36,6 +36,15 @@ export interface Asset {
   vendor_id: string | null;
   warranty_start: string | null;
   warranty_end: string | null;
+  /** Optional annual maintenance contract. */
+  amc_vendor_id?: string | null;
+  amc_start?: string | null;
+  amc_end?: string | null;
+  amc_cost?: string | number | null;
+  /** Optional license that comes with the device. Users see only the last 4 characters of the number. */
+  license_type?: string | null;
+  license_number?: string | null;
+  license_expiry?: string | null;
   location_id: string | null;
   department_id: string | null;
   condition: string;

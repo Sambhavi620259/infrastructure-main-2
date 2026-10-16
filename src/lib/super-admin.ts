@@ -1,5 +1,4 @@
 import { apiFetch } from "@/lib/api";
-import type { AppUser } from "@/types/user";
 
 export const PLANS = ["TRIAL", "STARTER", "BUSINESS", "ENTERPRISE"] as const;
 export type Plan = (typeof PLANS)[number];
@@ -30,6 +29,42 @@ export interface Company {
   assets: number;
   pending_tickets: number;
   primary_admin: { id: string; full_name: string; email: string } | null;
+  contact_email: string | null;
+  contact_phone: string | null;
+  address: string | null;
+  latitude: number | null;
+  longitude: number | null;
+}
+
+/** Contact details and office pin; null clears a value. */
+export type CompanyContactInput = {
+  contact_email?: string | null;
+  contact_phone?: string | null;
+  address?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+};
+
+/** One row of the contact directory report. */
+export interface DirectoryEntry {
+  id: string;
+  name: string;
+  code: string;
+  status: string;
+  plan: string | null;
+  contact_email: string | null;
+  contact_phone: string | null;
+  address: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  it_admins: { id: string; full_name: string; email: string; phone: string | null; status: string }[];
+}
+
+export interface PlanFeatures {
+  /** Feature key -> label, e.g. SOFTWARE -> "Software assets & licenses". */
+  features: Record<string, string>;
+  /** Plan -> the features it includes. */
+  plans: Record<string, string[]>;
 }
 
 export interface PlatformOverview {
@@ -95,7 +130,10 @@ export function createCompany(input: {
   return apiFetch<Company>("/api/super-admin/companies", { method: "POST", body: JSON.stringify(input) });
 }
 
-export function updateCompany(id: string, input: { name?: string; status?: "ACTIVE" | "SUSPENDED" }): Promise<Company> {
+export function updateCompany(
+  id: string,
+  input: { name?: string; status?: "ACTIVE" | "SUSPENDED" } & CompanyContactInput,
+): Promise<Company> {
   return apiFetch<Company>(`/api/super-admin/companies/${encodeURIComponent(id)}`, {
     method: "PUT",
     body: JSON.stringify(input),
@@ -112,18 +150,16 @@ export function updateSubscription(
   });
 }
 
-export function listSuperAdmins(): Promise<AppUser[]> {
-  return apiFetch<AppUser[]>("/api/super-admin/admins");
+export function getContactDirectory(): Promise<DirectoryEntry[]> {
+  return apiFetch<DirectoryEntry[]>("/api/super-admin/contact-directory");
 }
 
-export function createSuperAdmin(input: { name: string; email: string; password: string }): Promise<AppUser> {
-  return apiFetch<AppUser>("/api/super-admin/admins", { method: "POST", body: JSON.stringify(input) });
+export function getPlanFeatures(): Promise<PlanFeatures> {
+  return apiFetch<PlanFeatures>("/api/super-admin/plan-features");
 }
 
-export function setSuperAdminActive(id: string, active: boolean): Promise<AppUser> {
-  return apiFetch<AppUser>(`/api/super-admin/admins/${encodeURIComponent(id)}/${active ? "reactivate" : "deactivate"}`, {
-    method: "POST",
-  });
+export function updatePlanFeatures(plans: Record<string, string[]>): Promise<PlanFeatures> {
+  return apiFetch<PlanFeatures>("/api/super-admin/plan-features", { method: "PUT", body: JSON.stringify({ plans }) });
 }
 
 export function listPlatformAudit(

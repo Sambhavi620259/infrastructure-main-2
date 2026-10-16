@@ -4,7 +4,7 @@ The signed-in admin's own organization: profile, subscription usage and
 headcount, for the IT Admin Settings page.
 """
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -15,6 +15,7 @@ from app.core.database import get_db
 from app.core.deps import get_tenant_company_id, profile_role, require_roles
 from app.models.models import Asset, AssetCategory, Company, Department, PlatformRole, Subscription, User
 from app.services.audit_service import log_audit_event
+from app.services.plan_features_service import company_features
 
 router = APIRouter(prefix="/organization", tags=["Organization"])
 
@@ -36,6 +37,14 @@ class OrganizationResponse(BaseModel):
     asset_categories: int
     # Active users per role, using the frontend role names (EMPLOYEE -> IT_AGENT).
     users_by_role: Dict[str, int]
+    # Set by the Super Admin; read-only here.
+    contact_email: Optional[str] = None
+    contact_phone: Optional[str] = None
+    address: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    # Modules the organization's plan includes.
+    plan_features: List[str] = []
 
 
 class OrganizationUpdate(BaseModel):
@@ -72,6 +81,12 @@ def _response(db: Session, company: Company) -> OrganizationResponse:
         departments=db.query(Department).filter(Department.company_id == company.id).count(),
         asset_categories=db.query(AssetCategory).filter(AssetCategory.company_id == company.id).count(),
         users_by_role={profile_role(role): count for role, count in by_role},
+        contact_email=company.contact_email,
+        contact_phone=company.contact_phone,
+        address=company.address,
+        latitude=company.latitude,
+        longitude=company.longitude,
+        plan_features=sorted(company_features(db, company.id)),
     )
 
 

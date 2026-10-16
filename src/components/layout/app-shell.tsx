@@ -9,9 +9,6 @@ import {
   CubeTransparentIcon,
   KeyIcon,
   RectangleStackIcon,
-  TruckIcon,
-  WrenchScrewdriverIcon,
-  ArrowPathRoundedSquareIcon,
   ArrowRightStartOnRectangleIcon,
   BuildingOffice2Icon,
   ChevronDownIcon,
@@ -30,6 +27,7 @@ import {
   UserGroupIcon,
   UsersIcon,
   XMarkIcon,
+  MapPinIcon,
   UserPlusIcon,
   Bars3Icon,
 } from "@heroicons/react/24/outline";
@@ -40,7 +38,7 @@ import { routes } from "@/lib/routes";
 import { getDashboardCounts, type DashboardCounts } from "@/lib/dashboard";
 import { NotificationBell } from "@/components/layout/notification-bell";
 import { PROFILE_UPDATED_EVENT } from "@/lib/profile";
-import { sectionForPath, sectionsFor, type Section } from "@/lib/access";
+import { sectionForPath, sectionsFor, userPageOnPlan, type Section } from "@/lib/access";
 import { useResponsiveTables } from "@/lib/responsive-tables";
 
 type NavigationItem = readonly [label: string, href: string, countKey: string, icon: React.ComponentType<{ className?: string }>];
@@ -60,8 +58,6 @@ const itMenu: readonly MenuEntry[] = [
       { label: "Hardware Assets", href: "/assets/hardware", icon: ComputerDesktopIcon, section: "assets" },
       { label: "Software Assets", href: "/assets/software", icon: RectangleStackIcon, section: "software" },
       { label: "Asset Assignments", href: routes.assetAssignment, icon: UserGroupIcon, section: "assets" },
-      { label: "Asset Audit", href: routes.assetAudit, icon: ClipboardDocumentCheckIcon, section: "assets" },
-      { label: "Asset Lifecycle", href: routes.assetLifecycle, icon: ArrowPathRoundedSquareIcon, section: "assets" },
       { label: "Asset History", href: routes.assetHistory, icon: ClockIcon, section: "assets" },
       { label: "Asset Status", href: routes.assetStatus, icon: CheckCircleIcon, section: "assets" },
     ],
@@ -70,11 +66,10 @@ const itMenu: readonly MenuEntry[] = [
     kind: "group", label: "Inventory", icon: CubeIcon, children: [
       { label: "Hardware Stock", href: routes.inventoryHardware, icon: CubeTransparentIcon, section: "inventory" },
       { label: "Software Licenses", href: routes.inventorySoftware, icon: KeyIcon, section: "software" },
-      { label: "Purchase & Stock Movements", href: "/inventory/movements", icon: TruckIcon, section: "inventory", badge: "inventory" },
+      { label: "Vendors", href: routes.inventoryVendors, icon: BuildingOffice2Icon, section: "inventory" },
     ],
   },
   { kind: "link", label: "Requests & Approvals", href: "/requests", icon: ClipboardDocumentCheckIcon, section: "tickets", badge: "tickets" },
-  { kind: "link", label: "Maintenance & Warranty", href: "/maintenance", icon: WrenchScrewdriverIcon, section: "assets" },
   { kind: "link", label: "Reports & Analytics", href: routes.reports, icon: ChartBarIcon, section: "reports" },
   { kind: "heading", label: "Administration" },
   {
@@ -92,11 +87,6 @@ const itMenu: readonly MenuEntry[] = [
 const itMorePages: readonly NavigationItem[] = [
   ["Add hardware asset", routes.assetNew, "", ComputerDesktopIcon],
   ["Add software asset", routes.softwareNew, "", KeyIcon],
-  ["Warranty / AMC", routes.assetWarranty, "", ShieldCheckIcon],
-  ["Consumables stock", routes.inventoryStock, "", FolderIcon],
-  ["Purchase orders", routes.inventoryPurchaseOrders, "", DocumentChartBarIcon],
-  ["Vendors", routes.inventoryVendors, "", BuildingOffice2Icon],
-  ["My tickets", routes.ticketMine, "", TicketIcon],
 ];
 
 const itNavigation: readonly NavigationItem[] = itMenu.flatMap((entry): NavigationItem[] =>
@@ -121,9 +111,8 @@ const superNavigation: readonly NavigationItem[] = [
   ["Overview", routes.superAdmin, "", Squares2X2Icon],
   ["Companies", routes.superCompanies, "", BuildingOffice2Icon],
   ["Subscriptions", routes.superSubscriptions, "", DocumentChartBarIcon],
-  ["Tenant management", routes.superTenants, "", UsersIcon],
   ["Team work", "/super-admin/work", "", UserGroupIcon],
-  ["Platform admins", routes.superAdmins, "", ShieldCheckIcon],
+  ["Contact directory", "/super-admin/contacts", "", MapPinIcon],
   ["Audit logs", routes.superAudit, "", FolderIcon],
   ["Platform settings", routes.superSettings, "", Cog6ToothIcon],
 ] as const;
@@ -143,7 +132,12 @@ export function AppShell({ children }: { children: ReactNode }) {
   // An IT Agent who signed up on their own has no organization until an IT Admin adds them.
   const [awaitingOrganization, setAwaitingOrganization] = useState(false);
   const [modules, setModules] = useState<string[]>([]);
-  const sections = useMemo(() => sectionsFor(authenticatedUser?.role ?? "", modules), [authenticatedUser, modules]);
+  // Undefined until the profile loads, then the modules the organization's plan includes.
+  const [planFeatures, setPlanFeatures] = useState<string[] | undefined>(undefined);
+  const sections = useMemo(
+    () => sectionsFor(authenticatedUser?.role ?? "", modules, planFeatures),
+    [authenticatedUser, modules, planFeatures],
+  );
   const [sessionAttempt, setSessionAttempt] = useState(0);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
@@ -200,11 +194,13 @@ export function AppShell({ children }: { children: ReactNode }) {
             companyId: string | null;
             modules?: string[];
             avatarUrl?: string | null;
+            planFeatures?: string[];
           };
         }>("/api/profile");
         if (cancelled) return;
         setAwaitingOrganization(data.user.role === roles.IT_AGENT && !data.user.companyId);
         setModules(data.user.modules ?? []);
+        setPlanFeatures(data.user.planFeatures);
         setAvatarUrl(data.user.avatarUrl ?? null);
         const name = data.user.name || data.user.email.split("@")[0];
         setAuthenticatedUser({
@@ -257,7 +253,11 @@ export function AppShell({ children }: { children: ReactNode }) {
     if (authenticatedUser && workspaceForRole(authenticatedUser.role) === "it" && section && !sections.has(section)) {
       router.replace("/dashboard");
     }
-  }, [authenticatedUser, pathname, router, sections]);
+    // Users only open the pages their organization's plan includes.
+    if (authenticatedUser && workspaceForRole(authenticatedUser.role) === "agent" && !userPageOnPlan(pathname, planFeatures)) {
+      router.replace(defaultRouteForRole(authenticatedUser.role));
+    }
+  }, [authenticatedUser, pathname, router, sections, planFeatures]);
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -273,7 +273,11 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const workspace: Workspace = workspaceForRole(authenticatedUser?.role ?? roles.IT_ADMIN);
   const navigation =
-    workspace === "super" ? superNavigation : workspace === "agent" ? agentNavigation : itNavigation;
+    workspace === "super"
+      ? superNavigation
+      : workspace === "agent"
+        ? agentNavigation.filter(([, href]) => userPageOnPlan(href, planFeatures))
+        : itNavigation;
   const searchResults = useMemo(
     () =>
       (workspace === "it"

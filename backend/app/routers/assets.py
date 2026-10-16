@@ -23,6 +23,7 @@ from app.schemas.schemas import (
 from app.services.audit_service import log_audit_event
 from app.services.usage_alerts import check_usage_limits
 from app.services.notification_service import home_link, notify
+from app.services.software_service import mask_license_number
 
 router = APIRouter(prefix="/assets", tags=["Asset Management"])
 
@@ -159,7 +160,7 @@ def _active_assignees(db: Session, asset_ids: List[str]) -> Dict[str, User]:
 
 
 def _check_references(db: Session, company_id: str, data: dict) -> None:
-    """Department and vendor must belong to the asset's organization; warranty must end after it starts."""
+    """Department and vendors must belong to the asset's organization; warranty and AMC must end after they start."""
     if data.get("department_id") and not db.query(Department.id).filter(
         Department.id == data["department_id"], Department.company_id == company_id
     ).first():
@@ -171,6 +172,16 @@ def _check_references(db: Session, company_id: str, data: dict) -> None:
     start, end = data.get("warranty_start"), data.get("warranty_end")
     if start and end and end < start:
         raise HTTPException(status_code=400, detail="Warranty end must be after warranty start.")
+    if data.get("amc_vendor_id") and not db.query(Vendor.id).filter(
+        Vendor.id == data["amc_vendor_id"], Vendor.company_id == company_id
+    ).first():
+        raise HTTPException(status_code=400, detail="Unknown AMC vendor.")
+    amc_start, amc_end = data.get("amc_start"), data.get("amc_end")
+    if amc_start and amc_end and amc_end < amc_start:
+        raise HTTPException(status_code=400, detail="AMC end must be after AMC start.")
+    purchased, license_expiry = data.get("purchase_date"), data.get("license_expiry")
+    if purchased and license_expiry and license_expiry < purchased:
+        raise HTTPException(status_code=400, detail="License expiry must be after the purchase date.")
 
 
 def _held_by(db: Session, user: User):
@@ -197,6 +208,13 @@ def _only_own(query, db: Session, user: User):
     if user.role == PlatformRole.EMPLOYEE:
         return query.filter(Asset.id.in_(_held_by(db, user)))
     return query
+
+
+def _for_viewer(response: AssetResponse, viewer: User) -> AssetResponse:
+    """Users see only the last four characters of a device's license number; admins see it in full."""
+    if viewer.role == PlatformRole.EMPLOYEE and response.license_number:
+        response.license_number = mask_license_number(response.license_number)
+    return response
 
 
 def _with_assignee(asset: Asset, assignee: Optional[User]) -> AssetResponse:
@@ -326,6 +344,13 @@ def create_asset(
         vendor_id=asset_in.vendor_id or (po.vendor_id if po else None),
         warranty_start=asset_in.warranty_start,
         warranty_end=asset_in.warranty_end,
+        amc_vendor_id=asset_in.amc_vendor_id,
+        amc_start=asset_in.amc_start,
+        amc_end=asset_in.amc_end,
+        amc_cost=asset_in.amc_cost,
+        license_type=asset_in.license_type,
+        license_number=asset_in.license_number,
+        license_expiry=asset_in.license_expiry,
         location_id=asset_in.location_id or (receipt.location if receipt else None),
         department_id=asset_in.department_id,
         status=asset_in.status,
@@ -418,7 +443,7 @@ def list_assets(
 
     assets = query.offset(skip).limit(limit).all()
     assignees = _active_assignees(db, [asset.id for asset in assets])
-    return [_with_assignee(asset, assignees.get(asset.id)) for asset in assets]
+    return [_for_viewer(_with_assignee(asset, assignees.get(asset.id)), current_user) for asset in assets]
 
 
 @router.get("/counts", response_model=AssetCountsResponse)
@@ -524,7 +549,7 @@ def get_asset(
     asset = query.first()
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found.")
-    return _with_assignee(asset, _active_assignees(db, [asset.id]).get(asset.id))
+    return _for_viewer(_with_assignee(asset, _active_assignees(db, [asset.id]).get(asset.id)), current_user)
 
 
 @router.put("/{asset_id}", response_model=AssetResponse)
@@ -563,6 +588,11 @@ def update_asset(
         "vendor_id": update_data.get("vendor_id"),
         "warranty_start": update_data.get("warranty_start", asset.warranty_start),
         "warranty_end": update_data.get("warranty_end", asset.warranty_end),
+        "amc_vendor_id": update_data.get("amc_vendor_id"),
+        "amc_start": update_data.get("amc_start", asset.amc_start),
+        "amc_end": update_data.get("amc_end", asset.amc_end),
+        "purchase_date": update_data.get("purchase_date", asset.purchase_date),
+        "license_expiry": update_data.get("license_expiry", asset.license_expiry),
     })
     if "serial_number" in update_data:
         update_data["serial_number"] = (update_data["serial_number"] or "").strip() or None
@@ -637,7 +667,7 @@ def update_asset(
 
     response = _with_assignee(asset, _active_assignees(db, [asset.id]).get(asset.id))
     _queue_broadcast(background_tasks, "ASSET_UPDATED", response)
-    return response
+    return _for_viewer(response.model_copy(), current_user)
 
 
 @router.post("/{asset_id}/assign", response_model=AssetResponse)
@@ -847,6 +877,8 @@ def delete_asset(
     db.query(SoftwareLicenseAssignment).filter(SoftwareLicenseAssignment.asset_id == asset.id).update(
         {"asset_id": None}, synchronize_session=False
     )
+    # Tag and serial number are optional, so fall back to the name.
+    label = response.asset_tag or (f"S/N {response.serial_number}" if response.serial_number else response.name)
     db.delete(asset)
     db.commit()
 
@@ -857,7 +889,8 @@ def delete_asset(
         company_id=response.company_id,
         user_id=current_user.id,
         entity_id=response.id,
-        old_value=f"{response.asset_tag or 'S/N ' + response.serial_number} - {response.name} ({response.status.value})",
+        old_value=f"{label} - {response.name} ({response.status.value})" if label != response.name
+        else f"{response.name} ({response.status.value})",
     )
     _queue_broadcast(background_tasks, "ASSET_DELETED", response)
     return None

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   approveTicket,
@@ -18,6 +18,7 @@ import {
   type AssetRequest,
 } from "@/lib/tickets";
 import { assetStatusLabel, formatDate, type Asset, type AssetStatus, assetLabel } from "@/types/asset";
+import { listSoftware, type Software } from "@/lib/software";
 
 export function ticketNumber(ticket: AssetRequest): string {
   return `#${ticket.id.slice(0, 6).toUpperCase()}`;
@@ -343,10 +344,20 @@ export function TicketActions({
         )}
         {status === "APPROVED" &&
           (isSoftware ? (
-            <button type="button" disabled={busy} className={`${link} text-emerald-700 hover:text-emerald-800`}
-              onClick={() => run(() => fulfilSoftwareTicket(ticket.id), () => `${number}: seat of ${ticket.software_name} assigned.`)}>
-              Assign seat
-            </button>
+            ticket.software_id ? (
+              <button type="button" disabled={busy} className={`${link} text-emerald-700 hover:text-emerald-800`}
+                onClick={() => run(() => fulfilSoftwareTicket(ticket.id), () => `${number}: seat of ${ticket.software_name} assigned.`)}>
+                Assign seat
+              </button>
+            ) : (
+              <PickSoftware
+                requestedName={ticket.software_name ?? "the software"}
+                busy={busy}
+                onAssign={(softwareId, name) =>
+                  run(() => fulfilSoftwareTicket(ticket.id, undefined, softwareId), () => `${number}: seat of ${name} assigned.`)
+                }
+              />
+            )
           ) : (
             <button type="button" disabled={busy} onClick={() => setMode("handover")} className={`${link} text-emerald-700 hover:text-emerald-800`}>
               Confirm handover
@@ -429,6 +440,67 @@ export function TicketActions({
       <button type="button" disabled={busy} onClick={() => setMode("cancel")} className={`${link} text-slate-500 hover:text-slate-700`}>
         Cancel ticket
       </button>
+    </span>
+  );
+}
+
+/**
+ * A software request made by name (the software was not registered yet):
+ * the admin chooses the registered product, registering it first if needed.
+ */
+function PickSoftware({
+  requestedName,
+  busy,
+  onAssign,
+}: {
+  requestedName: string;
+  busy: boolean;
+  onAssign: (softwareId: string, name: string) => void;
+}) {
+  const [products, setProducts] = useState<Software[] | null>(null);
+  const [choice, setChoice] = useState("");
+
+  useEffect(() => {
+    listSoftware()
+      .then((data) => {
+        setProducts(data);
+        // Preselect a product with the same name, if one was registered since.
+        const match = data.find((p) => p.name.trim().toLowerCase() === requestedName.trim().toLowerCase());
+        if (match) setChoice(match.id);
+      })
+      .catch(() => setProducts([]));
+  }, [requestedName]);
+
+  const chosen = products?.find((p) => p.id === choice);
+  return (
+    <span className="inline-flex flex-wrap items-center justify-end gap-2">
+      <span className="text-[11px] text-amber-700">Asked for by name: {requestedName}</span>
+      {products && products.length > 0 && (
+        <select
+          value={choice}
+          onChange={(event) => setChoice(event.target.value)}
+          aria-label="Registered software to give"
+          className="w-48 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
+        >
+          <option value="">Choose registered software…</option>
+          {products.map((product) => (
+            <option key={product.id} value={product.id}>
+              {product.name} ({product.available_licenses} free)
+            </option>
+          ))}
+        </select>
+      )}
+      <button
+        type="button"
+        disabled={busy || !chosen}
+        onClick={() => chosen && onAssign(chosen.id, chosen.name)}
+        className="font-semibold text-emerald-700 hover:text-emerald-800 disabled:opacity-50"
+      >
+        Assign seat
+      </button>
+      <Link href="/assets/software/new" className="font-semibold text-brand-600 hover:text-brand-700">
+        Register {requestedName}
+      </Link>
     </span>
   );
 }

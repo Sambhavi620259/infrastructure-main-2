@@ -51,6 +51,14 @@ def login(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Your organization is suspended. Contact the platform administrator."
         )
+    # A Super Admin signs in with password and the Super Admin key.
+    if user.role == PlatformRole.SUPER_ADMIN and super_key_exists(db) and not verify_super_key(db, login_data.super_admin_key):
+        log_audit_event(db=db, action="SUPER_ADMIN_KEY_FAILED", entity="User", user_id=user.id, entity_id=user.id)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Enter the correct Super Admin key." if login_data.super_admin_key else "Super Admins must enter the Super Admin key.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
@@ -116,6 +124,12 @@ def register(
     else:
         # IT_ADMIN or SUPER_ADMIN - create new company
         if register_data.role == "SUPER_ADMIN":
+            # The platform has exactly one Super Admin: the first to register.
+            if db.query(User.id).filter(User.role == PlatformRole.SUPER_ADMIN).first():
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="This platform already has its Super Admin. Only one Super Admin is allowed."
+                )
             key = register_data.registrationKey or ""
             if super_key_exists(db):
                 if not verify_super_key(db, key):
@@ -339,9 +353,12 @@ def change_password(
 
 @router.get("/super-admin-key")
 def super_admin_key_status(db: Session = Depends(get_db)):
-    """Public: whether a Super Admin key exists, so registration knows to ask
-    for it or to create one. Never reveals the key."""
-    return {"exists": super_key_exists(db)}
+    """Public: whether a Super Admin key exists and whether Super Admin
+    registration is still open (only one Super Admin is allowed). Never reveals the key."""
+    return {
+        "exists": super_key_exists(db),
+        "registration_open": db.query(User.id).filter(User.role == PlatformRole.SUPER_ADMIN).first() is None,
+    }
 
 
 class SuperKeyChange(BaseModel):

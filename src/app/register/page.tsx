@@ -17,16 +17,22 @@ export default function RegisterPage() {
   const [password, setPassword] = useState("");
   const [registrationKey, setRegistrationKey] = useState("");
   const [registrationKeyConfirm, setRegistrationKeyConfirm] = useState("");
-  // Whether the platform already has a Super Admin key. If not, this Super
-  // Admin creates it; afterwards every new Super Admin must enter it.
+  // The platform has exactly one Super Admin. Until they register, the
+  // Super Admin option is offered and they create the Super Admin key.
   const [superKeyExists, setSuperKeyExists] = useState<boolean | null>(null);
+  const [superRegistrationOpen, setSuperRegistrationOpen] = useState(false);
 
   useEffect(() => {
-    if (role !== "SUPER_ADMIN" || superKeyExists !== null) return;
-    apiFetch<{ exists: boolean }>("/api/auth/super-admin-key")
-      .then((data) => setSuperKeyExists(data.exists))
-      .catch(() => setSuperKeyExists(true));
-  }, [role, superKeyExists]);
+    apiFetch<{ exists: boolean; registration_open?: boolean }>("/api/auth/super-admin-key")
+      .then((data) => {
+        setSuperKeyExists(data.exists);
+        setSuperRegistrationOpen(Boolean(data.registration_open));
+      })
+      .catch(() => {
+        setSuperKeyExists(true);
+        setSuperRegistrationOpen(false);
+      });
+  }, []);
 
   const creatingSuperKey = role === "SUPER_ADMIN" && superKeyExists === false;
   const [error, setError] = useState("");
@@ -42,7 +48,7 @@ export default function RegisterPage() {
         if (registrationKey.length < 8) return setError("Create a Super Admin key of at least 8 characters.");
         if (registrationKey !== registrationKeyConfirm) return setError("The two keys do not match.");
       } else if (!registrationKey) {
-        return setError("Enter the Super Admin key. An existing Super Admin can give it to you.");
+        return setError("Enter the Super Admin key.");
       }
     }
 
@@ -83,8 +89,8 @@ export default function RegisterPage() {
           ? "Sign up with your work email. An IT Admin will add you to their organization."
           : role === "SUPER_ADMIN"
             ? creatingSuperKey
-              ? "You are the first Super Admin: create the key that future Super Admins will need."
-              : "Super Admins need the key set by the first Super Admin."
+              ? "You are setting up the platform's only Super Admin: create the key you will enter at every sign-in."
+              : "Enter the Super Admin key."
             : "IT Admins get a new organization."}
       </p>
 
@@ -101,7 +107,7 @@ export default function RegisterPage() {
           >
             <option value="IT_ADMIN">IT Admin</option>
             <option value="IT_AGENT">User</option>
-            <option value="SUPER_ADMIN">Super Admin (key required)</option>
+            {superRegistrationOpen && <option value="SUPER_ADMIN">Super Admin (platform setup)</option>}
           </select>
         </label>
         <IconField

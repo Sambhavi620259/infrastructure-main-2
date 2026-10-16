@@ -29,12 +29,45 @@ const MODULE_SECTIONS: Record<string, Section[]> = {
   REPORTS: ["reports"],
 };
 
-export function sectionsFor(role: string, modules: readonly string[] = []): Set<Section> {
-  if (role === "SUB_ADMIN") {
-    return new Set<Section>(["dashboard", ...modules.flatMap((module) => MODULE_SECTIONS[module] ?? [])]);
+/** Plan feature -> sections it unlocks (backend: app/services/plan_features_service.py). */
+const FEATURE_SECTIONS: Record<string, Section[]> = {
+  INVENTORY: ["inventory"],
+  SOFTWARE: ["software"],
+  REPORTS: ["reports"],
+  CLOUD: ["cloud"],
+};
+
+/** User-workspace pages that belong to a plan feature. */
+const USER_PAGE_FEATURES: [string, string][] = [
+  ["/agent/software", "SOFTWARE"],
+  ["/agent/inventory", "INVENTORY"],
+  ["/agent/reports", "REPORTS"],
+];
+
+/**
+ * Sections the role may open. With planFeatures (from the profile), sections
+ * whose feature the organization's plan leaves out are removed too.
+ */
+export function sectionsFor(role: string, modules: readonly string[] = [], planFeatures?: readonly string[]): Set<Section> {
+  const sections =
+    role === "SUB_ADMIN"
+      ? new Set<Section>(["dashboard", ...modules.flatMap((module) => MODULE_SECTIONS[module] ?? [])])
+      : role === "REPORTING_USER"
+        ? new Set<Section>(["dashboard", "reports"])
+        : new Set(ALL);
+  if (planFeatures) {
+    for (const [feature, featureSections] of Object.entries(FEATURE_SECTIONS)) {
+      if (!planFeatures.includes(feature)) featureSections.forEach((section) => sections.delete(section));
+    }
   }
-  if (role === "REPORTING_USER") return new Set<Section>(["dashboard", "reports"]);
-  return new Set(ALL);
+  return sections;
+}
+
+/** Whether a user-workspace page is on the organization's plan. */
+export function userPageOnPlan(pathname: string, planFeatures?: readonly string[]): boolean {
+  if (!planFeatures) return true;
+  const match = USER_PAGE_FEATURES.find(([prefix]) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+  return !match || planFeatures.includes(match[1]);
 }
 
 /** The section a path belongs to, or null for pages open to everyone (e.g. /profile). */

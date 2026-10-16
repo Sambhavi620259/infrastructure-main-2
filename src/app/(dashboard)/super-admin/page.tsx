@@ -56,21 +56,7 @@ export default function SuperAdminOverviewPage() {
         <div>
           <p className="text-[11px] font-bold uppercase tracking-wider text-violet-600">Platform control center</p>
           <h1 className="mt-1 text-2xl font-extrabold tracking-tight text-slate-950">Super Admin workspace</h1>
-          <p className="mt-1 text-sm text-slate-500">Organizations, subscriptions, platform admins and activity across the platform.</p>
-        </div>
-        <div className="flex gap-2">
-          <Link
-            href="/super-admin/companies"
-            className="rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50"
-          >
-            + Add company
-          </Link>
-          <Link
-            href="/super-admin/subscriptions"
-            className="rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-brand-700"
-          >
-            Manage subscriptions
-          </Link>
+          <p className="mt-1 text-sm text-slate-500">Organizations, subscriptions and activity across the platform.</p>
         </div>
       </header>
 

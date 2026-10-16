@@ -29,8 +29,12 @@ export interface AssetFormValues {
   purchase_price: string;
   warranty_start: string;
   warranty_end: string;
+  amc_vendor_id: string;
+  amc_start: string;
+  amc_end: string;
+  amc_cost: string;
   description: string;
-  // Software licenses only.
+  // License: for software, its first license; for hardware, a license that comes with the device.
   license_type: string;
   license_number: string;
   license_count: string;
@@ -42,7 +46,7 @@ export function emptyAssetForm(): AssetFormValues {
   return {
     asset_tag: "", serial_number: "", name: "", category: "", type: "Hardware", brand: "", model: "", specifications: "",
     condition: "EXCELLENT", department_id: "", vendor_id: "", location_id: "", purchase_date: "", purchase_price: "",
-    warranty_start: "", warranty_end: "", description: "", license_type: "PERPETUAL", license_number: "",
+    warranty_start: "", warranty_end: "", amc_vendor_id: "", amc_start: "", amc_end: "", amc_cost: "", description: "", license_type: "", license_number: "",
     license_count: "", license_expiry: "", license_renewal: "",
   };
 }
@@ -82,7 +86,14 @@ export function assetToForm(asset: Asset): AssetFormValues {
     purchase_price: Number(asset.purchase_price) ? String(Number(asset.purchase_price)) : "",
     warranty_start: day(asset.warranty_start),
     warranty_end: day(asset.warranty_end),
+    amc_vendor_id: asset.amc_vendor_id ?? "",
+    amc_start: day(asset.amc_start ?? null),
+    amc_end: day(asset.amc_end ?? null),
+    amc_cost: asset.amc_cost !== null && asset.amc_cost !== undefined && asset.amc_cost !== "" ? String(Number(asset.amc_cost)) : "",
     description: asset.description ?? "",
+    license_type: asset.license_type ?? "",
+    license_number: asset.license_number ?? "",
+    license_expiry: day(asset.license_expiry ?? null),
   };
 }
 
@@ -114,6 +125,14 @@ export function formToPayload(values: AssetFormValues) {
     purchase_price: values.purchase_price ? Number(values.purchase_price) : 0,
     warranty_start: date(values.warranty_start),
     warranty_end: date(values.warranty_end),
+    amc_vendor_id: text(values.amc_vendor_id),
+    amc_start: date(values.amc_start),
+    amc_end: date(values.amc_end),
+    amc_cost: values.amc_cost ? Number(values.amc_cost) : null,
+    license_type: values.license_type || null,
+    // Blank clears the license number.
+    license_number: values.license_number.trim(),
+    license_expiry: date(values.license_expiry),
     description: text(values.description),
   };
 }
@@ -126,7 +145,7 @@ export function formToSoftware(values: AssetFormValues): SoftwareInput {
     vendor: values.brand.trim() || undefined,
     version: values.model.trim() || undefined,
     license: {
-      license_type: values.license_type,
+      license_type: values.license_type || "PERPETUAL",
       license_number: values.license_number.trim() || undefined,
       seats: Number(values.license_count),
       purchase_date: date(values.purchase_date),
@@ -162,6 +181,16 @@ export function validateAssetForm(values: AssetFormValues, software = false): st
     }
     if (values.warranty_start && values.warranty_end && values.warranty_end < values.warranty_start) {
       return "Warranty end must be after warranty start.";
+    }
+    if (values.amc_start && values.amc_end && values.amc_end < values.amc_start) {
+      return "AMC end must be after AMC start.";
+    }
+    if (values.amc_cost && !(Number(values.amc_cost) >= 0)) return "AMC cost must be zero or more.";
+    if (values.license_number.trim() && !LICENSE_NUMBER_PATTERN.test(values.license_number.trim())) {
+      return "A license number is 3-255 letters, digits and - _ . / # characters.";
+    }
+    if (values.purchase_date && values.license_expiry && values.license_expiry < values.purchase_date) {
+      return "License expiry must be after the purchase date.";
     }
   }
   if (values.purchase_price && !(Number(values.purchase_price) >= 0)) return "Purchase price must be zero or more.";
@@ -199,9 +228,13 @@ export function AssetForm({
     listAssetCategories().then(setCategories).catch(() => undefined);
     listDepartments().then(setDepartments).catch(() => undefined);
     listVendors()
-      .then((data) => setVendors(data.filter((vendor) => vendor.status === "ACTIVE" || vendor.id === initial.vendor_id)))
+      .then((data) =>
+        setVendors(
+          data.filter((vendor) => vendor.status === "ACTIVE" || vendor.id === initial.vendor_id || vendor.id === initial.amc_vendor_id),
+        ),
+      )
       .catch(() => undefined);
-  }, [initial.vendor_id]);
+  }, [initial.vendor_id, initial.amc_vendor_id]);
 
   const set = (key: keyof AssetFormValues) => (event: { target: { value: string } }) =>
     setValues((current) => ({ ...current, [key]: event.target.value }));
@@ -377,7 +410,7 @@ export function AssetForm({
             </label>
           </Fieldset>
 
-          <Fieldset title="Purchase & warranty" hint="Needed for depreciation, finance and warranty alerts.">
+          <Fieldset title="Purchase & warranty" hint="All optional. Fill the warranty dates to get warranty-ending alerts.">
             <label className={label}>
               Purchase date
               <input type="date" value={values.purchase_date} onChange={set("purchase_date")} className={input} />
@@ -398,12 +431,67 @@ export function AssetForm({
               </select>
             </label>
             <label className={label}>
-              Warranty start
+              Warranty start <span className="font-normal text-slate-400">(optional)</span>
               <input type="date" value={values.warranty_start} onChange={set("warranty_start")} className={input} />
             </label>
             <label className={label}>
-              Warranty end
+              Warranty end <span className="font-normal text-slate-400">(optional)</span>
               <input type="date" value={values.warranty_end} onChange={set("warranty_end")} className={input} />
+            </label>
+          </Fieldset>
+
+          <Fieldset title="License" hint="All optional. A license that comes with the device, e.g. an OEM Windows key. Users see only its last 4 characters.">
+            <label className={label}>
+              License type
+              <select value={values.license_type} onChange={set("license_type")} className={input}>
+                <option value="">None</option>
+                {LICENSE_TYPES.map((type) => (
+                  <option key={type} value={type}>
+                    {licenseTypeLabel(type)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={label}>
+              License number
+              <input
+                value={values.license_number}
+                onChange={set("license_number")}
+                maxLength={255}
+                autoComplete="off"
+                placeholder="e.g. WIN11-PRO-XXXX-XXXX"
+                className={`${input} font-mono`}
+              />
+            </label>
+            <label className={label}>
+              License expiry
+              <input type="date" value={values.license_expiry} onChange={set("license_expiry")} className={input} />
+            </label>
+          </Fieldset>
+
+          <Fieldset title="AMC (annual maintenance contract)" hint="All optional. Fill these if the device is covered by an AMC.">
+            <label className={label}>
+              AMC vendor
+              <select value={values.amc_vendor_id} onChange={set("amc_vendor_id")} className={input}>
+                <option value="">Not specified</option>
+                {vendors.map((vendor) => (
+                  <option key={vendor.id} value={vendor.id}>
+                    {vendor.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={label}>
+              AMC start
+              <input type="date" value={values.amc_start} onChange={set("amc_start")} className={input} />
+            </label>
+            <label className={label}>
+              AMC end
+              <input type="date" value={values.amc_end} onChange={set("amc_end")} className={input} />
+            </label>
+            <label className={label}>
+              AMC cost
+              <input type="number" min={0} step="0.01" value={values.amc_cost} onChange={set("amc_cost")} className={input} />
             </label>
           </Fieldset>
         </>

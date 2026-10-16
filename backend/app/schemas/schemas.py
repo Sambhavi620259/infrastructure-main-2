@@ -29,6 +29,8 @@ class LoginRequest(BaseModel):
     # The role picked on the login page. Informational only: the account's
     # own role decides the workspace. Accepts frontend names such as IT_AGENT.
     role: Optional[str] = None
+    # Super Admins also enter the platform's Super Admin key on every sign-in.
+    super_admin_key: Optional[str] = None
 
 
 class RegisterRequest(BaseModel):
@@ -160,6 +162,8 @@ class UserProfile(BaseModel):
     # As the user typed them on their profile (display only).
     organizationName: Optional[str] = None
     organizationId: Optional[str] = None
+    # Modules the organization's plan includes (all of them for a Super Admin).
+    planFeatures: List[str] = []
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -187,6 +191,19 @@ class AssetCategoryResponse(AssetCategoryCreate):
 ASSET_TAG_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9\-_./]{0,99}$")
 
 
+LICENSE_NUMBER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9\-_./# ]{2,254}$")
+
+
+def clean_license_number(value: Optional[str]) -> Optional[str]:
+    """Blank means no license number; otherwise 3-255 letters, digits and - _ . / # characters."""
+    value = (value or "").strip()
+    if not value:
+        return None
+    if not LICENSE_NUMBER_PATTERN.match(value):
+        raise ValueError("A license number is 3-255 letters, digits and - _ . / # characters.")
+    return value
+
+
 def clean_asset_tag(value: Optional[str]) -> Optional[str]:
     """Blank means no tag; a given tag is letters, digits and - _ . / (it must be unique per organization)."""
     value = (value or "").strip()
@@ -212,6 +229,15 @@ class AssetBase(BaseModel):
     vendor_id: Optional[str] = None
     warranty_start: Optional[datetime] = None
     warranty_end: Optional[datetime] = None
+    # Optional annual maintenance contract.
+    amc_vendor_id: Optional[str] = None
+    amc_start: Optional[datetime] = None
+    amc_end: Optional[datetime] = None
+    amc_cost: Optional[Decimal] = Field(None, ge=0)
+    # Optional license that comes with the device (e.g. OEM Windows key).
+    license_type: Optional[Literal["PERPETUAL", "SUBSCRIPTION", "PER_USER", "PER_DEVICE", "SITE", "VOLUME", "OEM", "TRIAL"]] = None
+    license_number: Optional[str] = Field(None, max_length=255)
+    license_expiry: Optional[datetime] = None
     location_id: Optional[str] = None
     department_id: Optional[str] = None
     condition: str = "EXCELLENT"
@@ -227,6 +253,11 @@ class AssetBase(BaseModel):
     @classmethod
     def _serial(cls, value):
         return (value or "").strip() or None
+
+    @field_validator("license_number", mode="before")
+    @classmethod
+    def _license_number(cls, value):
+        return clean_license_number(value)
 
     @field_validator("category", mode="before")
     @classmethod
@@ -255,6 +286,13 @@ class AssetUpdate(BaseModel):
     vendor_id: Optional[str] = None
     warranty_start: Optional[datetime] = None
     warranty_end: Optional[datetime] = None
+    amc_vendor_id: Optional[str] = None
+    amc_start: Optional[datetime] = None
+    amc_end: Optional[datetime] = None
+    amc_cost: Optional[Decimal] = Field(None, ge=0)
+    license_type: Optional[Literal["PERPETUAL", "SUBSCRIPTION", "PER_USER", "PER_DEVICE", "SITE", "VOLUME", "OEM", "TRIAL"]] = None
+    license_number: Optional[str] = Field(None, max_length=255)
+    license_expiry: Optional[datetime] = None
     location_id: Optional[str] = None
     department_id: Optional[str] = None
     status: Optional[AssetStatusEnum] = None
@@ -268,6 +306,11 @@ class AssetUpdate(BaseModel):
     def _tag(cls, value):
         return clean_asset_tag(value)
 
+    @field_validator("license_number", mode="before")
+    @classmethod
+    def _license_number(cls, value):
+        return clean_license_number(value)
+
 
 class AssetResponse(AssetBase):
     id: str
@@ -279,6 +322,11 @@ class AssetResponse(AssetBase):
     @field_validator("asset_tag", "serial_number", mode="before")
     @classmethod
     def _tag(cls, value):
+        return value
+
+    @field_validator("license_number", mode="before")
+    @classmethod
+    def _license_number(cls, value):
         return value
 
     @field_validator("category", mode="before")
@@ -310,6 +358,8 @@ class AssetRequestCreate(BaseModel):
     asset_category_id: Optional[str] = None
     asset_id: Optional[str] = None
     software_id: Optional[str] = None
+    # SOFTWARE tickets for software that is not registered yet: its name.
+    requested_software_name: Optional[str] = Field(None, max_length=150)
     requested_for: Optional[str] = None
     # Raise the ticket on behalf of this user (same organization); the asset
     # is assigned to them on approval. Defaults to the caller.
@@ -326,6 +376,8 @@ class AssetRequestUpdate(BaseModel):
     resolution_note: Optional[str] = Field(None, max_length=1000)
     # SOFTWARE fulfilment: which license to take the seat from (default: any with a free seat).
     license_id: Optional[str] = None
+    # SOFTWARE fulfilment of a request made by name: the registered software to give.
+    software_id: Optional[str] = None
     # RETURN fulfilment: the condition the device came back in.
     return_condition: Optional[Literal["EXCELLENT", "GOOD", "FAIR", "POOR", "DAMAGED"]] = None
 
@@ -372,6 +424,7 @@ class AssetRequestResponse(BaseModel):
     resolution_note: Optional[str] = None
     software_id: Optional[str] = None
     software_name: Optional[str] = None
+    requested_software_name: Optional[str] = None
     license_assignment_id: Optional[str] = None
     return_condition: Optional[str] = None
 

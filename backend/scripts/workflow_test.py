@@ -192,9 +192,8 @@ code, stock = call("adminA", "GET", "/inventory/hardware-stock")
 row = row_for(stock, "Latitude 5440")
 check("stock: 1 available, 1 assigned", row.get("available") == 1 and row.get("assigned") == 1, row)
 
-code, self_ticket = call("adminA", "POST", "/asset-requests", {"asset_category_id": laptop_cat, "reason": "Spare for me"})
-code, body = call("adminA", "PUT", f"/asset-requests/{self_ticket['id']}", {"status": "APPROVED"})
-check("an admin cannot approve a ticket raised for themselves", code == 403, body)
+code, body = call("adminA", "POST", "/asset-requests", {"asset_category_id": laptop_cat, "reason": "Spare for me"})
+check("an IT Admin cannot raise a ticket; only users raise them", code == 403, body)
 
 print("Return")
 code, ret = call("u1A", "POST", "/asset-requests", {"ticket_type": "RETURN", "asset_id": laptop1["id"], "reason": "Leaving the team"})
@@ -321,6 +320,23 @@ code, body = call("hamA", "PUT", f"/asset-requests/{ticket2['id']}", {"status": 
 check("a sub-admin is refused once the rule names only IT Admins", code == 403, body)
 code, body = call("adminA", "PUT", f"/asset-requests/{ticket2['id']}", {"status": "APPROVED"})
 check("an IT Admin approves under the rule", code == 200, body)
+
+# Software that is not registered yet can be requested by name.
+code, body = call("u2A", "POST", "/asset-requests", {"ticket_type": "SOFTWARE", "reason": "x"})
+check("a software request needs a product or a name", code == 400, body)
+code, named = call("u2A", "POST", "/asset-requests", {"ticket_type": "SOFTWARE", "requested_software_name": "Figma",
+                                                      "reason": "Design work"})
+check("a user requests software that is not registered yet, by name",
+      code == 201 and named["software_name"] == "Figma" and named["software_id"] is None, named)
+call("adminA", "PUT", f"/asset-requests/{named['id']}", {"status": "APPROVED"})
+code, body = call("adminA", "PUT", f"/asset-requests/{named['id']}", {"status": "FULFILLED"})
+check("it cannot be fulfilled until the admin picks registered software", code == 400 and "Figma" in str(body), body)
+code, figma = call("adminA", "POST", "/software", {"name": "Figma", "license": {"seats": 3}})
+code, body = call("adminA", "PUT", f"/asset-requests/{named['id']}", {"status": "FULFILLED", "software_id": figma["id"]})
+check("the admin registers it and assigns a seat", code == 200 and body["status"] == "FULFILLED"
+      and body["software_id"] == figma["id"] and body["license_assignment_id"], body)
+code, mine = call("u2A", "GET", "/software/mine")
+check("the seat is listed under the user's software", code == 200 and any(s["software_name"] == "Figma" for s in mine), mine)
 
 print("Optional fields and reports")
 code, only_name = call("adminA", "POST", "/assets", {"name": "Spare keyboard"})

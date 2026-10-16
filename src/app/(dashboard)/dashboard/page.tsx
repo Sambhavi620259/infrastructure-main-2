@@ -3,16 +3,14 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
-  ArchiveBoxIcon,
   ArrowRightIcon,
+  BuildingOffice2Icon,
   ChartBarIcon,
   CheckCircleIcon,
   CubeIcon,
-  ExclamationTriangleIcon,
   InboxStackIcon,
   KeyIcon,
   PlusIcon,
-  ShieldExclamationIcon,
   TicketIcon,
   UserPlusIcon,
   WrenchScrewdriverIcon,
@@ -20,11 +18,11 @@ import {
 import { getDashboardMetrics } from "@/lib/assets";
 import { sectionsFor, type Section } from "@/lib/access";
 import { listInventoryRequests, listMovements, type InventoryRequest, type StockMovement } from "@/lib/inventory";
+import { listVendors, type Vendor } from "@/lib/procurement";
 import { getProfile, type Profile } from "@/lib/profile";
 import { getAssetRequestCounts, isOpenTicket, listAssetRequests, type AssetRequest, type AssetRequestCounts } from "@/lib/tickets";
 import { listUnassignedAgents } from "@/lib/users";
-import { listWarrantyCoverage, type WarrantyCoverage } from "@/lib/warranty";
-import { assetLabel, formatDate, type DashboardMetrics } from "@/types/asset";
+import { assetLabel, type DashboardMetrics } from "@/types/asset";
 import type { AppUser } from "@/types/user";
 import { TicketStatusBadge, TicketTypeChip, ticketNumber } from "@/components/tickets/ticket-actions";
 
@@ -72,15 +70,15 @@ export default function DashboardPage() {
   const [openTickets, setOpenTickets] = useState<AssetRequest[] | null>(null);
   const [stockRequests, setStockRequests] = useState<InventoryRequest[] | null>(null);
   const [signups, setSignups] = useState<AppUser[] | null>(null);
-  const [expiring, setExpiring] = useState<WarrantyCoverage[] | null>(null);
   const [movements, setMovements] = useState<StockMovement[] | null>(null);
+  const [vendors, setVendors] = useState<Vendor[] | null>(null);
 
   useEffect(() => {
     getProfile().then(setProfile).catch(() => undefined);
   }, []);
 
   const sections = useMemo<Set<Section>>(
-    () => (profile ? sectionsFor(profile.role, profile.modules) : new Set()),
+    () => (profile ? sectionsFor(profile.role, profile.modules, profile.planFeatures) : new Set()),
     [profile],
   );
   const isAdmin = profile?.role === "IT_ADMIN" || profile?.role === "SUPER_ADMIN";
@@ -90,9 +88,6 @@ export default function DashboardPage() {
     getDashboardMetrics().then(setMetrics).catch(() => undefined);
     if (sections.has("assets")) {
       listMovements({ limit: 8 }).then(setMovements).catch(() => setMovements([]));
-      listWarrantyCoverage({ coverage: "EXPIRING", expiring_days: 30 })
-        .then(setExpiring)
-        .catch(() => setExpiring([]));
     }
     if (sections.has("tickets")) {
       getAssetRequestCounts().then(setTicketCounts).catch(() => undefined);
@@ -102,6 +97,7 @@ export default function DashboardPage() {
     }
     if (sections.has("inventory")) {
       listInventoryRequests("PENDING").then(setStockRequests).catch(() => setStockRequests([]));
+      listVendors().then(setVendors).catch(() => setVendors([]));
     }
     if (isAdmin) listUnassignedAgents().then(setSignups).catch(() => setSignups([]));
   }, [profile, sections, isAdmin]);
@@ -116,7 +112,7 @@ export default function DashboardPage() {
     ["Hardware assets", metrics?.total_assets, "text-slate-950", "/assets"],
     ["Available", metrics?.in_stock_assets, "text-emerald-600", "/inventory/hardware"],
     ["Assigned", metrics?.assigned_assets, "text-blue-600", "/assets/assignment"],
-    ["Under repair", metrics?.under_maintenance, "text-amber-600", "/maintenance"],
+    ["Under repair", metrics?.under_maintenance, "text-amber-600", "/assets/status"],
     ["Software products", metrics?.software_products, "text-slate-950", "/assets/software"],
     ["License utilization", metrics ? (seats ? `${Math.round((seatsUsed / seats) * 100)}%` : "—") : undefined, "text-indigo-600", "/inventory/software"],
   ];
@@ -126,8 +122,6 @@ export default function DashboardPage() {
     ["Problems to resolve", problems, "Reported on users' assets", WrenchScrewdriverIcon, "/requests", sections.has("tickets")],
     ["Stock requests", stockRequests?.length, "Waiting for approval", InboxStackIcon, "/requests?tab=stock", sections.has("inventory")],
     ["New sign-ups", signups?.length, "Users to add", UserPlusIcon, "/users", isAdmin],
-    ["Low stock items", metrics?.low_stock_alerts, "At or below reorder level", ArchiveBoxIcon, "/inventory/movements?tab=consumables", sections.has("inventory")],
-    ["Warranties ending", expiring?.length, "In the next 30 days", ShieldExclamationIcon, "/assets/warranty", sections.has("assets")],
   ];
 
   const quickActions: [string, string, string, typeof CubeIcon, boolean][] = [
@@ -135,6 +129,7 @@ export default function DashboardPage() {
     ["/assets/hardware/new", "Add hardware", "Register a device", CubeIcon, sections.has("assets") && profile?.role !== "REPORTING_USER"],
     ["/assets/software/new", "Add software", "License number, count and dates", KeyIcon, sections.has("software") && profile?.role !== "REPORTING_USER"],
     ["/assets/assignment", "Assign an asset", "Hand stock to a user or take it back", CheckCircleIcon, sections.has("assets") && profile?.role !== "REPORTING_USER"],
+    ["/inventory/vendors?new=1", "Add a vendor", "A supplier you buy from", BuildingOffice2Icon, sections.has("inventory") && profile?.role !== "REPORTING_USER"],
     ["/users/new", "Create a user", "Set up an account with a password", UserPlusIcon, isAdmin],
     ["/reports", "Run a report", "Download a CSV export", ChartBarIcon, sections.has("reports")],
   ];
@@ -297,8 +292,8 @@ export default function DashboardPage() {
       </section>
 
       {sections.has("assets") && (
-        <section className="grid gap-4 xl:grid-cols-[1.4fr_1fr]">
-          <Panel title="Recent assignments & stock movements" href="/inventory/movements" linkLabel="All movements">
+        <section>
+          <Panel title="Recent assignments & stock movements" href="/assets/history" linkLabel="Asset history">
             {movements === null ? (
               <Loading />
             ) : movements.length === 0 ? (
@@ -322,38 +317,45 @@ export default function DashboardPage() {
               </ul>
             )}
           </Panel>
+        </section>
+      )}
 
-          <Panel title="Warranties ending soon" href="/assets/warranty" linkLabel="Warranty / AMC" count={expiring?.length}>
-            {expiring === null ? (
-              <Loading />
-            ) : expiring.length === 0 ? (
-              <Empty text="No warranties end in the next 30 days." />
-            ) : (
-              <ul className="divide-y divide-slate-100">
-                {expiring.slice(0, 6).map((item) => (
-                  <li key={item.asset_id} className="flex items-center justify-between gap-3 px-4 py-2.5 text-xs">
-                    <Link href={`/assets/${item.asset_id}`} className="min-w-0 hover:text-brand-700">
-                      <span className="block font-semibold text-slate-800">
-                        {item.asset_tag ?? "Untagged"} · {item.name}
+      {sections.has("inventory") && (
+        <Panel title="Vendors" href="/inventory/vendors" linkLabel="All vendors" count={vendors?.filter((v) => v.status === "ACTIVE").length}>
+          {vendors === null ? (
+            <p className="p-4 text-xs text-slate-500">Loading…</p>
+          ) : vendors.length === 0 ? (
+            <p className="p-4 text-xs text-slate-500">
+              No vendors yet.{" "}
+              <Link href="/inventory/vendors?new=1" className="font-semibold text-brand-600 hover:text-brand-700">
+                Add your first vendor
+              </Link>
+            </p>
+          ) : (
+            <ul className="grid divide-y divide-slate-100 sm:grid-cols-2 sm:divide-y-0 lg:grid-cols-3">
+              {vendors
+                .filter((v) => v.status === "ACTIVE")
+                .slice(0, 6)
+                .map((vendor) => (
+                  <li key={vendor.id} className="flex items-start gap-3 px-4 py-3 text-xs">
+                    <BuildingOffice2Icon className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
+                    <span className="min-w-0">
+                      <span className="block truncate font-semibold text-slate-800">{vendor.name}</span>
+                      <span className="block truncate text-slate-500">
+                        {[vendor.contact, vendor.phone ?? vendor.email].filter(Boolean).join(" · ") || "No contact details"}
                       </span>
-                      <span className="block text-slate-500">Ends {formatDate(item.warranty_end)}</span>
-                    </Link>
-                    <span className="flex shrink-0 items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">
-                      <ExclamationTriangleIcon className="h-3 w-3" aria-hidden="true" />
-                      {item.days_remaining ?? 0} days
                     </span>
                   </li>
                 ))}
-              </ul>
-            )}
-          </Panel>
-        </section>
+            </ul>
+          )}
+        </Panel>
       )}
 
       {quickActions.some(([, , , , show]) => show) && (
         <section>
           <h2 className="mb-2 text-sm font-bold text-slate-900">Quick actions</h2>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {quickActions
               .filter(([, , , , show]) => show)
               .map(([href, title, text, Icon]) => (

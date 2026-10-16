@@ -25,6 +25,8 @@ export interface Profile {
   /** As the user typed them on their profile (display only). */
   organizationName: string | null;
   organizationId: string | null;
+  /** Modules the organization's plan includes (INVENTORY, SOFTWARE, REPORTS, CLOUD). */
+  planFeatures?: string[];
 }
 
 export interface ProfileInput {

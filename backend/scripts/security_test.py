@@ -120,7 +120,12 @@ A["dept"] = created("adminA", "POST", "/departments", {"name": "Finance"})
 A["cat"] = created("adminA", "POST", "/assets/categories", {"name": "Laptop"})
 A["asset"] = created("adminA", "POST", "/assets", {"asset_tag": "A-1", "serial_number": "SA1", "name": "A laptop", "category": "Laptop"})
 A["user"] = created("adminA", "POST", "/users", {"email": "emp.a@example.com", "full_name": "Emp A", "password": "password123", "role": "EMPLOYEE"})
-A["ticket"] = created("adminA", "POST", "/asset-requests", {"asset_category_id": A["cat"], "reason": "need"})
+TOKENS["empA"] = create_access_token({"sub": A["user"]})
+A["ticket"] = created("empA", "POST", "/asset-requests", {"asset_category_id": A["cat"], "reason": "need"})
+code, data = call("adminA", "POST", "/asset-requests", {"asset_category_id": A["cat"], "reason": "need"})
+check("an IT Admin cannot raise a ticket", code == 403, data)
+code, data = call("hamA", "POST", "/asset-requests", {"asset_category_id": A["cat"], "reason": "need"})
+check("a sub-admin cannot raise a ticket", code == 403, data)
 A["item"] = created("adminA", "POST", "/inventory", {"name": "Cable", "category": "C", "quantity": 5})
 A["vendor"] = created("adminA", "POST", "/vendors", {"name": "V"})
 A["po"] = created("adminA", "POST", "/purchase-orders", {"po_number": "P1", "vendor_id": A["vendor"], "total_amount": "10"})
@@ -167,6 +172,7 @@ attacks = [
     ("POST", "/asset-requests/returns", {"asset_id": A["asset"], "reason": "x"}),
     ("POST", "/assets", {"asset_tag": "B-1", "serial_number": "SB1", "name": "x", "category": "Laptop", "department_id": A["dept"]}),
     ("POST", "/assets", {"asset_tag": "B-2", "serial_number": "SB2", "name": "x", "category": "Laptop", "vendor_id": A["vendor"]}),
+    ("POST", "/assets", {"name": "x", "amc_vendor_id": A["vendor"]}),
     ("POST", "/users", {"email": "x.b@example.com", "full_name": "X", "password": "password123", "department_id": A["dept"]}),
 ]
 for method, path, body in attacks:
@@ -296,6 +302,16 @@ check("the Super Admin cannot add to an unknown company", code == 400, data)
 code, data = call("adminA", "POST", "/users", {"email": "sneak@example.com", "full_name": "Sneak", "password": "password123",
                                             "role": "EMPLOYEE", "company_id": COMPANIES["B"]})
 check("an IT Admin cannot add people to another company", code == 201 and data.get("company_id") == COMPANIES["A"], data)
+code, data = call("super", "DELETE", f"/users/{IDS['adminB']}")
+check("the Super Admin removes an IT Admin", code == 204, data)
+code, data = call("adminB", "GET", "/assets")
+check("a removed IT Admin can no longer use the app", code in (401, 403), data)
+code, data = call("super", "POST", f"/users/{IDS['adminB']}/reactivate")
+check("the Super Admin reactivates an IT Admin", code == 200 and data.get("status") == "ACTIVE", data)
+code, data = call("adminB", "GET", "/assets")
+check("a reactivated IT Admin can use the app again", code == 200, data)
+code, data = call("adminA", "DELETE", f"/users/{IDS['adminB']}")
+check("an IT Admin cannot remove an admin of another company", code == 404, data)
 
 # --- Privilege escalation ---------------------------------------------------
 print("Privilege escalation")
@@ -317,6 +333,60 @@ code, data = call("adminA", "PUT", f"/users/{A['user']}", {"role": "SUB_ADMIN", 
 check("promoting to Sub-admin stores modules once", code == 200 and data.get("modules") == ["SAM"], data)
 code, data = call("adminA", "PUT", f"/users/{A['user']}", {"role": "EMPLOYEE"})
 check("demoting from Sub-admin clears modules", code == 200 and not data.get("modules"), data)
+
+
+# --- Organization contact details (Super Admin) -----------------------------
+print("Organization contact details")
+org_a = COMPANIES["A"]
+code, data = call("super", "PUT", f"/super-admin/companies/{org_a}", {
+    "contact_email": "it@orga.example.com", "contact_phone": "+91 98765 43210",
+    "address": "MG Road, Pune", "latitude": 18.5204, "longitude": 73.8567})
+check("Super Admin sets an organization's contact details and pin",
+      code == 200 and data.get("contact_email") == "it@orga.example.com" and data.get("latitude") == 18.5204, data)
+code, data = call("super", "PUT", f"/super-admin/companies/{org_a}", {"latitude": None})
+check("a pin needs both latitude and longitude", code == 400, data)
+code, data = call("super", "PUT", f"/super-admin/companies/{org_a}", {"contact_email": "not-an-email"})
+check("contact email must be valid", code == 422, data)
+code, data = call("super", "PUT", f"/super-admin/companies/{org_a}", {"latitude": 123, "longitude": 10})
+check("latitude must be on the map", code == 422, data)
+code, data = call("adminA", "PUT", f"/super-admin/companies/{org_a}", {"contact_email": "x@example.com"})
+check("an IT Admin cannot change contact details", code == 403, data)
+code, data = call("adminA", "GET", "/organization")
+check("the IT Admin sees their organization's contact details",
+      code == 200 and data.get("contact_phone") == "+91 98765 43210" and data.get("longitude") == 73.8567, data)
+code, data = call("super", "GET", "/super-admin/contact-directory")
+row = next((c for c in data if c["id"] == org_a), {}) if code == 200 else {}
+check("contact directory lists contact details and IT Admins",
+      row.get("address") == "MG Road, Pune" and any(a["email"] == "admin.a@example.com" for a in row.get("it_admins", [])), data)
+code, data = call("adminA", "GET", "/super-admin/contact-directory")
+check("an IT Admin cannot open the contact directory", code == 403, data)
+
+# --- Plan features -----------------------------------------------------------
+print("Plan features")
+code, data = call("super", "GET", "/super-admin/plan-features")
+check("every plan includes every feature by default",
+      code == 200 and all(set(v) == set(data["features"]) for v in data["plans"].values()), data)
+code, data = call("super", "PUT", "/super-admin/plan-features", {"plans": {"ENTERPRISE": ["INVENTORY", "REPORTS", "CLOUD"]}})
+check("Super Admin removes Software from the Enterprise plan",
+      code == 200 and "SOFTWARE" not in data["plans"]["ENTERPRISE"] and "SOFTWARE" in data["plans"]["STARTER"], data)
+code, data = call("adminA", "GET", "/software")
+check("an organization on that plan cannot use Software", code == 403 and "plan" in str(data), data)
+code, data = call("agentA", "GET", "/software/mine")
+check("its users cannot use Software either", code == 403, data)
+code, data = call("adminA", "GET", "/inventory")
+check("features still on the plan keep working", code == 200, data)
+code, data = call("adminA", "GET", "/profile")
+check("the profile lists the plan's features", code == 200 and "SOFTWARE" not in data["user"]["planFeatures"]
+      and "INVENTORY" in data["user"]["planFeatures"], data)
+code, data = call("adminA", "GET", "/organization")
+check("the organization lists the plan's features", code == 200 and "SOFTWARE" not in data["plan_features"], data)
+code, data = call("super", "PUT", "/super-admin/plan-features", {"plans": {"ENTERPRISE": ["TELEPORT"]}})
+check("unknown features are refused", code == 400, data)
+code, data = call("adminA", "PUT", "/super-admin/plan-features", {"plans": {"ENTERPRISE": ["SOFTWARE"]}})
+check("an IT Admin cannot change plan features", code == 403, data)
+call("super", "PUT", "/super-admin/plan-features", {"plans": {"ENTERPRISE": ["INVENTORY", "SOFTWARE", "REPORTS", "CLOUD"]}})
+code, data = call("adminA", "GET", "/software")
+check("adding the feature back restores access", code == 200, data)
 
 print(f"\n{sum(RESULTS)}/{len(RESULTS)} passed")
 server.should_exit = True

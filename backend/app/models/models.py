@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from enum import Enum as PyEnum
 from sqlalchemy import (
-    Column, String, DateTime, ForeignKey, Integer, JSON, Numeric, Text, Boolean, Enum, Index, text
+    Column, String, DateTime, Float, ForeignKey, Integer, JSON, Numeric, Text, Boolean, Enum, Index, text
 )
 from sqlalchemy.orm import relationship
 from app.core.database import Base
@@ -56,6 +56,12 @@ class Company(Base):
     code = Column(String(50), nullable=False, unique=True)
     status = Column(String(20), default="ACTIVE")
     created_at = Column(DateTime, default=datetime.utcnow)
+    # Contact details and office location pin, set by the Super Admin.
+    contact_email = Column(String(255), nullable=True)
+    contact_phone = Column(String(50), nullable=True)
+    address = Column(Text, nullable=True)
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
 
     users = relationship("User", back_populates="company", cascade="all, delete-orphan")
     subscription = relationship("Subscription", back_populates="company", uselist=False, cascade="all, delete-orphan")
@@ -204,6 +210,15 @@ class Asset(Base):
     vendor_id = Column(String, ForeignKey("vendors.id"), nullable=True)
     warranty_start = Column(DateTime, nullable=True)
     warranty_end = Column(DateTime, nullable=True)
+    # Optional annual maintenance contract (AMC) on the device.
+    amc_vendor_id = Column(String, ForeignKey("vendors.id"), nullable=True)
+    amc_start = Column(DateTime, nullable=True)
+    amc_end = Column(DateTime, nullable=True)
+    amc_cost = Column(Numeric(12, 2), nullable=True)
+    # Optional license that comes with the device, e.g. an OEM operating system key.
+    license_type = Column(String(30), nullable=True)
+    license_number = Column(String(255), nullable=True)
+    license_expiry = Column(DateTime, nullable=True)
     # Depreciation inputs and the last calculated book value.
     depreciation_method = Column(String(30), default="STRAIGHT_LINE", nullable=False, server_default="STRAIGHT_LINE")
     useful_life_years = Column(Integer, default=5, nullable=False, server_default="5")
@@ -268,6 +283,8 @@ class AssetRequest(Base):
     resolution_note = Column(Text, nullable=True)
     # SOFTWARE tickets: the product asked for, and the seat given on fulfilment.
     software_id = Column(String, ForeignKey("software.id"), nullable=True, index=True)
+    # Software asked for by name because it is not registered yet; the admin links it on fulfilment.
+    requested_software_name = Column(String(150), nullable=True)
     license_assignment_id = Column(String, ForeignKey("license_assignments.id"), nullable=True)
     # RETURN tickets: condition confirmed when the device is handed back.
     return_condition = Column(String(30), nullable=True)

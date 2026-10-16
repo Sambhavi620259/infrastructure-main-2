@@ -69,7 +69,7 @@ def _with_names(db: Session, requests: List[AssetRequest]) -> List[AssetRequestR
         response.department_name = departments.get(req.department_id)
         response.processed_by_name = users.get(req.processed_by)
         response.raised_by_name = users.get(req.raised_by)
-        response.software_name = software_names.get(req.software_id)
+        response.software_name = software_names.get(req.software_id) or req.requested_software_name
         if response.software_name and not response.category_name:
             response.category_name = "Software"
         asset = issue_assets.get(req.asset_id)
@@ -93,8 +93,11 @@ def create_asset_request(
     tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
 ):
     """
-    Submit a new asset requisition request.
+    Submit a new asset requisition request. Only users raise tickets; IT Admins
+    and other admins work and resolve them.
     """
+    if current_user.role != PlatformRole.EMPLOYEE:
+        raise HTTPException(status_code=403, detail="Tickets are raised by users. IT Admins resolve them.")
     company_id = tenant_company_id or current_user.company_id
     if not company_id:
         raise HTTPException(status_code=400, detail="Company context required.")
@@ -137,9 +140,12 @@ def create_asset_request(
         software = db.query(Software).filter(
             Software.id == request_in.software_id, Software.company_id == company_id, Software.status == "ACTIVE"
         ).first() if request_in.software_id else None
-        if not software:
-            raise HTTPException(status_code=400, detail="Choose the software you need.")
-        if db.query(SoftwareLicenseAssignment.id).filter(
+        requested_name = (request_in.requested_software_name or "").strip()
+        if request_in.software_id and not software:
+            raise HTTPException(status_code=400, detail="That software is not available.")
+        if not software and not requested_name:
+            raise HTTPException(status_code=400, detail="Choose the software you need, or type its name.")
+        if software and db.query(SoftwareLicenseAssignment.id).filter(
             SoftwareLicenseAssignment.software_id == software.id, SoftwareLicenseAssignment.user_id == requester.id,
             SoftwareLicenseAssignment.is_active.is_(True),
         ).first():
@@ -162,6 +168,10 @@ def create_asset_request(
         ticket_type=request_in.ticket_type,
         asset_id=issue_asset.id if issue_asset else None,
         software_id=software.id if software else None,
+        requested_software_name=(
+            (request_in.requested_software_name or "").strip() or None
+            if request_in.ticket_type == "SOFTWARE" and not software else None
+        ),
         asset_category_id=category_id,
         department_id=request_in.department_id or None,
         requested_for=request_in.requested_for or requester.full_name,
@@ -175,6 +185,8 @@ def create_asset_request(
             f"Problem reported with {issue_asset.label} by {requester.full_name}" if request_in.ticket_type == "ISSUE"
             else f"{requester.full_name} wants to return {issue_asset.label}" if request_in.ticket_type == "RETURN"
             else f"{requester.full_name} requested {software.name}" if software
+            else f"{requester.full_name} requested {new_request.requested_software_name} (not registered yet)"
+            if new_request.requested_software_name
             else f"New ticket from {requester.full_name}"
         ),
         message=new_request.reason[:200],
@@ -462,6 +474,20 @@ def update_asset_request_status(
 
     if new_status == RequestStatusEnum.FULFILLED and ticket_type == "SOFTWARE":
         # Re-check seat availability at fulfilment, under a lock (approval alone grants nothing).
+        if not asset_req.software_id:
+            # Asked for by name: the admin picks the registered software to give.
+            if not update_in.software_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Register {asset_req.requested_software_name or 'the software'} first, then choose it to assign a seat.",
+                )
+            chosen = db.query(Software).filter(
+                Software.id == update_in.software_id, Software.company_id == asset_req.company_id,
+                Software.status == "ACTIVE",
+            ).first()
+            if not chosen:
+                raise HTTPException(status_code=400, detail="That software is not available.")
+            asset_req.software_id = chosen.id
         software = db.query(Software).filter(Software.id == asset_req.software_id).first()
         requester = db.query(User).filter(User.id == asset_req.requested_by).first()
         if not software or not requester:

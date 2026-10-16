@@ -29,6 +29,7 @@ import { NewTicketForm } from "@/components/tickets/ticket-queue";
 import { listInventoryRequests } from "@/lib/inventory";
 import { mySoftware } from "@/lib/software";
 import { getProfile, type Profile } from "@/lib/profile";
+import { userPageOnPlan } from "@/lib/access";
 import { assetStatusLabel, type AssetCounts, type AssetEvent, assetLabel } from "@/types/asset";
 
 const QUICK_ACTIONS = [
@@ -68,15 +69,26 @@ export default function AgentDashboardPage() {
     // Each panel loads on its own so one failing request does not blank the page.
     const fail = (caught: unknown) =>
       setError(caught instanceof Error ? caught.message : "Some dashboard data could not be loaded.");
-    getProfile().then(setProfile).catch(fail);
-    getAssetCounts().then(setAssets).catch(fail);
-    mySoftware().then((seats) => setSoftwareCount(seats.length)).catch(fail);
-    getAssetRequestCounts().then(setTickets).catch(fail);
-    listInventoryRequests("PENDING")
-      .then((data) => setStockWaiting(data.length))
+    // Software and stock requests load only when the organization's plan includes them.
+    getProfile()
+      .then((data) => {
+        setProfile(data);
+        if (userPageOnPlan("/agent/software", data.planFeatures)) {
+          mySoftware().then((seats) => setSoftwareCount(seats.length)).catch(fail);
+        }
+        if (userPageOnPlan("/agent/inventory", data.planFeatures)) {
+          listInventoryRequests("PENDING")
+            .then((requests) => setStockWaiting(requests.length))
+            .catch(fail);
+        }
+      })
       .catch(fail);
+    getAssetCounts().then(setAssets).catch(fail);
+    getAssetRequestCounts().then(setTickets).catch(fail);
     listAssetEvents({ limit: 6 }).then(setEvents).catch(fail);
   }, []);
+
+  const onPlan = (href: string) => profile !== null && userPageOnPlan(href, profile.planFeatures);
 
   const refreshTicketCounts = useCallback(() => {
     getAssetRequestCounts().then(setTickets).catch(() => undefined);
@@ -86,7 +98,7 @@ export default function AgentDashboardPage() {
   const byStatus = assets?.by_status;
   const metrics: [string, number | undefined, string][] = [
     ["My assets", assets?.total, "text-slate-950"],
-    ["My software", softwareCount ?? undefined, "text-indigo-600"],
+    ...(onPlan("/agent/software") ? [["My software", softwareCount ?? undefined, "text-indigo-600"] as [string, number | undefined, string]] : []),
     ["Working", byStatus ? byStatus.ASSIGNED + byStatus.IN_USE : undefined, "text-emerald-600"],
     ["In repair", assets?.in_repair, "text-amber-600"],
     ["Damaged or lost", byStatus ? byStatus.DAMAGED + byStatus.LOST : undefined, "text-rose-600"],
@@ -139,13 +151,15 @@ export default function AgentDashboardPage() {
             <p className="text-[10px] text-slate-500">Approved, waiting for stock</p>
           </div>
         </Link>
-        <Link href="/agent/inventory" className="ui-surface flex items-center gap-3 p-4 transition hover:border-brand-200">
-          <ArchiveBoxIcon className="h-6 w-6 text-violet-500" aria-hidden="true" />
-          <div>
-            <p className="text-xl font-extrabold">{stockWaiting ?? "—"}</p>
-            <p className="text-[10px] text-slate-500">Stock requests waiting for approval</p>
-          </div>
-        </Link>
+        {onPlan("/agent/inventory") && (
+          <Link href="/agent/inventory" className="ui-surface flex items-center gap-3 p-4 transition hover:border-brand-200">
+            <ArchiveBoxIcon className="h-6 w-6 text-violet-500" aria-hidden="true" />
+            <div>
+              <p className="text-xl font-extrabold">{stockWaiting ?? "—"}</p>
+              <p className="text-[10px] text-slate-500">Stock requests waiting for approval</p>
+            </div>
+          </Link>
+        )}
       </section>
 
       <section className="grid gap-3 xl:grid-cols-[1.3fr_1fr]">
@@ -182,7 +196,7 @@ export default function AgentDashboardPage() {
       <section>
         <h2 className="mb-2 text-sm font-bold">Quick actions</h2>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {QUICK_ACTIONS.map(([href, title, text, Icon]) => (
+          {QUICK_ACTIONS.filter(([href]) => onPlan(href)).map(([href, title, text, Icon]) => (
             <Link key={href} href={href} className="ui-surface flex items-start gap-3 p-4 transition hover:border-brand-200">
               <Icon className="h-5 w-5 shrink-0 text-brand-600" aria-hidden="true" />
               <span>

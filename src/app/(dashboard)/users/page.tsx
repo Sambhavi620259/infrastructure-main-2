@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { PlusIcon } from "@heroicons/react/24/outline";
 import { apiFetch } from "@/lib/api";
 import {
   addToOrganization,
@@ -151,12 +150,6 @@ export default function UsersPage() {
             Everyone with access to this organization&rsquo;s workspace, plus new users waiting to be added.
           </p>
         </div>
-        <Link
-          href="/users/new"
-          className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-brand-700"
-        >
-          <PlusIcon className="h-4 w-4" /> Create user
-        </Link>
       </header>
 
       {error && (

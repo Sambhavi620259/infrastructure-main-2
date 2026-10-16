@@ -84,6 +84,8 @@ export interface AssetRequest {
   /** SOFTWARE tickets: the product asked for and the seat given. */
   software_id: string | null;
   software_name: string | null;
+  /** Software asked for by name because it was not registered yet. */
+  requested_software_name?: string | null;
   license_assignment_id: string | null;
   /** RETURN tickets: condition confirmed at handover. */
   return_condition: string | null;
@@ -95,8 +97,9 @@ export interface AssetRequestCreateInput {
   asset_category_id?: string;
   /** Required for ISSUE and RETURN tickets: an asset assigned to the requester. */
   asset_id?: string;
-  /** Required for SOFTWARE tickets. */
+  /** SOFTWARE tickets: the registered product, or requested_software_name when it is not listed. */
   software_id?: string;
+  requested_software_name?: string;
   reason: string;
   priority?: string;
   /** Raise the ticket for another user in the organization; they receive the asset on approval. */
@@ -203,8 +206,13 @@ export function resolveTicket(id: string, note: string): Promise<AssetRequest> {
 }
 
 /** Fulfil an approved software request: a seat is taken now (re-checked), from `licenseId` or any license with room. */
-export function fulfilSoftwareTicket(id: string, licenseId?: string): Promise<AssetRequest> {
-  return moveTicket(id, licenseId ? { status: "FULFILLED", license_id: licenseId } : { status: "FULFILLED" });
+export function fulfilSoftwareTicket(id: string, licenseId?: string, softwareId?: string): Promise<AssetRequest> {
+  // softwareId: for a request made by name, the registered software to give.
+  return moveTicket(id, {
+    status: "FULFILLED",
+    ...(licenseId ? { license_id: licenseId } : {}),
+    ...(softwareId ? { software_id: softwareId } : {}),
+  });
 }
 
 export const RETURN_CONDITIONS = ["EXCELLENT", "GOOD", "FAIR", "POOR", "DAMAGED"] as const;

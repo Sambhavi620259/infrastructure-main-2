@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { deleteAsset, getAsset, listAssetLifecycle, updateAsset } from "@/lib/assets";
 import { getProfile } from "@/lib/profile";
+import { listVendors } from "@/lib/procurement";
+import { licenseTypeLabel } from "@/lib/software";
 import { AssetForm, assetToForm, formToPayload, type AssetFormValues } from "@/components/assets/asset-form";
 import { AssetCare } from "@/components/assets/asset-care";
 import { AssetTickets } from "@/components/tickets/asset-tickets";
@@ -42,6 +44,16 @@ export default function AssetDetailPage() {
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [removeError, setRemoveError] = useState("");
+  const [amcVendor, setAmcVendor] = useState("");
+
+  // Vendors are admin data; users simply see no AMC vendor name.
+  const amcVendorId = asset?.amc_vendor_id ?? "";
+  useEffect(() => {
+    if (!amcVendorId) return setAmcVendor("");
+    listVendors()
+      .then((vendors) => setAmcVendor(vendors.find((v) => v.id === amcVendorId)?.name ?? ""))
+      .catch(() => setAmcVendor(""));
+  }, [amcVendorId]);
   const [removedElsewhere, setRemovedElsewhere] = useState(false);
 
   const removeAsset = async () => {
@@ -161,6 +173,12 @@ export default function AssetDetailPage() {
     ["Purchase cost", Number(asset.purchase_price) ? Number(asset.purchase_price).toLocaleString() : "—"],
     ["Warranty starts", formatDate(asset.warranty_start)],
     ["Warranty expires", formatDate(asset.warranty_end)],
+    ["License", asset.license_type ? licenseTypeLabel(asset.license_type) : "—"],
+    ["License number", asset.license_number ?? "—"],
+    ["License expiry", formatDate(asset.license_expiry ?? null)],
+    ["AMC vendor", amcVendor || "—"],
+    ["AMC period", asset.amc_start || asset.amc_end ? `${formatDate(asset.amc_start ?? null)} – ${formatDate(asset.amc_end ?? null)}` : "—"],
+    ["AMC cost", Number(asset.amc_cost) ? Number(asset.amc_cost).toLocaleString() : "—"],
     ["Registered", formatDate(asset.created_at)],
   ];
 

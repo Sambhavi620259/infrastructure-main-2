@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { createUser, listUsers } from "@/lib/users";
+import { createUser, listUsers, reactivateUser, removeUser } from "@/lib/users";
 import { listCompanies, type Company } from "@/lib/super-admin";
 import { SUB_ADMIN_MODULES, initialsOf, moduleLabel, roleBadgeClass, roleLabel, statusBadgeClass, type AppUser } from "@/types/user";
 
@@ -24,6 +24,26 @@ export default function TeamWorkPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [adding, setAdding] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState("");
+  const [busyId, setBusyId] = useState("");
+
+  // Removing deactivates the account: it can no longer sign in, its history is kept, and it can be reactivated.
+  const setStatus = async (person: AppUser, active: boolean) => {
+    setBusyId(person.id);
+    setError("");
+    setNotice("");
+    try {
+      if (active) await reactivateUser(person.id);
+      else await removeUser(person.id);
+      setUsers((current) => current.map((u) => (u.id === person.id ? { ...u, status: active ? "ACTIVE" : "INACTIVE" } : u)));
+      setNotice(active ? `${person.full_name} can sign in again.` : `${person.full_name} has been removed and can no longer sign in.`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not change this account.");
+    } finally {
+      setBusyId("");
+      setConfirmRemove("");
+    }
+  };
 
   useEffect(() => {
     Promise.all([listUsers({ limit: 2000 }), listCompanies()])
@@ -59,7 +79,7 @@ export default function TeamWorkPage() {
         <h1 className="mt-1 text-2xl font-extrabold tracking-tight text-slate-950">Team work</h1>
         <p className="mt-1 text-sm text-slate-500">
           Review what IT Admins and users have done in every company: tickets raised and handled, assets assigned, stock and
-          reports.
+          reports. Add or remove IT Admins and users; a removed account can no longer sign in and can be reactivated.
         </p>
           </div>
           <button
@@ -172,10 +192,41 @@ export default function TeamWorkPage() {
                   <td className="px-4 py-3">
                     <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${statusBadgeClass(u.status)}`}>{u.status}</span>
                   </td>
-                  <td className="px-4 py-3 text-right">
-                    <Link href={`/super-admin/work/${u.id}`} className="text-sm font-semibold text-brand-600 hover:text-brand-700">
-                      View work
-                    </Link>
+                  <td className="whitespace-nowrap px-4 py-3 text-right">
+                    <span className="inline-flex items-center gap-4">
+                      <Link href={`/super-admin/work/${u.id}`} className="text-sm font-semibold text-brand-600 hover:text-brand-700">
+                        View work
+                      </Link>
+                      {u.status !== "ACTIVE" ? (
+                        <button
+                          type="button"
+                          disabled={busyId === u.id}
+                          onClick={() => setStatus(u, true)}
+                          className="text-sm font-semibold text-brand-600 hover:text-brand-700 disabled:opacity-50"
+                        >
+                          Reactivate
+                        </button>
+                      ) : confirmRemove === u.id ? (
+                        <span className="inline-flex items-center gap-3">
+                          <span className="text-xs text-slate-500">Remove {roleLabel(u.role)}?</span>
+                          <button
+                            type="button"
+                            disabled={busyId === u.id}
+                            onClick={() => setStatus(u, false)}
+                            className="text-sm font-semibold text-red-600 hover:text-red-700 disabled:opacity-50"
+                          >
+                            Yes, remove
+                          </button>
+                          <button type="button" onClick={() => setConfirmRemove("")} className="text-sm font-semibold text-slate-600">
+                            Cancel
+                          </button>
+                        </span>
+                      ) : (
+                        <button type="button" onClick={() => setConfirmRemove(u.id)} className="text-sm font-semibold text-red-600 hover:text-red-700">
+                          Remove
+                        </button>
+                      )}
+                    </span>
                   </td>
                 </tr>
               ))}

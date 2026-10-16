@@ -15,7 +15,7 @@ import {
   type AssetRequestCounts,
 } from "@/lib/tickets";
 import { listAssets } from "@/lib/assets";
-import { listDepartments, listUserDirectory, type DirectoryEntry } from "@/lib/users";
+import { listDepartments, type DirectoryEntry } from "@/lib/users";
 import type { Asset } from "@/types/asset";
 import type { Department } from "@/types/user";
 import { CategoryPicker, resolveCategoryId } from "@/components/tickets/category-picker";
@@ -57,21 +57,17 @@ function timeAgo(value: string): string {
 export function TicketQueue({
   eyebrow,
   title = "Ticket Queue",
-  initialMine = false,
   canHandle = true,
 }: {
   eyebrow: string;
   title?: string;
-  initialMine?: boolean;
   /** False in the user workspace: users see their own tickets and can only cancel them. */
   canHandle?: boolean;
 }) {
-  const [tab, setTab] = useState<string>(initialMine || !canHandle ? "" : "PENDING");
-  const [mine, setMine] = useState(initialMine);
+  const [tab, setTab] = useState<string>(!canHandle ? "" : "PENDING");
   const [tickets, setTickets] = useState<AssetRequest[]>([]);
   const [counts, setCounts] = useState<AssetRequestCounts | null>(null);
   const [categories, setCategories] = useState<AssetCategory[]>([]);
-  const [users, setUsers] = useState<DirectoryEntry[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [stock, setStock] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
@@ -83,7 +79,6 @@ export function TicketQueue({
   useEffect(() => {
     listAssetCategories().then(setCategories).catch(() => undefined);
     // Only admins raise tickets on someone else's behalf.
-    if (canHandle) listUserDirectory().then(setUsers).catch(() => undefined);
     listDepartments().then(setDepartments).catch(() => undefined);
   }, [canHandle]);
 
@@ -91,7 +86,7 @@ export function TicketQueue({
     let cancelled = false;
     setLoading(true);
     Promise.all([
-      listAssetRequests({ status: tab || undefined, mine, limit: 200 }),
+      listAssetRequests({ status: tab || undefined, limit: 200 }),
       getAssetRequestCounts(),
       canHandle ? listAssets({ status: "IN_STOCK", limit: 200 }) : Promise.resolve([]),
     ])
@@ -111,7 +106,7 @@ export function TicketQueue({
     return () => {
       cancelled = true;
     };
-  }, [tab, mine, refreshKey, canHandle]);
+  }, [tab, refreshKey, canHandle]);
 
   const done = useCallback((message: string) => {
     setNotice(message);
@@ -131,14 +126,17 @@ export function TicketQueue({
               : "Request a new asset or report a problem with one of yours. Your IT Admin handles each ticket; you are notified at every step."}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => setFormOpen(true)}
-          disabled={formOpen}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-xs font-bold text-white hover:bg-brand-700 disabled:opacity-60"
-        >
-          <PlusIcon className="h-4 w-4" /> New ticket
-        </button>
+        {/* Users raise tickets; IT Admins only work and resolve them. */}
+        {!canHandle && (
+          <button
+            type="button"
+            onClick={() => setFormOpen(true)}
+            disabled={formOpen}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-xs font-bold text-white hover:bg-brand-700 disabled:opacity-60"
+          >
+            <PlusIcon className="h-4 w-4" /> New ticket
+          </button>
+        )}
       </header>
 
       {error && (
@@ -155,13 +153,13 @@ export function TicketQueue({
         </div>
       )}
 
-      {formOpen && (
+      {formOpen && !canHandle && (
         <NewTicketForm
           categories={categories}
           onCategoryCreated={(category) => setCategories((current) => [...current, category])}
           departments={departments}
-          users={users}
-          forOthers={canHandle}
+          users={[]}
+          forOthers={false}
           onCancel={() => setFormOpen(false)}
           onCreated={(ticket) => {
             setFormOpen(false);
@@ -170,13 +168,12 @@ export function TicketQueue({
         />
       )}
 
-      <section className={`grid grid-cols-2 gap-3 ${canHandle ? "lg:grid-cols-5" : "lg:grid-cols-4"}`}>
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {[
           ["Pending", counts?.pending, "text-amber-600"],
           ["In progress", counts?.in_progress, "text-blue-600"],
           ["Awaiting stock", counts?.approved, "text-violet-600"],
           ["Fulfilled", counts?.fulfilled, "text-emerald-600"],
-          ...(canHandle ? [["Raised by me (open)", counts?.my_open, "text-slate-900"]] : []),
         ].map(([label, value, color]) => (
           <div key={String(label)} className="ui-surface p-4">
             <p className="text-[10px] text-slate-500">{label}</p>
@@ -203,12 +200,6 @@ export function TicketQueue({
               </button>
             ))}
           </div>
-          {canHandle && (
-            <label className="flex items-center gap-2 text-xs text-slate-600">
-              <input type="checkbox" checked={mine} onChange={(event) => setMine(event.target.checked)} />
-              Only tickets raised by me
-            </label>
-          )}
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[900px] text-left text-xs">
@@ -317,6 +308,9 @@ export function NewTicketForm({
   const [myAssets, setMyAssets] = useState<Asset[]>([]);
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
   const [softwareId, setSoftwareId] = useState("");
+  // Software that is not registered yet is requested by name.
+  const [softwareName, setSoftwareName] = useState("");
+  const [catalogLoaded, setCatalogLoaded] = useState(false);
   const [selfId, setSelfId] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [categoryDraft, setCategoryDraft] = useState<string | null>(null);
@@ -343,20 +337,29 @@ export function NewTicketForm({
   }, [ticketType, forOthers, userId, selfId]);
 
   useEffect(() => {
-    if (ticketType === "SOFTWARE" && catalog.length === 0) softwareCatalog().then(setCatalog).catch(() => undefined);
-  }, [ticketType, catalog.length]);
+    if (ticketType !== "SOFTWARE" || catalogLoaded) return;
+    softwareCatalog()
+      .then(setCatalog)
+      .catch(() => undefined)
+      .finally(() => setCatalogLoaded(true));
+  }, [ticketType, catalogLoaded]);
+
+  // With nothing registered, or "Not in the list" chosen, the user types the name.
+  const typingSoftware = softwareId === "OTHER" || (catalogLoaded && catalog.length === 0);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (ticketType === "SOFTWARE") {
-      if (!softwareId) return setError("Choose the software you need.");
+      if (typingSoftware ? !softwareName.trim() : !softwareId) {
+        return setError(typingSoftware ? "Type the name of the software you need." : "Choose the software you need.");
+      }
       if (!reason.trim()) return setError("Say what you need it for.");
       setBusy(true);
       try {
         onCreated(
           await createAssetRequest({
             ticket_type: "SOFTWARE",
-            software_id: softwareId,
+            ...(typingSoftware ? { requested_software_name: softwareName.trim() } : { software_id: softwareId }),
             department_id: departmentId || undefined,
             reason: reason.trim(),
             requested_for_user_id: userId || undefined,
@@ -444,18 +447,36 @@ export function NewTicketForm({
       {/* Without the "For user" picker (users), the reason gets a full row. */}
       <div className={`grid gap-3 sm:grid-cols-2 ${forOthers ? "lg:grid-cols-4" : ""}`}>
         {ticketType === "SOFTWARE" ? (
-          <label className="block text-[11px] font-semibold text-slate-600">
-            Software
-            <select value={softwareId} onChange={(event) => setSoftwareId(event.target.value)} className={inputClass}>
-              <option value="">{catalog.length ? "Choose the software…" : "No software registered yet"}</option>
-              {catalog.map((product) => (
-                <option key={product.id} value={product.id}>
-                  {product.name}
-                  {product.version ? ` ${product.version}` : ""}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="space-y-2">
+            {catalog.length > 0 && (
+              <label className="block text-[11px] font-semibold text-slate-600">
+                Software
+                <select value={softwareId} onChange={(event) => setSoftwareId(event.target.value)} className={inputClass}>
+                  <option value="">Choose the software…</option>
+                  {catalog.map((product) => (
+                    <option key={product.id} value={product.id}>
+                      {product.name}
+                      {product.version ? ` ${product.version}` : ""}
+                    </option>
+                  ))}
+                  <option value="OTHER">Not in the list: type its name</option>
+                </select>
+              </label>
+            )}
+            {typingSoftware && (
+              <label className="block text-[11px] font-semibold text-slate-600">
+                {catalog.length > 0 ? "Software name" : "Software"}
+                <input
+                  value={softwareName}
+                  onChange={(event) => setSoftwareName(event.target.value)}
+                  maxLength={150}
+                  placeholder="e.g. Adobe Photoshop"
+                  className={inputClass}
+                />
+                <span className="mt-1 block font-normal text-slate-400">Your IT Admin registers it and assigns you a seat.</span>
+              </label>
+            )}
+          </div>
         ) : ticketType === "ISSUE" ? (
           <label className="block text-[11px] font-semibold text-slate-600">
             Asset
