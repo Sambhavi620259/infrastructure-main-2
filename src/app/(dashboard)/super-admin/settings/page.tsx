@@ -127,7 +127,7 @@ export default function PlatformSettingsPage() {
 
         <SuperKeyForm
           onChanged={() => {
-            setNotice("Super Admin key changed. Share the new key only with people who should become Super Admins.");
+            setNotice("Super Admin key changed. You will need the new key the next time you sign in.");
             setError("");
           }}
           onError={setError}
@@ -167,7 +167,7 @@ function SuperKeyForm({ onChanged, onError }: { onChanged: () => void; onError: 
     <form onSubmit={submit} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
       <h2 className="text-sm font-bold text-slate-900">Super Admin key</h2>
       <p className="mt-1 text-xs text-slate-500">
-        Required to register as a Super Admin. Changing it does not affect existing Super Admins.
+        Entered, with your password, every time you sign in as Super Admin. Changing it takes effect at your next sign-in.
       </p>
       <div className="mt-4 space-y-3">
         <label className="block text-xs font-semibold text-slate-700">

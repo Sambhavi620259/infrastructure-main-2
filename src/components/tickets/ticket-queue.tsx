@@ -45,8 +45,11 @@ import { formatDate } from "@/types/asset";
 const PAGE_SIZE = 25;
 
 // Quick views over the status filter.
+// Every ticket not yet resolved, including those waiting for stock, a license or the user.
+const OPEN = "PENDING,UNDER_REVIEW,PENDING_APPROVAL,APPROVED,IN_PROGRESS,WAITING_INVENTORY,WAITING_LICENSE,WAITING_USER";
 const VIEWS: [string, string][] = [
   ["PENDING,UNDER_REVIEW,PENDING_APPROVAL,APPROVED,IN_PROGRESS", "Needs action"],
+  [OPEN, "All open"],
   ["PENDING", "Submitted"],
   ["PENDING_APPROVAL", "Awaiting approval"],
   ["WAITING_INVENTORY,WAITING_LICENSE", "Awaiting stock / license"],
@@ -244,7 +247,7 @@ export function TicketQueue({
       {canHandle && counts && counts.high_priority > 0 && (
         <button
           type="button"
-          onClick={() => set({ priority: "HIGH,CRITICAL", status: VIEWS[0][0] })}
+          onClick={() => set({ priority: "HIGH,CRITICAL", status: OPEN })}
           className="w-full rounded-lg border border-rose-200 bg-rose-50 px-4 py-2 text-left text-xs font-semibold text-rose-800"
         >
           {counts.high_priority} open high-priority ticket{counts.high_priority === 1 ? "" : "s"}: show them

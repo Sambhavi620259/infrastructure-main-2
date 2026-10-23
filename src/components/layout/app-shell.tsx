@@ -67,6 +67,7 @@ const itMenu: readonly MenuEntry[] = [
     kind: "group", label: "Inventory", icon: CubeIcon, children: [
       { label: "Hardware Stock", href: routes.inventoryHardware, icon: CubeTransparentIcon, section: "inventory" },
       { label: "Software Licenses", href: routes.inventorySoftware, icon: KeyIcon, section: "software" },
+      { label: "Consumables", href: routes.inventoryStock, icon: FolderIcon, section: "inventory" },
       { label: "Vendors", href: routes.inventoryVendors, icon: BuildingOffice2Icon, section: "inventory" },
     ],
   },

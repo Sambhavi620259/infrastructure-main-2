@@ -274,6 +274,25 @@ check("reporting user cannot remove assets", code == 403, data)
 code, data = call("agentA", "POST", "/users", {"email": "y@example.com", "full_name": "Y", "password": "password123"})
 check("user cannot create users", code == 403, data)
 
+# --- Reports belong to whoever generated them -------------------------------
+print("Report ownership")
+code, mine = call("agentA", "POST", "/reports/runs", {"report_type": "my_assets"})
+code, other = call("adminA", "POST", "/reports/runs", {"report_type": "asset_inventory"})
+code, other2 = call("hamA", "POST", "/reports/runs", {"report_type": "asset_inventory"})
+code, listing = call("adminA", "GET", "/reports/runs?limit=100")
+check("an IT Admin's recent reports hold only their own runs",
+      code == 200 and listing and {r["generated_by"] for r in listing} == {IDS["adminA"]}, listing)
+code, data = call("adminA", "GET", f"/reports/runs/{mine['id']}/download")
+check("an IT Admin cannot download a user's personal report", code == 404, data)
+code, data = call("adminA", "GET", f"/reports/runs/{other2['id']}/download")
+check("an IT Admin cannot download another admin's report", code == 404, data)
+code, data = call("adminA", "DELETE", f"/reports/runs/{mine['id']}")
+check("an IT Admin cannot delete a user's report", code == 404, data)
+code, data = call("adminA", "DELETE", f"/reports/runs/{other['id']}")
+check("an IT Admin can remove their own report", code == 204, data)
+code, data = call("hamA", "GET", "/reports/summary")
+check("the summary counts only the caller's own reports", code == 200 and data["generated_this_month"] >= 1, data)
+
 # --- Work review: admins see users' work, not other admins' -----------------
 code, data = call("adminA", "GET", f"/users/{IDS['agentA']}/activity")
 check("an IT Admin reviews a user's work", code == 200, data)

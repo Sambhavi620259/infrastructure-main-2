@@ -135,7 +135,7 @@ def register(
                 if not verify_super_key(db, key):
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Incorrect Super Admin key. Ask an existing Super Admin for it."
+                        detail="Incorrect Super Admin key."
                     )
             else:
                 # No key yet: this Super Admin creates it.

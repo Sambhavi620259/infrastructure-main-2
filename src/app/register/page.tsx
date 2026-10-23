@@ -144,7 +144,7 @@ export default function RegisterPage() {
               value={registrationKey}
               onChange={(event) => setRegistrationKey(event.target.value)}
               autoComplete="off"
-              placeholder={creatingSuperKey ? "At least 8 characters" : "Key from an existing Super Admin"}
+              placeholder={creatingSuperKey ? "At least 8 characters" : "Your Super Admin key"}
             />
             {creatingSuperKey && (
               <>
@@ -157,7 +157,7 @@ export default function RegisterPage() {
                   autoComplete="off"
                 />
                 <p className="text-xs text-slate-500">
-                  Keep this key safe. Anyone who registers as a Super Admin later must enter it, and it cannot be shown
+                  Keep this key safe. You will enter it every time you sign in as Super Admin, and it cannot be shown
                   again.
                 </p>
               </>

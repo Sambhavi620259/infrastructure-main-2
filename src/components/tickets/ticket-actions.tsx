@@ -51,7 +51,7 @@ const TYPE_CHIP: Record<string, [string, string]> = {
 /** "Asset request", "Problem", "Software" or "Return" chip. */
 export function TicketTypeChip({ ticketType }: { ticketType: string }) {
   const [text, style] = TYPE_CHIP[ticketType] ?? TYPE_CHIP.REQUEST;
-  return <span className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-bold ${style}`}>{text}</span>;
+  return <span className={`inline-flex shrink-0 whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-bold ${style}`}>{text}</span>;
 }
 
 // Submitted -> Under review -> (Pending approval) -> Approved -> In progress -> Resolved -> Closed.

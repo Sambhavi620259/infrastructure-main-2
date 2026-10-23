@@ -37,7 +37,9 @@ def _company(current_user: User, tenant_company_id: Optional[str]) -> str:
 
 
 def _own_only(user: User) -> bool:
-    return user.role == PlatformRole.EMPLOYEE
+    """Everyone sees only the reports they generated or saved themselves; an admin's list never
+    shows other admins' work or users' personal exports."""
+    return user.role != PlatformRole.SUPER_ADMIN
 
 
 def _check_type(report_type: str, user: User) -> None:
