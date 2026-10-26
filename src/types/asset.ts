@@ -22,6 +22,8 @@ export type AssetStatus = (typeof ASSET_STATUSES)[number];
 export interface Asset {
   id: string;
   company_id: string;
+  /** The system's own unique Asset ID (AST-000001); the asset number below may repeat. */
+  asset_code: string;
   /** Optional: null when the asset has no tag (see assetLabel). */
   asset_tag: string | null;
   /** Optional: null when no serial number was recorded. */
@@ -60,6 +62,8 @@ export interface Asset {
   assigned_to_id: string | null;
   assigned_to_name: string | null;
   assigned_to_email: string | null;
+  assigned_by_name?: string | null;
+  assigned_at?: string | null;
 }
 
 /** Mirrors AssetLifecycleResponse. */
@@ -154,6 +158,8 @@ export function formatDate(value: string | null): string {
 }
 
 /** How to name an asset in the UI: its tag, or its serial number when it has none. */
-export function assetLabel(asset: { asset_tag: string | null; serial_number?: string | null }): string {
-  return asset.asset_tag || (asset.serial_number ? `S/N ${asset.serial_number}` : "No tag or serial");
+export function assetLabel(asset: { asset_tag: string | null; serial_number?: string | null; asset_code?: string }): string {
+  const name = asset.asset_tag || (asset.serial_number ? `S/N ${asset.serial_number}` : "No tag or serial");
+  // Several devices may share an asset number, so name the Asset ID too.
+  return asset.asset_code ? `${name} (${asset.asset_code})` : name;
 }

@@ -91,8 +91,8 @@ export function NewAsset({ kind }: { kind: "hardware" | "software" }) {
           Registering a device from receipt on <strong>{receipt.po_number}</strong>:{" "}
           {receipt.quantity} × {[receipt.brand, receipt.model].filter(Boolean).join(" ") || receipt.category} ·{" "}
           <strong>{left}</strong> still to register.{" "}
-          <Link href="/inventory/hardware" className="font-semibold underline">
-            Back to Hardware Stock
+          <Link href="/assets/hardware" className="font-semibold underline">
+            Back to Hardware Assets
           </Link>
         </div>
       )}
@@ -111,7 +111,7 @@ export function NewAsset({ kind }: { kind: "hardware" | "software" }) {
         busy={submitting}
         submitLabel={kind === "software" ? "Add software" : "Add hardware asset"}
         onSubmit={submit}
-        onCancel={() => router.push(receipt ? "/inventory/hardware" : kind === "software" ? "/assets/software" : "/assets/hardware")}
+        onCancel={() => router.push(receipt ? "/assets/hardware" : kind === "software" ? "/assets/software" : "/assets/hardware")}
         receipt={receipt}
       />
     </main>

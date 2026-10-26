@@ -20,6 +20,7 @@ from app.schemas.schemas import (
     AssetCategoryCreate, AssetCategoryResponse, AssetLifecycleResponse,
     AssetCountsResponse, AssetEventResponse
 )
+from app.services.asset_code_service import next_asset_code
 from app.services.audit_service import log_audit_event
 from app.services.usage_alerts import check_usage_limits
 from app.services.notification_service import home_link, notify
@@ -307,13 +308,11 @@ def create_asset(
 
     _check_references(db, company_id, asset_in.model_dump())
 
-    # Serial numbers and tags are optional; when given they are unique per organization.
+    # Serial numbers are optional; when given they are unique per organization. Asset numbers may repeat:
+    # every device gets its own Asset ID.
     if asset_in.serial_number and db.query(Asset.id).filter(Asset.company_id == company_id,
                                                             Asset.serial_number == asset_in.serial_number).first():
         raise HTTPException(status_code=400, detail="An asset with this serial number already exists.")
-    if asset_in.asset_tag and db.query(Asset.id).filter(Asset.company_id == company_id,
-                                                        Asset.asset_tag == asset_in.asset_tag).first():
-        raise HTTPException(status_code=400, detail="An asset with this asset tag already exists.")
 
     # Registering a device from a stock receipt: the receipt must have units left.
     receipt = None
@@ -330,6 +329,7 @@ def create_asset(
     po = db.query(PurchaseOrder).filter(PurchaseOrder.id == receipt.purchase_order_id).first() if receipt else None
     asset = Asset(
         company_id=company_id,
+        asset_code=next_asset_code(db, company_id),
         asset_tag=asset_in.asset_tag,
         serial_number=asset_in.serial_number,
         name=asset_in.name,
@@ -433,6 +433,7 @@ def list_assets(
         query = query.filter(
             (Asset.name.ilike(search_fmt)) |
             (Asset.asset_tag.ilike(search_fmt)) |
+            (Asset.asset_code.ilike(search_fmt)) |
             (Asset.serial_number.ilike(search_fmt))
         )
 
@@ -549,7 +550,14 @@ def get_asset(
     asset = query.first()
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found.")
-    return _for_viewer(_with_assignee(asset, _active_assignees(db, [asset.id]).get(asset.id)), current_user)
+    response = _with_assignee(asset, _active_assignees(db, [asset.id]).get(asset.id))
+    if response.assigned_to_id:
+        handed = db.query(AssetAssignment.assigned_at, User.full_name).outerjoin(
+            User, User.id == AssetAssignment.assigned_by
+        ).filter(AssetAssignment.asset_id == asset.id, AssetAssignment.is_active.is_(True)).first()
+        if handed:
+            response.assigned_at, response.assigned_by_name = handed
+    return _for_viewer(response, current_user)
 
 
 @router.put("/{asset_id}", response_model=AssetResponse)
@@ -602,10 +610,6 @@ def update_asset(
             raise HTTPException(status_code=400, detail="An asset with this serial number already exists.")
     if "category" in update_data and not (update_data["category"] or "").strip():
         update_data["category"] = "Uncategorised"
-    if "asset_tag" in update_data and update_data["asset_tag"] and db.query(Asset.id).filter(
-        Asset.company_id == asset.company_id, Asset.asset_tag == update_data["asset_tag"], Asset.id != asset.id
-    ).first():
-        raise HTTPException(status_code=400, detail="An asset with this asset tag already exists.")
     status_changed = asset_in.status is not None and asset_in.status.value != old_status
 
     # A status such as In stock or Retired takes the asset back from its holder,
@@ -722,6 +726,7 @@ def assign_asset_to_user(
         company_id=asset.company_id,
         asset_id=asset.id,
         user_id=target_user.id,
+        assigned_by=current_user.id,
         is_active=True
     )
     db.add(new_assignment)

@@ -64,8 +64,8 @@ def run_warranty_alerts(db: Session) -> int:
         for admin in admins:
             if already_notified(db, admin.id, title):
                 continue
-            notify(db, admin, title, f"{(item.expiry_date - now).days} day(s) left. Renew it under Software Licenses.",
-                   "/inventory/software", "WARNING")
+            notify(db, admin, title, f"{(item.expiry_date - now).days} day(s) left. Renew it under Software Assets.",
+                   "/assets/software", "WARNING")
             created += 1
     # Access grants past their end date are ended (and the user told).
     created += expire_access_grants(db)

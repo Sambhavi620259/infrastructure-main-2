@@ -244,15 +244,6 @@ export function TicketQueue({
           </button>
         ))}
       </section>
-      {canHandle && counts && counts.high_priority > 0 && (
-        <button
-          type="button"
-          onClick={() => set({ priority: "HIGH,CRITICAL", status: OPEN })}
-          className="w-full rounded-lg border border-rose-200 bg-rose-50 px-4 py-2 text-left text-xs font-semibold text-rose-800"
-        >
-          {counts.high_priority} open high-priority ticket{counts.high_priority === 1 ? "" : "s"}: show them
-        </button>
-      )}
 
       <section className="ui-surface overflow-hidden">
         <div className="space-y-3 border-b border-slate-100 px-4 py-3">

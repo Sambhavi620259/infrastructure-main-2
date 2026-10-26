@@ -4,7 +4,8 @@ import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import { createAssetCategory, listAssetCategories, type AssetCategory } from "@/lib/tickets";
-import { LocationMap } from "@/components/maps/location-map";
+import { ContactCard } from "@/components/settings/contact-card";
+import { getProfile } from "@/lib/profile";
 
 const FEATURE_LABEL: Record<string, string> = {
   INVENTORY: "Inventory & vendors",
@@ -67,6 +68,8 @@ function UsageBar({ used, limit }: { used: number; limit: number | null }) {
 
 export default function SettingsPage() {
   const [org, setOrg] = useState<Organization | null>(null);
+  // Only the Super Admin edits the company's contact details and office location.
+  const [isSuper, setIsSuper] = useState(false);
   const [name, setName] = useState("");
   const [categories, setCategories] = useState<AssetCategory[]>([]);
   const [newCategory, setNewCategory] = useState("");
@@ -81,6 +84,9 @@ export default function SettingsPage() {
         setName(data.name);
       })
       .catch((caught) => setError(caught instanceof Error ? caught.message : "Unable to load organization settings."));
+    getProfile()
+      .then((profile) => setIsSuper(profile.role === "SUPER_ADMIN"))
+      .catch(() => undefined);
     listAssetCategories()
       .then(setCategories)
       .catch(() => undefined);
@@ -208,33 +214,18 @@ export default function SettingsPage() {
         </article>
       </section>
 
-      <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="font-semibold text-slate-900">Contact details &amp; location</h2>
-        <p className="mt-1 text-sm text-slate-500">Set by the platform Super Admin. Ask them to update anything that has changed.</p>
-        <div className="mt-5 grid gap-6 lg:grid-cols-2">
-          <dl className="grid gap-4 text-sm sm:grid-cols-2">
-            <div>
-              <dt className="font-medium text-slate-700">Contact email</dt>
-              <dd className="mt-1 text-slate-600">{org?.contact_email ?? "Not set"}</dd>
-            </div>
-            <div>
-              <dt className="font-medium text-slate-700">Contact phone</dt>
-              <dd className="mt-1 text-slate-600">{org?.contact_phone ?? "Not set"}</dd>
-            </div>
-            <div className="sm:col-span-2">
-              <dt className="font-medium text-slate-700">Office address</dt>
-              <dd className="mt-1 whitespace-pre-line text-slate-600">{org?.address ?? "Not set"}</dd>
-            </div>
-          </dl>
-          {org && org.latitude !== null && org.longitude !== null ? (
-            <LocationMap latitude={org.latitude} longitude={org.longitude} label={org.name} />
-          ) : (
-            <div className="grid h-48 place-items-center rounded-lg border border-dashed border-slate-200 text-xs text-slate-400">
-              No office location pin yet.
-            </div>
-          )}
-        </div>
-      </section>
+      {org && (
+        <ContactCard
+          org={org}
+          canEdit={isSuper}
+          onSaved={(updated) => {
+            setOrg((current) => (current ? { ...current, ...updated } : current));
+            setNotice("Company contact details saved.");
+            setError("");
+          }}
+          onError={setError}
+        />
+      )}
 
       <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="flex items-center justify-between border-b border-slate-100 px-6 py-5">

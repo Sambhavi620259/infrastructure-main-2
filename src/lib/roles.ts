@@ -183,6 +183,7 @@ export function defaultRouteForRole(role: Role) {
 export function canAccessPath(role: Role, pathname: string) {
   if (pathname === "/profile") return true;
   const workspace = workspaceForRole(role);
+  // The Super Admin has only his own pages; the IT Admin's and the users' areas are not his.
   if (workspace === "super") return pathname === "/super-admin" || pathname.startsWith("/super-admin/");
   if (workspace === "agent") return pathname === "/agent/dashboard" || pathname.startsWith("/agent/");
   return !pathname.startsWith("/super-admin") && !pathname.startsWith("/agent/");

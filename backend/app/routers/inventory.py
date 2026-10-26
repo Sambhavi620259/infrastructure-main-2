@@ -114,6 +114,9 @@ class MovementResponse(BaseModel):
 
 
 _admins = require_roles([PlatformRole.SUPER_ADMIN, PlatformRole.IT_ADMIN, PlatformRole.SUB_ADMIN])
+# Inventory is an IT Admin area: the IT team reads it, users do not use it at all.
+_staff = require_roles([PlatformRole.SUPER_ADMIN, PlatformRole.IT_ADMIN, PlatformRole.SUB_ADMIN,
+                        PlatformRole.REPORTING_USER])
 
 
 class InventoryRequestCreate(BaseModel):
@@ -306,7 +309,7 @@ def list_inventory_items(
     limit: int = 100,
     category: Optional[str] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_staff),
     tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
 ):
     """
@@ -329,7 +332,7 @@ def list_inventory_items(
 @router.get("/counts")
 def get_inventory_counts(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_staff),
     tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
 ):
     """
@@ -452,7 +455,7 @@ def receive_stock(
         db, company_id, [PlatformRole.IT_ADMIN, PlatformRole.SUB_ADMIN],
         title=f"{receipt.quantity} × {receipt.model or receipt.category} received on {po.po_number}",
         message="Register each device as an asset to make it available.",
-        admin_link="/inventory/hardware", exclude_user_id=current_user.id,
+        admin_link="/assets/hardware", exclude_user_id=current_user.id,
     )
     db.commit()
     db.refresh(receipt)
@@ -564,7 +567,7 @@ def list_inventory_requests(
     status_filter: Optional[str] = Query(None, alias="status"),
     limit: int = Query(200, ge=1, le=500),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_staff),
     tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
 ):
     """Stock requests, newest first. Admins see the organization's; users see their own."""
@@ -582,7 +585,7 @@ def list_inventory_requests(
 def create_inventory_request(
     request_in: InventoryRequestCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_staff),
     tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
 ):
     """A user asks for stock of an item; the IT Admin approves (issuing it) or rejects."""
@@ -621,7 +624,7 @@ def decide_inventory_request(
     request_id: str,
     decision: InventoryRequestDecision,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_staff),
     tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
 ):
     """
@@ -700,7 +703,7 @@ def decide_inventory_request(
 def get_inventory_item(
     item_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(_staff),
     tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
 ):
     """

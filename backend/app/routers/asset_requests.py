@@ -314,6 +314,9 @@ def create_asset_request(
     ).first():
         raise HTTPException(status_code=400, detail="Unknown department.")
 
+    # One ticket at a time per person: lock the requester's row so two submissions arriving together
+    # (two tabs, a quick double press) run one after the other and the second sees the first.
+    db.query(User.id).filter(User.id == requester.id).with_for_update().first()
     # The same request twice (e.g. submitted again after an error) is refused while the first is open.
     open_mine = db.query(AssetRequest).filter(
         AssetRequest.company_id == company_id, AssetRequest.requested_by == requester.id,
@@ -771,7 +774,7 @@ def _hand_over_asset(db: Session, asset_req: AssetRequest, asset_id: Optional[st
         AssetAssignment.asset_id == asset.id, AssetAssignment.is_active == True
     ).update({"is_active": False})
     db.add(AssetAssignment(
-        company_id=asset_req.company_id, asset_id=asset.id, user_id=asset_req.requested_by, is_active=True,
+        company_id=asset_req.company_id, asset_id=asset.id, user_id=asset_req.requested_by, assigned_by=actor.id, is_active=True,
     ))
     record_movement(db, asset_req.company_id, "ASSIGN", "HARDWARE", actor.id, asset_id=asset.id,
                     reason=f"Assigned to fulfil ticket #{asset_req.id[:6].upper()}")

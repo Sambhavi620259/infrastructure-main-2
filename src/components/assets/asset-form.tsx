@@ -2,12 +2,10 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { listAssetCategories, type AssetCategory } from "@/lib/tickets";
-import { listDepartments } from "@/lib/users";
 import { listVendors, type Vendor } from "@/lib/procurement";
 import { LICENSE_TYPES, licenseTypeLabel, type SoftwareInput } from "@/lib/software";
 import type { StockReceipt } from "@/lib/inventory";
 import type { Asset } from "@/types/asset";
-import type { Department } from "@/types/user";
 
 export const CONDITIONS = ["EXCELLENT", "GOOD", "FAIR", "POOR"] as const;
 
@@ -223,13 +221,11 @@ export function AssetForm({
 }) {
   const [values, setValues] = useState<AssetFormValues>(initial);
   const [categories, setCategories] = useState<AssetCategory[]>([]);
-  const [departments, setDepartments] = useState<Department[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [error, setError] = useState("");
 
   useEffect(() => {
     listAssetCategories().then(setCategories).catch(() => undefined);
-    listDepartments().then(setDepartments).catch(() => undefined);
     listVendors()
       .then((data) =>
         setVendors(
@@ -287,8 +283,9 @@ export function AssetForm({
         {!software && (
           <>
             <label className={label}>
-              Asset tag <span className="font-normal text-slate-400">(optional)</span>
-              <input value={values.asset_tag} onChange={set("asset_tag")} maxLength={100} placeholder="e.g. AST-0142" className={input} />
+              Asset number <span className="font-normal text-slate-400">(optional)</span>
+              <input value={values.asset_tag} onChange={set("asset_tag")} maxLength={100} placeholder="e.g. LAP-0142" className={input} />
+              <span className="mt-1 block text-xs font-normal text-slate-400">Every asset also gets its own unique Asset ID, so numbers may repeat.</span>
             </label>
             <label className={label}>
               Serial number <span className="font-normal text-slate-400">(optional)</span>
@@ -309,6 +306,10 @@ export function AssetForm({
                   </option>
                 ))}
               </select>
+            </label>
+            <label className={label}>
+              Location <span className="font-normal text-slate-400">(optional)</span>
+              <input value={values.location_id} onChange={set("location_id")} maxLength={150} placeholder="e.g. Pune office, floor 2" className={input} />
             </label>
           </>
         )}
@@ -403,24 +404,6 @@ export function AssetForm({
         </Fieldset>
       ) : (
         <>
-          <Fieldset title="Ownership & location">
-            <label className={label}>
-              Department
-              <select value={values.department_id} onChange={set("department_id")} className={input}>
-                <option value="">Not assigned</option>
-                {departments.map((department) => (
-                  <option key={department.id} value={department.id}>
-                    {department.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className={label}>
-              Location
-              <input value={values.location_id} onChange={set("location_id")} placeholder="e.g. Pune office, floor 2" className={input} />
-            </label>
-          </Fieldset>
-
           <Fieldset title="Purchase & warranty" hint="All optional. Fill the warranty dates to get warranty-ending alerts.">
             <label className={label}>
               Purchase date

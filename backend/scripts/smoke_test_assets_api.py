@@ -681,53 +681,28 @@ async def run_checks():
                                               "name": "Nope", "category": "Laptop"})
         check("agent cannot register assets (403)", code == 403, body)
 
-        # Stock: users request it, the IT Admin approves and issues it.
-        code, body = call("POST", f"/inventory/{item_id}/adjust", {"change": -2, "reason": "Taking some"})
-        check("user cannot move stock directly (403)", code == 403, body)
-        code, body = call("POST", "/inventory/requests", {"item_id": item_id, "quantity": 2, "reason": "For the new joiners"})
-        check("user requests stock", code == 201 and body.get("status") == "PENDING"
-              and body.get("item_name") == "USB-C cable" and body.get("available") == 5, body)
-        stock_req = body.get("id", "")
-        code, body = call("PUT", f"/inventory/requests/{stock_req}", {"status": "APPROVED"})
-        check("user cannot approve their own stock request (403)", code == 403, body)
-        code, body = call("POST", "/inventory/requests", {"item_id": item_id, "quantity": 50, "reason": "Too many"})
-        big_req = body.get("id", "")
-        code, body = call("POST", "/inventory/requests", {"item_id": item_id, "quantity": 1, "reason": "Changed my mind"})
-        code, body = call("PUT", f"/inventory/requests/{body.get('id', '')}", {"status": "CANCELLED"})
-        check("user cancels their own pending stock request", code == 200 and body.get("status") == "CANCELLED", body)
+        # Inventory is an IT Admin area: users have no access to it at all.
+        for method, path, payload in (
+            ("GET", "/inventory", None),
+            ("GET", f"/inventory/{item_id}", None),
+            ("GET", "/inventory/requests", None),
+            ("POST", "/inventory/requests", {"item_id": item_id, "quantity": 2, "reason": "For the new joiners"}),
+            ("POST", f"/inventory/{item_id}/adjust", {"change": -2, "reason": "Taking some"}),
+            ("PUT", f"/inventory/{item_id}", {"reorder_level": 1}),
+        ):
+            code, body = call(method, path, payload)
+            check(f"user cannot use inventory: {method} {path.split('?')[0]} (403)", code == 403, body)
 
+        # The IT Admin still manages stock directly.
         ACTING["user_id"] = None
-        code, body = call("GET", "/inventory/requests?status=PENDING")
-        check("admin sees pending stock requests with names",
-              code == 200 and len(body) == 2 and all(r["requested_by_name"] == "Rahul Sharma" for r in body), body)
-        code, body = call("PUT", f"/inventory/requests/{big_req}", {"status": "APPROVED"})
-        check("approving more than is in stock is refused", code == 400, body)
-        code, body = call("PUT", f"/inventory/requests/{big_req}", {"status": "REJECTED"})
-        check("rejecting needs a reason", code == 400, body)
-        code, body = call("PUT", f"/inventory/requests/{big_req}", {"status": "REJECTED", "rejection_reason": "Too many"})
-        check("admin rejects a stock request", code == 200 and body.get("status") == "REJECTED", body)
-        code, body = call("PUT", f"/inventory/requests/{stock_req}", {"status": "APPROVED"})
-        check("admin approves: stock is issued", code == 200 and body.get("status") == "APPROVED"
-              and body.get("processed_by_name") == "Smoke Admin", body)
-        code, body = call("GET", f"/inventory/{item_id}")
-        check("approval lowers stock; status turns LOW_STOCK at reorder level",
-              code == 200 and body.get("quantity") == 3 and body.get("status") == "LOW_STOCK", body)
-        code, body = call("PUT", f"/inventory/requests/{stock_req}", {"status": "REJECTED", "rejection_reason": "x"})
-        check("a decided stock request is final", code == 400, body)
         code, body = call("POST", f"/inventory/{item_id}/adjust", {"change": -10, "reason": "Too many"})
         check("issuing more than in stock is refused", code == 400, body)
+        code, body = call("POST", f"/inventory/{item_id}/adjust", {"change": -3, "reason": "Issued to the new joiners"})
+        check("admin issues stock; status turns LOW_STOCK at the reorder level",
+              code == 200 and body.get("quantity") == 2 and body.get("status") == "LOW_STOCK", body)
         code, body = call("POST", f"/inventory/{item_id}/adjust", {"change": 10, "reason": "Delivery"})
-        check("admin receives stock", code == 200 and body.get("quantity") == 13 and body.get("status") == "IN_STOCK", body)
+        check("admin receives stock", code == 200 and body.get("quantity") == 12 and body.get("status") == "IN_STOCK", body)
         ACTING["user_id"] = rahul_id
-        code, body = call("GET", "/inventory/requests")
-        check("user sees their own stock requests and the outcome",
-              code == 200 and len(body) == 3 and {r["status"] for r in body} == {"APPROVED", "REJECTED", "CANCELLED"}, body)
-        code, body = call("GET", "/notifications")
-        check("user is told their stock request was approved",
-              code == 200 and any(n["title"] == "Your request for USB-C cable was approved" for n in body), [n["title"] for n in body][:6])
-
-        code, body = call("PUT", f"/inventory/{item_id}", {"reorder_level": 1})
-        check("agent cannot edit inventory settings (403)", code == 403, body)
 
         code, body = call("GET", "/reports/types")
         check("user is offered only personal reports",
@@ -1077,6 +1052,11 @@ async def run_checks():
         code, body = call("GET", "/super-admin/audit-logs?search=Orbit")
         check("platform audit log with names",
               code == 200 and any(e["action"] == "CREATE_COMPANY_TENANT" and e["user_name"] == "Super Person" for e in body), body)
+        code, body = call("GET", "/super-admin/assets")
+        check("Super Admin lists every asset with its Asset ID",
+              code == 200 and body and all(a["asset_code"].startswith("AST-") for a in body), body)
+        code, body = call("GET", "/super-admin/assets?assignment=unassigned&search=zzz-nothing")
+        check("Super Admin asset search and filter", code == 200 and body == [], body)
         code, body = call("GET", "/super-admin/audit-actions")
         check("audit action list", code == 200 and "UPDATE_SUBSCRIPTION" in body, body)
 

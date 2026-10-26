@@ -314,6 +314,7 @@ class AssetUpdate(BaseModel):
 
 class AssetResponse(AssetBase):
     id: str
+    asset_code: str
     company_id: str
     status: AssetStatusEnum
     receipt_id: Optional[str] = None
@@ -337,6 +338,8 @@ class AssetResponse(AssetBase):
     assigned_to_id: Optional[str] = None
     assigned_to_name: Optional[str] = None
     assigned_to_email: Optional[str] = None
+    assigned_by_name: Optional[str] = None
+    assigned_at: Optional[datetime] = None
     created_by: Optional[str] = None
     created_at: datetime
     updated_at: datetime

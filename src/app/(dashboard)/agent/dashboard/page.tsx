@@ -5,7 +5,6 @@ import Link from "next/link";
 import {
   PlusIcon,
   TrashIcon,
-  ArchiveBoxIcon,
   ComputerDesktopIcon,
   DocumentChartBarIcon,
   TicketIcon,
@@ -26,7 +25,6 @@ import { listDepartments } from "@/lib/users";
 import type { Department } from "@/types/user";
 import { TicketStatusBadge, ticketNumber } from "@/components/tickets/ticket-actions";
 import { NewTicketForm } from "@/components/tickets/ticket-queue";
-import { listInventoryRequests } from "@/lib/inventory";
 import { mySoftware } from "@/lib/software";
 import { getProfile, type Profile } from "@/lib/profile";
 import { userPageOnPlan } from "@/lib/access";
@@ -35,7 +33,6 @@ import { assetStatusLabel, type AssetCounts, type AssetEvent, assetLabel } from 
 const QUICK_ACTIONS = [
   ["/agent/tickets", "Request an asset", "Raise a ticket and follow its status", TicketIcon],
   ["/agent/assets", "Update an asset", "Change status, condition or location", ComputerDesktopIcon],
-  ["/agent/inventory", "Request stock", "Ask for cables, mice and other consumables", ArchiveBoxIcon],
   ["/agent/reports", "Run a report", "Download a CSV export", DocumentChartBarIcon],
 ] as const;
 
@@ -60,7 +57,6 @@ export default function AgentDashboardPage() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [assets, setAssets] = useState<AssetCounts | null>(null);
   const [tickets, setTickets] = useState<AssetRequestCounts | null>(null);
-  const [stockWaiting, setStockWaiting] = useState<number | null>(null);
   const [softwareCount, setSoftwareCount] = useState<number | null>(null);
   const [events, setEvents] = useState<AssetEvent[]>([]);
   const [error, setError] = useState("");
@@ -75,11 +71,6 @@ export default function AgentDashboardPage() {
         setProfile(data);
         if (userPageOnPlan("/agent/software", data.planFeatures)) {
           mySoftware().then((seats) => setSoftwareCount(seats.length)).catch(fail);
-        }
-        if (userPageOnPlan("/agent/inventory", data.planFeatures)) {
-          listInventoryRequests("PENDING")
-            .then((requests) => setStockWaiting(requests.length))
-            .catch(fail);
         }
       })
       .catch(fail);
@@ -129,7 +120,7 @@ export default function AgentDashboardPage() {
 
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
         {metrics.map(([label, value, color]) => (
-          <Link key={label} href={label === "My software" ? "/agent/software" : "/agent/assets"} className="ui-surface p-4 transition hover:border-brand-200">
+          <Link key={label} href={label === "My software" ? "/agent/assets?tab=software" : "/agent/assets"} className="ui-surface p-4 transition hover:border-brand-200">
             <p className="text-[10px] text-slate-500">{label}</p>
             <p className={`mt-1 text-2xl font-extrabold ${color}`}>{value ?? "—"}</p>
           </Link>
@@ -153,15 +144,6 @@ export default function AgentDashboardPage() {
             <p className="text-[10px] text-slate-500">Approved or waiting for stock / license</p>
           </div>
         </Link>
-        {onPlan("/agent/inventory") && (
-          <Link href="/agent/inventory" className="ui-surface flex items-center gap-3 p-4 transition hover:border-brand-200">
-            <ArchiveBoxIcon className="h-6 w-6 text-violet-500" aria-hidden="true" />
-            <div>
-              <p className="text-xl font-extrabold">{stockWaiting ?? "—"}</p>
-              <p className="text-[10px] text-slate-500">Stock requests waiting for approval</p>
-            </div>
-          </Link>
-        )}
       </section>
 
       <section className="grid gap-3 xl:grid-cols-[1.3fr_1fr]">

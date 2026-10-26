@@ -6,11 +6,11 @@ import React, { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   ChartBarIcon,
   CloudIcon,
-  CubeTransparentIcon,
   KeyIcon,
   RectangleStackIcon,
   ArrowRightStartOnRectangleIcon,
   BuildingOffice2Icon,
+  BuildingStorefrontIcon,
   ChevronDownIcon,
   Cog6ToothIcon,
   ComputerDesktopIcon,
@@ -28,7 +28,6 @@ import {
   UsersIcon,
   XMarkIcon,
   LockOpenIcon,
-  MapPinIcon,
   UserPlusIcon,
   Bars3Icon,
 } from "@heroicons/react/24/outline";
@@ -61,14 +60,7 @@ const itMenu: readonly MenuEntry[] = [
       { label: "Asset Assignments", href: routes.assetAssignment, icon: UserGroupIcon, section: "assets" },
       { label: "Asset History", href: routes.assetHistory, icon: ClockIcon, section: "assets" },
       { label: "Asset Status", href: routes.assetStatus, icon: CheckCircleIcon, section: "assets" },
-    ],
-  },
-  {
-    kind: "group", label: "Inventory", icon: CubeIcon, children: [
-      { label: "Hardware Stock", href: routes.inventoryHardware, icon: CubeTransparentIcon, section: "inventory" },
-      { label: "Software Licenses", href: routes.inventorySoftware, icon: KeyIcon, section: "software" },
       { label: "Consumables", href: routes.inventoryStock, icon: FolderIcon, section: "inventory" },
-      { label: "Vendors", href: routes.inventoryVendors, icon: BuildingOffice2Icon, section: "inventory" },
     ],
   },
   { kind: "link", label: "Requests & Approvals", href: "/requests", icon: ClipboardDocumentCheckIcon, section: "tickets", badge: "tickets" },
@@ -82,6 +74,7 @@ const itMenu: readonly MenuEntry[] = [
       { label: "Departments / Teams", href: routes.userDepartments, icon: BuildingOffice2Icon, section: "users" },
     ],
   },
+  { kind: "link", label: "Vendors", href: routes.inventoryVendors, icon: BuildingStorefrontIcon, section: "inventory" },
   { kind: "link", label: "Cloud", href: routes.cloud, icon: CloudIcon, section: "cloud" },
   { kind: "link", label: "Settings", href: routes.settings, icon: Cog6ToothIcon, section: "settings" },
 ];
@@ -103,22 +96,18 @@ const itNavigation: readonly NavigationItem[] = itMenu.flatMap((entry): Navigati
 const agentNavigation: readonly NavigationItem[] = [
   ["Dashboard", routes.agentDashboard, "", Squares2X2Icon],
   ["My Assets", routes.agentAssets, "", CubeIcon],
-  ["My Software", "/agent/software", "", KeyIcon],
-  ["My Access", "/agent/access", "", LockOpenIcon],
   ["Tickets", routes.agentTickets, "", TicketIcon],
-  ["Inventory", routes.agentInventory, "", FolderIcon],
   ["Reports", routes.agentReports, "", DocumentChartBarIcon],
   ["Settings", routes.agentSettings, "", Cog6ToothIcon],
 ] as const;
 
+/** The Super Admin's own menu: his dashboard, the team's work, audit logs and settings. */
 const superNavigation: readonly NavigationItem[] = [
-  ["Overview", routes.superAdmin, "", Squares2X2Icon],
-  ["Companies", routes.superCompanies, "", BuildingOffice2Icon],
-  ["Subscriptions", routes.superSubscriptions, "", DocumentChartBarIcon],
+  ["Dashboard", routes.superAdmin, "", Squares2X2Icon],
   ["Team work", "/super-admin/work", "", UserGroupIcon],
-  ["Contact directory", "/super-admin/contacts", "", MapPinIcon],
+  ["All assets", "/super-admin/assets", "", ComputerDesktopIcon],
   ["Audit logs", routes.superAudit, "", FolderIcon],
-  ["Platform settings", routes.superSettings, "", Cog6ToothIcon],
+  ["Settings", routes.superSettings, "", Cog6ToothIcon],
 ] as const;
 
 function isActiveRoute(pathname: string, href: string) {
@@ -142,6 +131,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     () => sectionsFor(authenticatedUser?.role ?? "", modules, planFeatures),
     [authenticatedUser, modules, planFeatures],
   );
+  const isSuper = authenticatedUser?.role === roles.SUPER_ADMIN;
   const [sessionAttempt, setSessionAttempt] = useState(0);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
@@ -161,7 +151,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [search, setSearch] = useState("");
   const [profileOpen, setProfileOpen] = useState(false);
   // Sidebar groups (Assets, Inventory): open when you are inside one.
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({ Assets: true, Inventory: true, Users: true });
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({ Assets: true, Users: true });
   // Dashboard counts for sidebar badges
   const [counts, setCounts] = useState<DashboardCounts | null>(null);
 
@@ -243,8 +233,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     setMobileNavOpen(false);
     setProfileOpen(false);
-    if (pathname.startsWith("/assets")) setOpenGroups((current) => ({ ...current, Assets: true }));
-    if (pathname.startsWith("/inventory")) setOpenGroups((current) => ({ ...current, Inventory: true }));
+    // Consumables lives under Assets.
+    if (pathname.startsWith("/assets") || pathname.startsWith("/inventory/stock")) setOpenGroups((current) => ({ ...current, Assets: true }));
   }, [pathname]);
 
   useEffect(() => {
@@ -276,17 +266,20 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, []);
 
   const workspace: Workspace = workspaceForRole(authenticatedUser?.role ?? roles.IT_ADMIN);
-  const navigation =
-    workspace === "super"
-      ? superNavigation
-      : workspace === "agent"
+  const navigation = useMemo(
+    () =>
+      workspace === "agent"
         ? agentNavigation.filter(([, href]) => userPageOnPlan(href, planFeatures))
-        : itNavigation;
+        : isSuper
+          ? superNavigation
+          : itNavigation,
+    [workspace, isSuper, planFeatures],
+  );
   const searchResults = useMemo(
     () =>
       (workspace === "it"
         ? [
-            ...itNavigation,
+            ...navigation,
             ...itMorePages,
           ].filter(([, href]) => {
             const section = sectionForPath(href);
@@ -427,13 +420,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <XMarkIcon className="h-5 w-5" />
         </button>
         <Link
-          href={
-            workspace === "super"
-              ? routes.superAdmin
-              : workspace === "agent"
-                ? routes.agentDashboard
-                : routes.dashboard
-          }
+          href={isSuper ? routes.superAdmin : workspace === "agent" ? routes.agentDashboard : routes.dashboard}
           onClick={() => setMobileNavOpen(false)}
           className="mb-5 flex items-center gap-2.5 px-2"
           aria-label="Bold And Wise Ventures home"
@@ -452,9 +439,9 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="mb-5">
           <div className="flex w-full items-center gap-2.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-left">
             <span
-              className={`grid h-8 w-8 place-items-center rounded-lg ${workspace === "super" ? "bg-violet-100 text-violet-700" : "bg-blue-100 text-blue-700"}`}
+              className={`grid h-8 w-8 place-items-center rounded-lg ${isSuper ? "bg-violet-100 text-violet-700" : "bg-blue-100 text-blue-700"}`}
             >
-              {workspace === "super" ? (
+              {isSuper ? (
                 <ShieldCheckIcon className="h-4 w-4" />
               ) : (
                 <ComputerDesktopIcon className="h-4 w-4" />
@@ -465,28 +452,18 @@ export function AppShell({ children }: { children: ReactNode }) {
                 Workspace
               </span>
               <span className="block truncate text-xs font-bold text-slate-800">
-                {workspace === "super" ? "Super Admin" : workspace === "agent" ? "User" : "IT Admin"}
+                {isSuper ? "Super Admin" : workspace === "agent" ? "User" : "IT Admin"}
               </span>
             </span>
           </div>
         </div>
 
         <p className="mb-2 px-2 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">
-          {workspace === "super"
-            ? "Platform workspace"
-            : workspace === "agent"
-              ? "User workspace"
-              : "IT operations"}
+          {isSuper ? "Super Admin" : workspace === "agent" ? "User workspace" : "IT operations"}
         </p>
         <nav
           className="space-y-1"
-          aria-label={
-            workspace === "super"
-              ? "Super Admin navigation"
-              : workspace === "agent"
-                ? "User navigation"
-                : "IT Admin navigation"
-          }
+          aria-label={isSuper ? "Super Admin navigation" : workspace === "agent" ? "User navigation" : "IT Admin navigation"}
         >
           {workspace === "it"
             ? itMenu.map((entry, index) => {
@@ -580,14 +557,14 @@ export function AppShell({ children }: { children: ReactNode }) {
               })}
         </nav>
 
-        <div className={`mt-8 rounded-xl p-3 ${workspace === "super" ? "bg-violet-50" : "bg-blue-50"}`}>
+        <div className={`mt-8 rounded-xl p-3 ${isSuper ? "bg-violet-50" : "bg-blue-50"}`}>
           <p
-            className={`text-[10px] font-bold uppercase tracking-wider ${workspace === "super" ? "text-violet-600" : "text-brand-600"}`}
+            className={`text-[10px] font-bold uppercase tracking-wider ${isSuper ? "text-violet-600" : "text-brand-600"}`}
           >
             Current role
           </p>
           <p className="mt-1 text-xs font-bold text-slate-800">
-            {workspace === "super"
+            {isSuper
               ? "Super Administrator"
               : workspace === "agent"
                 ? "User"
@@ -598,8 +575,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                     : "IT Administrator"}
           </p>
           <p className="mt-1 text-[10px] leading-4 text-slate-500">
-            {workspace === "super"
-              ? "Platform-wide company and subscription controls."
+            {isSuper
+              ? "Your dashboard, your team's work and settings."
               : workspace === "agent"
                 ? "Your assets, tickets and stock."
                 : authenticatedUser.role === roles.SUB_ADMIN
@@ -623,11 +600,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             >
               <Bars3Icon className="h-6 w-6" />
             </button>
-            <Link href={workspace === "super"
-              ? routes.superAdmin
-              : workspace === "agent"
-                ? routes.agentDashboard
-                : routes.dashboard} className="flex min-w-0 items-center gap-2" aria-label="Home">
+            <Link href={isSuper ? routes.superAdmin : workspace === "agent" ? routes.agentDashboard : routes.dashboard} className="flex min-w-0 items-center gap-2" aria-label="Home">
               <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-brand-600 text-xs font-black text-white">B</span>
               <span className="truncate text-[13px] font-extrabold tracking-tight text-slate-900">Bold And Wise</span>
             </Link>
@@ -682,7 +655,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <span className="hidden text-left sm:block">
                   <span className="block text-[11px] font-bold text-slate-700">{authenticatedUser.name}</span>
                   <span className="block text-[10px] text-slate-500">
-                    {workspace === "super" ? "Super Admin" : workspace === "agent" ? "User" : "IT Admin"}
+                    {isSuper ? "Super Admin" : workspace === "agent" ? "User" : "IT Admin"}
                   </span>
                 </span>
                 <ChevronDownIcon className="hidden h-3.5 w-3.5 text-slate-400 sm:block" />

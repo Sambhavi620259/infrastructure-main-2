@@ -81,7 +81,7 @@ def expire_access_grants(db: Session) -> int:
         if user and resource:
             notify(db, user, f"Your {grant.access_level} access to {resource.name} has ended",
                    "It reached its end date. Raise a new access request if you still need it.",
-                   home_link(user, "/access", "/agent/access"), "INFO")
+                   home_link(user, "/access", "/agent/assets?tab=access"), "INFO")
         log_audit_event(db=db, action="EXPIRE_ACCESS", entity="AccessGrant", company_id=grant.company_id,
                         entity_id=grant.id, new_value=f"{resource.name if resource else 'Resource'}: {grant.access_level} ended")
     return len(expired)

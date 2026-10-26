@@ -450,7 +450,7 @@ def release_assignment(
     if holder and holder.id != current_user.id:
         notify(db, holder, title=f"Your access to {software.name if software else 'software'} was removed",
                message=f"{current_user.full_name} released your seat.",
-               link=home_link(holder, "/profile", "/agent/software"), type="INFO")
+               link=home_link(holder, "/profile", "/agent/assets?tab=software"), type="INFO")
     db.commit()
     log_audit_event(db=db, action="RELEASE_SOFTWARE_SEAT", entity="SoftwareLicenseAssignment", company_id=company_id,
                     user_id=current_user.id, entity_id=seat.id,
@@ -492,7 +492,7 @@ def update_deployment(
         notify(db, holder,
                title=f"{software.name if software else 'Software'} " + ("is installed" if body.status == "INSTALLED" else "could not be installed"),
                message=f"{current_user.full_name}: {seat.deployment_note or 'recorded the installation.'}"[:300],
-               link=home_link(holder, "/profile", "/agent/software"),
+               link=home_link(holder, "/profile", "/agent/assets?tab=software"),
                type="SUCCESS" if body.status == "INSTALLED" else "WARNING")
     db.commit()
     log_audit_event(db=db, action="UPDATE_SOFTWARE_DEPLOYMENT", entity="SoftwareLicenseAssignment", company_id=company_id,
@@ -648,7 +648,7 @@ def assign_software_license(
     if target.id != current_user.id:
         notify(db, target, title=f"You now have {software.name}",
                message=f"{current_user.full_name} assigned you a seat.",
-               link=home_link(target, "/profile", "/agent/software"), type="SUCCESS")
+               link=home_link(target, "/profile", "/agent/assets?tab=software"), type="SUCCESS")
     db.commit()
     log_audit_event(db=db, action="ASSIGN_SOFTWARE_LICENSE", entity="SoftwareLicenseAssignment", company_id=company_id,
                     user_id=current_user.id, entity_id=seat.id, new_value=f"{software.name} assigned to {target.full_name}")

@@ -136,7 +136,8 @@ A["cloud"] = created("adminA", "POST", "/cloud/resources", {"provider": "AWS", "
 A["device"] = created("adminA", "POST", "/discovery/agent-ingest", {"hostname": "h", "ip_address": "1.1.1.1", "mac_address": "aa"}, key="device_id")
 code, run = call("adminA", "POST", "/reports/runs", {"report_type": "asset_inventory", "save": True})
 A["run"], A["saved"] = run["id"], run["report_config_id"]
-A["stockreq"] = created("agentA", "POST", "/inventory/requests", {"item_id": A["item"], "quantity": 1, "reason": "Need one"})
+# Users no longer request stock; an older request is made by an admin so the decide checks below still have one.
+A["stockreq"] = created("adminA", "POST", "/inventory/requests", {"item_id": A["item"], "quantity": 1, "reason": "Need one"})
 A["claim"] = created("adminA", "POST", "/warranty-maintenance/claims", {"asset_id": A["asset"], "issue_description": "broken"})
 
 # --- Tenant isolation: organization B's admin attacks A's records -------------
@@ -264,7 +265,14 @@ check("user cannot raise a ticket for someone else", code == 403, data)
 code, data = call("agentA", "POST", f"/inventory/{A['item']}/adjust", {"change": -1, "reason": "x"})
 check("user cannot move stock directly", code == 403, data)
 code, data = call("agentA", "PUT", f"/inventory/requests/{A['stockreq']}", {"status": "APPROVED"})
-check("user cannot approve their own stock request", code == 403, data)
+check("user cannot decide on stock requests", code == 403, data)
+for method, path, body in (
+    ("GET", "/inventory", None), ("GET", f"/inventory/{A['item']}", None), ("GET", "/inventory/counts", None),
+    ("GET", "/inventory/requests", None), ("GET", "/inventory/hardware-stock", None), ("GET", "/inventory/movements", None),
+    ("POST", "/inventory/requests", {"item_id": A["item"], "quantity": 1, "reason": "x"}),
+):
+    code, data = call("agentA", method, path, body)
+    check(f"user has no access to inventory: {method} {path.replace(A['item'], '{item}')}", code == 403, data)
 code, data = call("samA", "PUT", f"/inventory/requests/{A['stockreq']}", {"status": "APPROVED"})
 check("SAM sub-admin cannot approve stock requests (inventory is HAM)", code == 403, data)
 code, data = call("samA", "DELETE", f"/assets/{A['asset']}")

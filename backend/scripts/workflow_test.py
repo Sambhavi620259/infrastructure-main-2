@@ -144,7 +144,14 @@ code, body = call("adminA", "POST", "/assets", {"serial_number": "DL-003", "name
                                                 "receipt_id": receipt["id"]})
 check("a receipt cannot register more devices than were received", code == 400, body)
 code, body = call("adminA", "POST", "/assets", {"serial_number": "X-1", "name": "x", "category": "Laptop", "asset_tag": "LAP-002"})
-check("a duplicate non-empty asset tag is refused", code == 400, body)
+check("two devices may share an asset number, each with its own Asset ID",
+      code == 201 and body["asset_tag"] == "LAP-002" and body["asset_code"] != laptop2["asset_code"]
+      and body["asset_code"].startswith("AST-"), body)
+code, body = call("adminA", "POST", "/assets", {"serial_number": "X-1", "name": "x", "category": "Laptop"})
+check("a duplicate serial number is still refused", code == 400, body)
+code, listed = call("adminA", "GET", "/assets?limit=500")
+codes = [a["asset_code"] for a in listed]
+check("every Asset ID is unique", len(codes) == len(set(codes)) and all(codes), codes)
 code, body = call("adminA", "POST", "/assets", {"serial_number": "X-2", "name": "x", "category": "Laptop", "asset_tag": "bad tag!"})
 check("a malformed asset tag is refused", code == 422, body)
 code, untagged = call("adminA", "POST", "/assets", {"serial_number": "MON-1", "name": "Monitor", "category": "Monitor"})
@@ -177,6 +184,8 @@ code, asset_now = call("adminA", "GET", f"/assets/{laptop1['id']}")
 check("the device is assigned to the user", asset_now["status"] == "ASSIGNED" and asset_now["assigned_to_id"] == IDS["u1A"], asset_now)
 code, body = call("adminA", "POST", f"/assets/{laptop1['id']}/assign", {"user_id": IDS["u2A"]})
 check("an assigned device cannot be assigned again", code == 400, body)
+code, detail = call("adminA", "GET", f"/assets/{laptop1['id']}")
+check("the asset shows who assigned it", code == 200 and detail.get("assigned_by_name"), detail)
 with Session() as db:
     db.add(AssetAssignment(company_id=COMPANY["A"], asset_id=laptop1["id"], user_id=IDS["u2A"], is_active=True))
     try:
@@ -295,9 +304,13 @@ code, body = call("u1A", "POST", "/inventory/movements", {"movement_type": "ISSU
 check("users cannot record stock movements", code == 403, body)
 code, body = call("u1A", "POST", "/inventory/receipts", receipt_body | {"reference": ref()})
 check("users cannot receive stock", code == 403, body)
-code, req = call("u1A", "POST", "/inventory/requests", {"item_id": item["id"], "quantity": 2, "reason": "Desk setup"})
-code, body = call("adminA", "PUT", f"/inventory/requests/{req['id']}", {"status": "APPROVED"})
-check("a stock request is approved and issued", code == 200 and body["status"] == "APPROVED", body)
+code, body = call("u1A", "POST", "/inventory/requests", {"item_id": item["id"], "quantity": 2, "reason": "Desk setup"})
+check("users cannot request stock (inventory is an IT Admin area)", code == 403, body)
+code, body = call("u1A", "GET", "/inventory")
+check("users cannot list inventory", code == 403, body)
+code, body = call("adminA", "POST", "/inventory/movements", {"movement_type": "ISSUE", "item_kind": "CONSUMABLE",
+                                                             "inventory_item_id": item["id"], "quantity": 2, "reason": "Desk setup"})
+check("the IT Admin issues stock directly", code == 201, body)
 code, ledger = call("adminA", "GET", "/inventory/movements?limit=100")
 kinds = {m["movement_type"] for m in ledger}
 check("the ledger holds receipts, registrations, assignments, returns, transfers and issues",

@@ -15,6 +15,7 @@ from app.core.database import get_db
 from app.core.deps import get_tenant_company_id, require_roles
 from app.models.models import Asset, AssetLifecycle, AssetStatusEnum, DiscoveredDevice, PlatformRole, User
 from app.schemas.schemas import clean_asset_tag
+from app.services.asset_code_service import next_asset_code
 from app.services.audit_service import log_audit_event
 
 router = APIRouter(prefix="/discovery", tags=["Automated Network & Agent Discovery"])
@@ -147,14 +148,12 @@ def promote_discovered_device_to_asset(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     serial = device.serial_number or f"SN-{device.mac_address.replace(':', '').upper()}"
-    clash = Asset.serial_number == serial
-    if asset_tag:
-        clash = clash | (Asset.asset_tag == asset_tag)
-    if db.query(Asset.id).filter(Asset.company_id == device.company_id, clash).first():
-        raise HTTPException(status_code=400, detail="An asset with this tag or serial number already exists.")
+    if db.query(Asset.id).filter(Asset.company_id == device.company_id, Asset.serial_number == serial).first():
+        raise HTTPException(status_code=400, detail="An asset with this serial number already exists.")
 
     asset = Asset(
         company_id=device.company_id,
+        asset_code=next_asset_code(db, device.company_id),
         asset_tag=asset_tag,
         serial_number=serial,
         name=(body.name or device.hostname or "Discovered device").strip(),

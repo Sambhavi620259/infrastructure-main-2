@@ -10,7 +10,6 @@ import {
   CubeIcon,
   InboxStackIcon,
   KeyIcon,
-  PlusIcon,
   ShieldExclamationIcon,
   TicketIcon,
   UserPlusIcon,
@@ -111,11 +110,11 @@ export default function DashboardPage() {
   const seatsUsed = metrics?.license_seats_assigned ?? 0;
   const kpis: [string, number | string | undefined, string, string][] = [
     ["Hardware assets", metrics?.total_assets, "text-slate-950", "/assets"],
-    ["Available", metrics?.in_stock_assets, "text-emerald-600", "/inventory/hardware"],
+    ["Available", metrics?.in_stock_assets, "text-emerald-600", "/assets/hardware"],
     ["Assigned", metrics?.assigned_assets, "text-blue-600", "/assets/assignment"],
     ["Under repair", metrics?.under_maintenance, "text-amber-600", "/assets/status"],
     ["Software products", metrics?.software_products, "text-slate-950", "/assets/software"],
-    ["License utilization", metrics ? (seats ? `${Math.round((seatsUsed / seats) * 100)}%` : "—") : undefined, "text-indigo-600", "/inventory/software"],
+    ["License utilization", metrics ? (seats ? `${Math.round((seatsUsed / seats) * 100)}%` : "—") : undefined, "text-indigo-600", "/assets/software"],
   ];
 
   const attention: [string, number | undefined, string, typeof TicketIcon, string, boolean][] = [
@@ -128,7 +127,6 @@ export default function DashboardPage() {
   ];
 
   const quickActions: [string, string, string, typeof CubeIcon, boolean][] = [
-    ["/inventory/hardware", "Receive stock", "Record a delivery against an approved PO", CubeIcon, sections.has("inventory") && profile?.role !== "REPORTING_USER"],
     ["/assets/hardware/new", "Add hardware", "Register a device", CubeIcon, sections.has("assets") && profile?.role !== "REPORTING_USER"],
     ["/assets/software/new", "Add software", "License number, count and dates", KeyIcon, sections.has("software") && profile?.role !== "REPORTING_USER"],
     ["/assets/assignment", "Assign an asset", "Hand stock to a user or take it back", CheckCircleIcon, sections.has("assets") && profile?.role !== "REPORTING_USER"],
@@ -159,18 +157,6 @@ export default function DashboardPage() {
             </h1>
             <p className="text-sm text-slate-500">Here is what needs your attention today.</p>
           </div>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {sections.has("tickets") && (
-            <Link href="/requests" className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50">
-              <TicketIcon className="h-4 w-4" aria-hidden="true" /> Requests &amp; Approvals
-            </Link>
-          )}
-          {sections.has("assets") && profile?.role !== "REPORTING_USER" && (
-            <Link href="/assets/hardware/new" className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-sm font-bold text-white shadow-sm hover:bg-brand-700">
-              <PlusIcon className="h-4 w-4" aria-hidden="true" /> Add hardware
-            </Link>
-          )}
         </div>
       </header>
 

@@ -42,7 +42,6 @@ const FEATURE_SECTIONS: Record<string, Section[]> = {
 /** User-workspace pages that belong to a plan feature. */
 const USER_PAGE_FEATURES: [string, string][] = [
   ["/agent/software", "SOFTWARE"],
-  ["/agent/inventory", "INVENTORY"],
   ["/agent/reports", "REPORTS"],
   ["/agent/access", "ACCESS"],
 ];

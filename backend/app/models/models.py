@@ -204,7 +204,9 @@ class Asset(Base):
 
     id = Column(String, primary_key=True, default=gen_uuid)
     company_id = Column(String, ForeignKey("companies.id"), nullable=False, index=True)
-    # Optional; when given it is unique within the organization.
+    # The system's own identifier (AST-000001): unique within the organization.
+    asset_code = Column(String(20), nullable=False)
+    # The asset number written on the device. Optional, and several devices may share one.
     asset_tag = Column(String(100), nullable=True, index=True)
     # Optional too; when given it is unique within the organization.
     serial_number = Column(String(100), nullable=True, index=True)
@@ -245,8 +247,7 @@ class Asset(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     __table_args__ = (
-        # NULL tags do not collide, so untagged assets are allowed.
-        Index("uix_company_asset_tag", "company_id", "asset_tag", unique=True),
+        Index("uix_company_asset_code", "company_id", "asset_code", unique=True),
         Index("uix_company_serial", "company_id", "serial_number", unique=True),
     )
 
@@ -265,6 +266,8 @@ class AssetAssignment(Base):
     company_id = Column(String, ForeignKey("companies.id"), nullable=False, index=True)
     asset_id = Column(String, ForeignKey("assets.id"), nullable=False, index=True)
     user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    # Who handed the device over (the IT Admin who assigned it or fulfilled the ticket).
+    assigned_by = Column(String, ForeignKey("users.id"), nullable=True)
     assigned_at = Column(DateTime, default=datetime.utcnow)
     returned_at = Column(DateTime, nullable=True)
     is_active = Column(Boolean, default=True)

@@ -37,7 +37,7 @@ const ROLE_LABEL: Record<string, string> = {
 };
 
 const ROLE_SUMMARY: Record<string, string> = {
-  SUPER_ADMIN: "Manages organizations, subscriptions and platform administrators.",
+  SUPER_ADMIN: "Adds and removes IT Admins and users, reviews their work, and manages the audit logs and settings.",
   IT_ADMIN: "Runs your organization's IT: users, assets, inventory, tickets and settings.",
   SUB_ADMIN: "Administers the IT modules assigned to you.",
   REPORTING_USER: "Read-only access to reports and exports.",
@@ -46,8 +46,8 @@ const ROLE_SUMMARY: Record<string, string> = {
 
 const QUICK_LINKS: Record<string, [string, string][]> = {
   SUPER_ADMIN: [
-    ["/super-admin", "Platform overview"],
-    ["/super-admin/companies", "Companies"],
+    ["/super-admin", "Dashboard"],
+    ["/super-admin/work", "Team work"],
     ["/super-admin/audit", "Audit logs"],
   ],
   IT_ADMIN: [
@@ -69,7 +69,6 @@ const QUICK_LINKS: Record<string, [string, string][]> = {
     ["/agent/dashboard", "My dashboard"],
     ["/agent/tickets", "My tickets"],
     ["/agent/assets", "My assets"],
-    ["/agent/inventory", "Request stock"],
   ],
 };
 

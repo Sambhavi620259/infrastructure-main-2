@@ -169,6 +169,7 @@ export default function AssetDetailPage() {
     ["Serial number", asset.serial_number ?? "—"],
     ["Condition", asset.condition],
     ["Assigned to", asset.assigned_to_name ?? "Unassigned"],
+    ...(asset.assigned_to_name ? ([["Assigned by", asset.assigned_by_name ?? "—"]] as [string, string][]) : []),
     ["Purchase date", formatDate(asset.purchase_date)],
     ["Purchase cost", Number(asset.purchase_price) ? Number(asset.purchase_price).toLocaleString() : "—"],
     ["Warranty starts", formatDate(asset.warranty_start)],
@@ -203,7 +204,8 @@ export default function AssetDetailPage() {
               </span>
             </div>
             <p className="mt-2 text-sm text-slate-500">
-              Asset tag: <span className="font-semibold text-slate-700">{assetLabel(asset)}</span>
+              Asset ID: <span className="font-mono font-semibold text-slate-700">{asset.asset_code}</span>
+              {" · "}Asset number: <span className="font-semibold text-slate-700">{asset.asset_tag ?? "None"}</span>
               {asset.model ? ` · ${asset.model}` : ""}
             </p>
           </div>

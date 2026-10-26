@@ -91,7 +91,23 @@ export interface PlatformAuditEntry {
   timestamp: string;
   user_name: string | null;
   user_email: string | null;
+  user_role: string | null;
   company_name: string | null;
+}
+
+export interface PlatformAsset {
+  id: string;
+  asset_code: string;
+  asset_tag: string | null;
+  same_number_count: number;
+  serial_number: string | null;
+  name: string;
+  category: string;
+  status: string;
+  assigned_to_name: string | null;
+  assigned_to_email: string | null;
+  assigned_by_name: string | null;
+  assigned_at: string | null;
 }
 
 export interface ProvisioningDefaults {
@@ -100,10 +116,10 @@ export interface ProvisioningDefaults {
   asset_limit: number;
 }
 
-function query(params: Record<string, string | number | undefined>): string {
+function query(params: Record<string, string | number | boolean | undefined>): string {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined && value !== "") search.set(key, String(value));
+    if (value !== undefined && value !== "" && value !== false) search.set(key, String(value));
   }
   const text = search.toString();
   return text ? `?${text}` : "";
@@ -163,9 +179,15 @@ export function updatePlanFeatures(plans: Record<string, string[]>): Promise<Pla
 }
 
 export function listPlatformAudit(
-  params: { search?: string; action?: string; company_id?: string; skip?: number; limit?: number } = {},
+  params: { search?: string; action?: string; sign_ins?: boolean; role?: string; skip?: number; limit?: number } = {},
 ): Promise<PlatformAuditEntry[]> {
   return apiFetch<PlatformAuditEntry[]>(`/api/super-admin/audit-logs${query(params)}`);
+}
+
+export function listPlatformAssets(
+  params: { search?: string; status?: string; assignment?: string; skip?: number; limit?: number } = {},
+): Promise<PlatformAsset[]> {
+  return apiFetch<PlatformAsset[]>(`/api/super-admin/assets${query(params)}`);
 }
 
 export function listAuditActions(): Promise<string[]> {
@@ -189,6 +211,8 @@ export function changeSuperAdminKey(currentKey: string, newKey: string): Promise
 
 /** "ADD_COMPANY_TENANT" -> "Add company tenant". */
 export function actionLabel(action: string): string {
+  if (action === "USER_LOGIN") return "Signed in";
+  if (action === "USER_REGISTER") return "Registered";
   const text = action.toLowerCase().replace(/_/g, " ");
   return text.charAt(0).toUpperCase() + text.slice(1);
 }

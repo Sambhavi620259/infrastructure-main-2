@@ -2,8 +2,8 @@
 Access guard for scoped roles.
 
 - EMPLOYEE (shown as "User"): may reach only the areas that hold their own
-  data: assets, tickets, stock requests, reports, notifications and profile,
-  plus the inventory catalogue and department names they pick from. The
+  data: assets, tickets, software, access, reports, notifications and profile,
+  plus the department names they pick from. Inventory is an IT Admin area. The
   routers then limit each of those to the user's own records.
 - SUB_ADMIN: may change data only in the modules on their account
   (users.modules, e.g. ["HAM", "SAM"]).
@@ -47,7 +47,7 @@ ALWAYS_ALLOWED = ("/api/profile", "/api/notifications", "/api/auth")
 
 # The only areas a user (EMPLOYEE) may reach. Each router scopes them to the
 # user's own records. Departments are read-only names for the ticket form.
-USER_PREFIXES = ("/api/assets", "/api/asset-requests", "/api/inventory", "/api/reports", "/api/software", "/api/access")
+USER_PREFIXES = ("/api/assets", "/api/asset-requests", "/api/reports", "/api/software", "/api/access")
 USER_READ_ONLY = ("/api/departments",)
 
 
@@ -101,7 +101,7 @@ class ScopedRoleWriteGuard(BaseHTTPMiddleware):
         ):
             return JSONResponse(
                 status_code=403,
-                content={"detail": "Users can only access their own assets, tickets, stock requests and reports."},
+                content={"detail": "Users can only access their own assets, tickets, software, access and reports."},
             )
         if reading:
             return await call_next(request)

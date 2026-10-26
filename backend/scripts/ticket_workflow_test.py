@@ -459,6 +459,15 @@ code, body = call("adminA", "GET", "/asset-requests/search?status=NOPE")
 check("an unknown status filter is refused", code == 422, body)
 
 if ON_POSTGRES:
+    print("Concurrent duplicate submissions (PostgreSQL)")
+    for label, body in (
+        ("software by name", {"ticket_type": "SOFTWARE", "requested_software_name": "Notion", "reason": "Notes"}),
+        ("hardware", {"asset_category_id": cat["id"], "reason": "Docking station for the desk"}),
+    ):
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            codes = list(pool.map(lambda _: call("u3A", "POST", "/asset-requests", body)[0], range(6)))
+        check(f"six identical {label} requests sent at once: exactly one ticket is created",
+              codes.count(201) == 1 and codes.count(400) == 5, codes)
     print("Concurrent allocation (PostgreSQL)")
     code, solo = call("adminA", "POST", "/software", {"name": "Solo", "approval_required": False, "license": {"seats": 1}})
     racers = []

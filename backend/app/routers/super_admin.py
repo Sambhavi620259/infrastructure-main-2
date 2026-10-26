@@ -11,14 +11,14 @@ from typing import Dict, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
-from sqlalchemy import func, or_
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, func, or_
+from sqlalchemy.orm import Session, aliased
 
 from app.core.database import get_db
 from app.core.deps import require_roles
 from app.core.security import get_password_hash
 from app.models.models import (
-    Asset, AssetRequest, AuditLog, Company, PlatformRole, RequestStatusEnum, Subscription, User,
+    Asset, AssetAssignment, AssetRequest, AssetStatusEnum, AuditLog, Company, PlatformRole, RequestStatusEnum, Subscription, User,
 )
 from app.schemas.schemas import SubscriptionResponse
 from app.services.audit_service import log_audit_event
@@ -159,9 +159,26 @@ class PlatformAuditEntry(BaseModel):
     timestamp: datetime
     user_name: Optional[str] = None
     user_email: Optional[str] = None
+    user_role: Optional[str] = None
     company_name: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class PlatformAssetRow(BaseModel):
+    id: str
+    asset_code: str
+    asset_tag: Optional[str] = None
+    # Other assets carrying the same asset number, so the clash is visible.
+    same_number_count: int = 1
+    serial_number: Optional[str] = None
+    name: str
+    category: str
+    status: str
+    assigned_to_name: Optional[str] = None
+    assigned_to_email: Optional[str] = None
+    assigned_by_name: Optional[str] = None
+    assigned_at: Optional[datetime] = None
 
 
 # --- Helpers -----------------------------------------------------------------
@@ -481,6 +498,8 @@ def platform_audit_logs(
     search: Optional[str] = None,
     action: Optional[str] = None,
     company_id: Optional[str] = None,
+    sign_ins: bool = False,
+    role: Optional[str] = None,
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=500),
     db: Session = Depends(get_db),
@@ -488,10 +507,18 @@ def platform_audit_logs(
 ):
     """Every recorded action on the platform, newest first, with user and organization names."""
     query = (
-        db.query(AuditLog, User.full_name, User.email, Company.name)
+        db.query(AuditLog, User.full_name, User.email, User.role, Company.name)
         .outerjoin(User, User.id == AuditLog.user_id)
         .outerjoin(Company, Company.id == AuditLog.company_id)
     )
+    if sign_ins:
+        # Sign-ins and registrations, including failed Super Admin key attempts.
+        query = query.filter(AuditLog.action.in_(("USER_LOGIN", "USER_REGISTER", "SUPER_ADMIN_KEY_FAILED")))
+    if role:
+        try:
+            query = query.filter(User.role == PlatformRole(role))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Unknown role.")
     if action:
         query = query.filter(AuditLog.action == action)
     if company_id:
@@ -504,11 +531,63 @@ def platform_audit_logs(
         ))
     rows = query.order_by(AuditLog.timestamp.desc()).offset(skip).limit(limit).all()
     result = []
-    for entry, user_name, user_email, company_name in rows:
+    for entry, user_name, user_email, user_role, company_name in rows:
         item = PlatformAuditEntry.model_validate(entry)
         item.user_name, item.user_email, item.company_name = user_name, user_email, company_name
+        item.user_role = user_role.value if user_role else None
         result.append(item)
     return result
+
+
+@router.get("/assets", response_model=List[PlatformAssetRow])
+def platform_assets(
+    search: Optional[str] = None,
+    status_filter: Optional[str] = Query(None, alias="status"),
+    assignment: Optional[str] = Query(None, pattern="^(assigned|unassigned)$"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=500),
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(_super)
+):
+    """Every asset in the system, with who holds it and which IT Admin assigned it."""
+    holder, giver = aliased(User), aliased(User)
+    query = (
+        db.query(Asset, AssetAssignment, holder, giver)
+        .outerjoin(AssetAssignment, and_(AssetAssignment.asset_id == Asset.id, AssetAssignment.is_active.is_(True)))
+        .outerjoin(holder, holder.id == AssetAssignment.user_id)
+        .outerjoin(giver, giver.id == AssetAssignment.assigned_by)
+    )
+    if status_filter:
+        try:
+            query = query.filter(Asset.status == AssetStatusEnum(status_filter))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Unknown status.")
+    if assignment == "assigned":
+        query = query.filter(AssetAssignment.id.isnot(None))
+    elif assignment == "unassigned":
+        query = query.filter(AssetAssignment.id.is_(None))
+    if search:
+        like = f"%{search}%"
+        query = query.filter(or_(
+            Asset.asset_code.ilike(like), Asset.asset_tag.ilike(like), Asset.serial_number.ilike(like),
+            Asset.name.ilike(like), holder.full_name.ilike(like), holder.email.ilike(like), giver.full_name.ilike(like),
+        ))
+    rows = query.order_by(Asset.asset_code).offset(skip).limit(limit).all()
+    tags = [asset.asset_tag for asset, *_ in rows if asset.asset_tag]
+    shared = dict(
+        db.query(Asset.asset_tag, func.count(Asset.id)).filter(Asset.asset_tag.in_(tags)).group_by(Asset.asset_tag).all()
+    ) if tags else {}
+    return [
+        PlatformAssetRow(
+            id=asset.id, asset_code=asset.asset_code, asset_tag=asset.asset_tag,
+            same_number_count=shared.get(asset.asset_tag, 1),
+            serial_number=asset.serial_number, name=asset.name, category=asset.category, status=asset.status.value,
+            assigned_to_name=user.full_name if user else None, assigned_to_email=user.email if user else None,
+            assigned_by_name=by.full_name if by else None,
+            assigned_at=assignment.assigned_at if assignment else None,
+        )
+        for asset, assignment, user, by in rows
+    ]
 
 
 @router.get("/audit-actions", response_model=List[str])

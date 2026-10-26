@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import { apiFetch } from "@/lib/api";
+import { ContactCard, type CompanyContact } from "@/components/settings/contact-card";
 import {
   PLANS,
   changeSuperAdminKey,
@@ -23,7 +25,7 @@ export default function PlatformSettingsPage() {
   useEffect(() => {
     getProvisioningDefaults()
       .then(setDefaults)
-      .catch((caught) => setError(caught instanceof Error ? caught.message : "Unable to load platform settings."));
+      .catch((caught) => setError(caught instanceof Error ? caught.message : "Unable to load settings."));
   }, []);
 
   const saveDefaults = async (event: FormEvent<HTMLFormElement>) => {
@@ -47,9 +49,9 @@ export default function PlatformSettingsPage() {
   return (
     <main className="mx-auto max-w-[1100px] space-y-5">
       <header>
-        <p className="text-[11px] font-bold uppercase tracking-wider text-violet-600">Super Admin · Platform settings</p>
-        <h1 className="mt-1 text-2xl font-extrabold text-slate-950">Platform settings</h1>
-        <p className="mt-1 text-sm text-slate-500">Features per plan, defaults for new organizations and the Super Admin key.</p>
+        <p className="text-[11px] font-bold uppercase tracking-wider text-violet-600">Super Admin · Settings</p>
+        <h1 className="mt-1 text-2xl font-extrabold text-slate-950">Settings</h1>
+        <p className="mt-1 text-sm text-slate-500">Company contact details and office location, features per plan and the Super Admin key.</p>
       </header>
 
       {error && (
@@ -65,6 +67,8 @@ export default function PlatformSettingsPage() {
           </button>
         </div>
       )}
+
+      <CompanyContactCard onSaved={(message) => { setNotice(message); setError(""); }} onError={setError} />
 
       <PlanFeaturesCard onSaved={(message) => { setNotice(message); setError(""); }} onError={setError} />
 
@@ -283,5 +287,29 @@ function PlanFeaturesCard({ onSaved, onError }: { onSaved: (message: string) => 
         {saving ? "Saving…" : "Save plan features"}
       </button>
     </section>
+  );
+}
+
+/** The company's contact details and office location pin, shown with a map. */
+function CompanyContactCard({ onSaved, onError }: { onSaved: (message: string) => void; onError: (message: string) => void }) {
+  const [company, setCompany] = useState<CompanyContact | null>(null);
+
+  useEffect(() => {
+    apiFetch<CompanyContact>("/api/organization")
+      .then(setCompany)
+      .catch((caught) => onError(caught instanceof Error ? caught.message : "Unable to load the company."));
+  }, [onError]);
+
+  if (!company) return null;
+  return (
+    <ContactCard
+      org={company}
+      canEdit
+      onSaved={(updated) => {
+        setCompany((current) => (current ? { ...current, ...updated } : current));
+        onSaved("Company contact details saved.");
+      }}
+      onError={onError}
+    />
   );
 }

@@ -325,7 +325,7 @@ def revoke_grant(
     if holder and holder.id != current_user.id:
         notify(db, holder, f"Your {grant.access_level} access to {resource.name if resource else 'a resource'} was removed",
                f"{current_user.full_name}: {grant.revoke_reason}"[:300],
-               home_link(holder, "/access", "/agent/access"), "WARNING")
+               home_link(holder, "/access", "/agent/assets?tab=access"), "WARNING")
     db.commit()
     log_audit_event(db=db, action="REVOKE_ACCESS", entity="AccessGrant", company_id=company_id,
                     user_id=current_user.id, entity_id=grant.id,
