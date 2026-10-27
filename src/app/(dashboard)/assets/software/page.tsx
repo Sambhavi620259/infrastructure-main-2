@@ -66,7 +66,7 @@ export default function SoftwareAssetsPage() {
 
   useEffect(() => {
     loadProducts();
-    listUserDirectory().then(setUsers).catch(() => undefined);
+    listUserDirectory({ onlyUsers: true }).then(setUsers).catch(() => undefined);
     const fromUrl = new URLSearchParams(window.location.search).get("product");
     if (fromUrl) setSelected(fromUrl);
   }, [loadProducts]);

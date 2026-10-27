@@ -34,7 +34,8 @@ _operators = require_roles([
     PlatformRole.SUPER_ADMIN, PlatformRole.IT_ADMIN, PlatformRole.SUB_ADMIN, PlatformRole.EMPLOYEE,
 ])
 # Only admins hand assets out or take them back; users (EMPLOYEE) cannot.
-_assigners = require_roles([PlatformRole.SUPER_ADMIN, PlatformRole.IT_ADMIN, PlatformRole.SUB_ADMIN])
+# Handing devices out is the IT team's job; the Super Admin only views.
+_assigners = require_roles([PlatformRole.IT_ADMIN, PlatformRole.SUB_ADMIN])
 # Fields a user (EMPLOYEE) may change through PUT /assets/{id}.
 _AGENT_EDITABLE_FIELDS = {"status", "status_remarks", "condition", "location_id"}
 
@@ -713,6 +714,8 @@ def assign_asset_to_user(
     ).first()
     if not target_user:
         raise HTTPException(status_code=404, detail="Target active user not found.")
+    if target_user.role != PlatformRole.EMPLOYEE:
+        raise HTTPException(status_code=400, detail="Assets can only be assigned to users, not to IT Admins or the Super Admin.")
 
     old_status = asset.status.value
     asset.status = AssetStatusEnum.ASSIGNED

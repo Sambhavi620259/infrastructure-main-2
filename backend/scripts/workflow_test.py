@@ -184,6 +184,8 @@ code, asset_now = call("adminA", "GET", f"/assets/{laptop1['id']}")
 check("the device is assigned to the user", asset_now["status"] == "ASSIGNED" and asset_now["assigned_to_id"] == IDS["u1A"], asset_now)
 code, body = call("adminA", "POST", f"/assets/{laptop1['id']}/assign", {"user_id": IDS["u2A"]})
 check("an assigned device cannot be assigned again", code == 400, body)
+code, body = call("adminA", "POST", f"/assets/{untagged['id']}/assign", {"user_id": IDS["adminA"]})
+check("a device cannot be assigned to an IT Admin", code == 400, body)
 code, detail = call("adminA", "GET", f"/assets/{laptop1['id']}")
 check("the asset shows who assigned it", code == 200 and detail.get("assigned_by_name"), detail)
 with Session() as db:
@@ -252,6 +254,9 @@ check("users see the catalogue (names only) to request from",
 code, sw_ticket = call("u1A", "POST", "/asset-requests", {"ticket_type": "SOFTWARE", "software_id": sw_id, "reason": "Need Office"})
 check("a user requests software access", code == 201 and sw_ticket["software_name"] == "Microsoft 365", sw_ticket)
 call("adminA", "PUT", f"/asset-requests/{sw_ticket['id']}", {"status": "APPROVED"})
+code, entries = call("adminA", "GET", "/users/directory?only_users=true")
+check("seat picker lists only ordinary users", code == 200 and entries and IDS["adminA"] not in [e["id"] for e in entries]
+      and IDS["u1A"] in [e["id"] for e in entries], entries)
 code, body = call("adminA", "POST", f"/software/{sw_id}/assign", {"user_id": IDS["u2A"]})
 code, seat_admin = call("adminA", "POST", f"/software/{sw_id}/assign", {"user_id": IDS["adminA"]})
 check("seats can be assigned directly by an admin", code == 201, seat_admin)

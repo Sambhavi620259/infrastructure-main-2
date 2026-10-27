@@ -245,6 +245,7 @@ def get_user_counts(
 
 @router.get("/directory", response_model=List[UserDirectoryEntry])
 def list_user_directory(
+    only_users: bool = False,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
@@ -253,12 +254,11 @@ def list_user_directory(
     company_id = tenant_company_id or current_user.company_id
     if not company_id:
         raise HTTPException(status_code=400, detail="Company context required.")
-    return (
-        db.query(User)
-        .filter(User.company_id == company_id, User.status == "ACTIVE")
-        .order_by(User.full_name)
-        .all()
-    )
+    query = db.query(User).filter(User.company_id == company_id, User.status == "ACTIVE")
+    if only_users:
+        # Ordinary users only: no IT Admins, Sub Admins, Reporting users or Super Admin.
+        query = query.filter(User.role == PlatformRole.EMPLOYEE)
+    return query.order_by(User.full_name).all()
 
 
 @router.get("/unassigned", response_model=List[UserResponse])

@@ -50,8 +50,8 @@ export interface DirectoryEntry {
 }
 
 /** GET /api/users/directory — active users in your organization, names only. Used by agent pages. */
-export function listUserDirectory(): Promise<DirectoryEntry[]> {
-  return apiFetch<DirectoryEntry[]>("/api/users/directory");
+export function listUserDirectory(options: { onlyUsers?: boolean } = {}): Promise<DirectoryEntry[]> {
+  return apiFetch<DirectoryEntry[]>(`/api/users/directory${options.onlyUsers ? "?only_users=true" : ""}`);
 }
 
 export function listDepartments(): Promise<Department[]> {

@@ -110,6 +110,16 @@ export interface PlatformAsset {
   assigned_at: string | null;
 }
 
+export interface PlatformSeat {
+  id: string;
+  software_name: string;
+  license_number: string | null;
+  assigned_to_name: string;
+  assigned_to_email: string;
+  assigned_by_name: string | null;
+  assigned_at: string | null;
+}
+
 export interface ProvisioningDefaults {
   plan: Plan;
   user_limit: number;
@@ -188,6 +198,10 @@ export function listPlatformAssets(
   params: { search?: string; status?: string; assignment?: string; skip?: number; limit?: number } = {},
 ): Promise<PlatformAsset[]> {
   return apiFetch<PlatformAsset[]>(`/api/super-admin/assets${query(params)}`);
+}
+
+export function listPlatformSeats(params: { search?: string; skip?: number; limit?: number } = {}): Promise<PlatformSeat[]> {
+  return apiFetch<PlatformSeat[]>(`/api/super-admin/software-seats${query(params)}`);
 }
 
 export function listAuditActions(): Promise<string[]> {

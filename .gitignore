@@ -13,3 +13,4 @@ __pycache__/
 CHANGES-REQUESTED.md
 PRODUCTION_REQUIREMENTS.md
 backups/
+.vercel

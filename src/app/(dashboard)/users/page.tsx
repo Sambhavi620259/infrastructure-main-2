@@ -12,7 +12,6 @@ import {
   removeUser,
 } from "@/lib/users";
 import {
-  BACKEND_ROLES,
   initialsOf,
   moduleLabel,
   roleBadgeClass,
@@ -34,7 +33,6 @@ export default function UsersPage() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [currentUserId, setCurrentUserId] = useState("");
   const [query, setQuery] = useState("");
-  const [role, setRole] = useState("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -45,7 +43,8 @@ export default function UsersPage() {
     setLoading(true);
     Promise.all([listUsers({ limit: 200 }), listUnassignedAgents()])
       .then(([userData, signupData]) => {
-        setUsers(userData);
+        // This page is for ordinary users only; IT Admins and the Super Admin are managed elsewhere.
+        setUsers(userData.filter((user) => user.role === "EMPLOYEE"));
         setSignups(signupData);
         setError("");
       })
@@ -74,11 +73,10 @@ export default function UsersPage() {
   const visibleUsers = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return users.filter((user) => {
-      const matchesRole = role === "all" || user.role === role;
-      const haystack = `${user.full_name} ${user.email} ${user.agent_id ?? ""} ${roleLabel(user.role)}`.toLowerCase();
-      return matchesRole && haystack.includes(needle);
+      const haystack = `${user.full_name} ${user.email} ${user.agent_id ?? ""}`.toLowerCase();
+      return haystack.includes(needle);
     });
-  }, [users, query, role]);
+  }, [users, query]);
 
   /** Run a row action, then reload both lists. */
   const act = async (userId: string, action: () => Promise<unknown>, success: string) => {
@@ -147,7 +145,7 @@ export default function UsersPage() {
           <p className="text-[11px] font-bold uppercase tracking-wider text-brand-600">Users · Directory</p>
           <h1 className="mt-1 text-2xl font-extrabold tracking-tight text-slate-950">Users</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Everyone with access to this organization&rsquo;s workspace, plus new users waiting to be added.
+            The users of this organization, plus new sign-ups waiting to be added.
           </p>
         </div>
       </header>
@@ -247,19 +245,6 @@ export default function UsersPage() {
               placeholder="Search name, email or User ID"
               className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none placeholder:text-slate-400 focus:border-brand-500 sm:w-64"
             />
-            <select
-              aria-label="Filter users by role"
-              value={role}
-              onChange={(event) => setRole(event.target.value)}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 outline-none focus:border-brand-500"
-            >
-              <option value="all">All roles</option>
-              {BACKEND_ROLES.map((value) => (
-                <option key={value} value={value}>
-                  {roleLabel(value)}
-                </option>
-              ))}
-            </select>
           </div>
         </div>
 

@@ -18,7 +18,7 @@ from app.core.database import get_db
 from app.core.deps import require_roles
 from app.core.security import get_password_hash
 from app.models.models import (
-    Asset, AssetAssignment, AssetRequest, AssetStatusEnum, AuditLog, Company, PlatformRole, RequestStatusEnum, Subscription, User,
+    Asset, AssetAssignment, AssetRequest, AssetStatusEnum, AuditLog, Company, Software, SoftwareLicense, SoftwareLicenseAssignment, PlatformRole, RequestStatusEnum, Subscription, User,
 )
 from app.schemas.schemas import SubscriptionResponse
 from app.services.audit_service import log_audit_event
@@ -163,6 +163,16 @@ class PlatformAuditEntry(BaseModel):
     company_name: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class PlatformSeatRow(BaseModel):
+    id: str
+    software_name: str
+    license_number: Optional[str] = None
+    assigned_to_name: str
+    assigned_to_email: str
+    assigned_by_name: Optional[str] = None
+    assigned_at: Optional[datetime] = None
 
 
 class PlatformAssetRow(BaseModel):
@@ -587,6 +597,41 @@ def platform_assets(
             assigned_at=assignment.assigned_at if assignment else None,
         )
         for asset, assignment, user, by in rows
+    ]
+
+
+@router.get("/software-seats", response_model=List[PlatformSeatRow])
+def platform_software_seats(
+    search: Optional[str] = None,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=500),
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(_super)
+):
+    """Software seats currently held, with the user and the IT Admin who gave each one."""
+    holder, giver = aliased(User), aliased(User)
+    query = (
+        db.query(SoftwareLicenseAssignment, Software.name, SoftwareLicense.license_number, holder, giver)
+        .join(Software, Software.id == SoftwareLicenseAssignment.software_id)
+        .outerjoin(SoftwareLicense, SoftwareLicense.id == SoftwareLicenseAssignment.license_id)
+        .join(holder, holder.id == SoftwareLicenseAssignment.user_id)
+        .outerjoin(giver, giver.id == SoftwareLicenseAssignment.assigned_by)
+        .filter(SoftwareLicenseAssignment.is_active.is_(True))
+    )
+    if search:
+        like = f"%{search}%"
+        query = query.filter(or_(
+            Software.name.ilike(like), SoftwareLicense.license_number.ilike(like),
+            holder.full_name.ilike(like), holder.email.ilike(like), giver.full_name.ilike(like),
+        ))
+    rows = query.order_by(SoftwareLicenseAssignment.assigned_at.desc()).offset(skip).limit(limit).all()
+    return [
+        PlatformSeatRow(
+            id=seat.id, software_name=name, license_number=number,
+            assigned_to_name=user.full_name, assigned_to_email=user.email,
+            assigned_by_name=by.full_name if by else None, assigned_at=seat.assigned_at,
+        )
+        for seat, name, number, user, by in rows
     ]
 
 

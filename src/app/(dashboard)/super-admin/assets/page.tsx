@@ -1,17 +1,22 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { formatDateTime, listPlatformAssets, type PlatformAsset } from "@/lib/super-admin";
-import { ASSET_STATUSES, assetStatusLabel, assetStatusStyle } from "@/types/asset";
+import {
+  formatDateTime,
+  listPlatformAssets,
+  listPlatformSeats,
+  type PlatformAsset,
+  type PlatformSeat,
+} from "@/lib/super-admin";
 
 const PAGE_SIZE = 50;
 
 export default function PlatformAssetsPage() {
   const [assets, setAssets] = useState<PlatformAsset[]>([]);
+  const [seats, setSeats] = useState<PlatformSeat[]>([]);
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
-  const [status, setStatus] = useState("");
-  const [assignment, setAssignment] = useState("");
+  const [assignment, setAssignment] = useState("assigned");
   const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -29,8 +34,7 @@ export default function PlatformAssetsPage() {
     setLoading(true);
     listPlatformAssets({
       search: search || undefined,
-      status: status || undefined,
-      assignment: assignment || undefined,
+      assignment: assignment === "all" ? undefined : assignment,
       skip: page * PAGE_SIZE,
       limit: PAGE_SIZE,
     })
@@ -48,21 +52,33 @@ export default function PlatformAssetsPage() {
     return () => {
       cancelled = true;
     };
-  }, [search, status, assignment, page]);
+  }, [search, assignment, page]);
+
+  // Software seats follow the same search box.
+  useEffect(() => {
+    listPlatformSeats({ search: search || undefined, limit: 200 })
+      .then(setSeats)
+      .catch(() => setSeats([]));
+  }, [search]);
 
   return (
     <main className="mx-auto max-w-[1400px] space-y-5">
       <header>
-        <p className="text-[11px] font-bold uppercase tracking-wider text-violet-600">Super Admin · All assets</p>
+        <p className="text-[11px] font-bold uppercase tracking-wider text-violet-600">
+          Super Admin · All assets
+        </p>
         <h1 className="mt-1 text-2xl font-extrabold text-slate-950">All assets</h1>
         <p className="mt-1 text-sm text-slate-500">
-          Every asset in the system, who holds it, and which IT Admin assigned it. The Asset ID is unique to each device;
-          the asset number can be shared by several.
+          Every hardware asset and software seat in the system, who holds it, and which IT Admin assigned it.
+          The Asset ID is unique to each device; the asset number can be shared by several.
         </p>
       </header>
 
       {error && (
-        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+        <div
+          role="alert"
+          className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
+        >
           {error}
         </div>
       )}
@@ -85,32 +101,16 @@ export default function PlatformAssetsPage() {
             aria-label="Filter by assignment"
             className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
           >
-            <option value="">Assigned and unassigned</option>
             <option value="assigned">Assigned to a user</option>
             <option value="unassigned">Not assigned</option>
-          </select>
-          <select
-            value={status}
-            onChange={(event) => {
-              setStatus(event.target.value);
-              setPage(0);
-            }}
-            aria-label="Filter by status"
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
-          >
-            <option value="">All statuses</option>
-            {ASSET_STATUSES.map((value) => (
-              <option key={value} value={value}>
-                {assetStatusLabel(value)}
-              </option>
-            ))}
+            <option value="all">All assets</option>
           </select>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[960px] text-left">
             <thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-400">
               <tr>
-                {["Asset ID", "Asset", "Status", "Assigned to", "Assigned by", "Assigned on"].map((h) => (
+                {["Asset ID", "Asset", "Assigned to", "Assigned by", "Assigned on"].map((h) => (
                   <th key={h} className="px-4 py-2.5">
                     {h}
                   </th>
@@ -120,7 +120,9 @@ export default function PlatformAssetsPage() {
             <tbody className="divide-y divide-slate-100">
               {assets.map((asset) => (
                 <tr key={asset.id} className="align-top text-sm">
-                  <td className="whitespace-nowrap px-4 py-3 font-mono font-semibold text-slate-800">{asset.asset_code}</td>
+                  <td className="whitespace-nowrap px-4 py-3 font-mono font-semibold text-slate-800">
+                    {asset.asset_code}
+                  </td>
                   <td className="px-4 py-3">
                     <p className="font-semibold text-slate-800">{asset.name}</p>
                     <p className="text-xs text-slate-500">
@@ -130,14 +132,10 @@ export default function PlatformAssetsPage() {
                     </p>
                     {asset.same_number_count > 1 && (
                       <p className="mt-0.5 text-xs font-semibold text-amber-700">
-                        {asset.same_number_count} assets share this number. Use the Asset ID to tell them apart.
+                        {asset.same_number_count} assets share this number. Use the Asset ID to tell them
+                        apart.
                       </p>
                     )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${assetStatusStyle(asset.status)}`}>
-                      {assetStatusLabel(asset.status)}
-                    </span>
                   </td>
                   <td className="px-4 py-3">
                     {asset.assigned_to_name ? (
@@ -149,7 +147,9 @@ export default function PlatformAssetsPage() {
                       <span className="text-slate-400">Not assigned</span>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-slate-600">{asset.assigned_to_name ? (asset.assigned_by_name ?? "—") : ""}</td>
+                  <td className="px-4 py-3 text-slate-600">
+                    {asset.assigned_to_name ? (asset.assigned_by_name ?? "—") : ""}
+                  </td>
                   <td className="whitespace-nowrap px-4 py-3 text-slate-500">
                     {asset.assigned_to_name ? formatDateTime(asset.assigned_at) : ""}
                   </td>
@@ -183,6 +183,51 @@ export default function PlatformAssetsPage() {
           </span>
         </footer>
       </section>
+
+      {assignment !== "unassigned" && (
+        <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-100 px-4 py-3">
+            <h2 className="font-extrabold text-slate-900">Software seats ({seats.length})</h2>
+            <p className="text-xs text-slate-500">Software given to users, and the IT Admin who gave it.</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] text-left">
+              <thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                <tr>
+                  {["Software", "Assigned to", "Assigned by", "Assigned on"].map((h) => (
+                    <th key={h} className="px-4 py-2.5">
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {seats.map((seat) => (
+                  <tr key={seat.id} className="align-top text-sm">
+                    <td className="px-4 py-3">
+                      <p className="font-semibold text-slate-800">{seat.software_name}</p>
+                      {seat.license_number && (
+                        <p className="text-xs text-slate-500">License {seat.license_number}</p>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <p className="font-semibold text-slate-800">{seat.assigned_to_name}</p>
+                      <p className="text-xs text-slate-500">{seat.assigned_to_email}</p>
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">{seat.assigned_by_name ?? "—"}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-slate-500">
+                      {formatDateTime(seat.assigned_at)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {seats.length === 0 && (
+            <p className="p-8 text-center text-sm text-slate-500">No software seats are assigned.</p>
+          )}
+        </section>
+      )}
     </main>
   );
 }

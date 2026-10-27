@@ -332,16 +332,6 @@ export function AssetForm({
       {software ? (
         <Fieldset title="License" hint="License Count is the number of seats bought. Assigned and available seats are tracked separately.">
           <label className={label}>
-            License type
-            <select value={values.license_type} onChange={set("license_type")} className={input}>
-              {LICENSE_TYPES.map((type) => (
-                <option key={type} value={type}>
-                  {licenseTypeLabel(type)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className={label}>
             License Number <span className="font-normal text-slate-400">(optional)</span>
             <input
               value={values.license_number}
