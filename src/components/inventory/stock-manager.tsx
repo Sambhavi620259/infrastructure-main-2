@@ -183,7 +183,7 @@ export function StockManager({
         </div>
         {!loading && visible.length === 0 && !error && (
           <p className="p-8 text-center text-xs text-slate-500">
-            {items.length === 0 ? "No inventory items yet. An IT Admin adds them with Add item." : "No items match."}
+            {items.length === 0 ? "No consumables yet." : "No items match."}
           </p>
         )}
       </section>

@@ -38,6 +38,8 @@ export interface AssetFormValues {
   license_count: string;
   license_expiry: string;
   license_renewal: string;
+  /** Hardware only: more licenses that come with the device (the + button). */
+  extra_licenses: { license_type: string; license_number: string }[];
   /** Software only: requests need approval before a seat is given. */
   approval_required: boolean;
 }
@@ -47,7 +49,7 @@ export function emptyAssetForm(): AssetFormValues {
     asset_tag: "", serial_number: "", name: "", category: "", type: "Hardware", brand: "", model: "", specifications: "",
     condition: "EXCELLENT", department_id: "", vendor_id: "", location_id: "", purchase_date: "", purchase_price: "",
     warranty_start: "", warranty_end: "", amc_vendor_id: "", amc_start: "", amc_end: "", amc_cost: "", description: "", license_type: "", license_number: "",
-    license_count: "", license_expiry: "", license_renewal: "", approval_required: true,
+    license_count: "", license_expiry: "", license_renewal: "", extra_licenses: [], approval_required: true,
   };
 }
 
@@ -94,6 +96,7 @@ export function assetToForm(asset: Asset): AssetFormValues {
     license_type: asset.license_type ?? "",
     license_number: asset.license_number ?? "",
     license_expiry: day(asset.license_expiry ?? null),
+    extra_licenses: (asset.extra_licenses ?? []).map((entry) => ({ license_type: entry.license_type ?? "", license_number: entry.license_number })),
   };
 }
 
@@ -133,6 +136,9 @@ export function formToPayload(values: AssetFormValues) {
     // Blank clears the license number.
     license_number: values.license_number.trim(),
     license_expiry: date(values.license_expiry),
+    extra_licenses: values.extra_licenses
+      .filter((entry) => entry.license_number.trim())
+      .map((entry) => ({ license_type: entry.license_type || null, license_number: entry.license_number.trim() })),
     description: text(values.description),
   };
 }
@@ -192,6 +198,11 @@ export function validateAssetForm(values: AssetFormValues, software = false): st
     }
     if (values.purchase_date && values.license_expiry && values.license_expiry < values.purchase_date) {
       return "License expiry must be after the purchase date.";
+    }
+    for (const entry of values.extra_licenses) {
+      if (entry.license_number.trim() && !LICENSE_NUMBER_PATTERN.test(entry.license_number.trim())) {
+        return "A license number is 3-255 letters, digits and - _ . / # characters.";
+      }
     }
   }
   if (values.purchase_price && !(Number(values.purchase_price) >= 0)) return "Purchase price must be zero or more.";
@@ -436,21 +447,67 @@ export function AssetForm({
                 ))}
               </select>
             </label>
-            <label className={label}>
-              License number
-              <input
-                value={values.license_number}
-                onChange={set("license_number")}
-                maxLength={255}
-                autoComplete="off"
-                placeholder="e.g. WIN11-PRO-XXXX-XXXX"
-                className={`${input} font-mono`}
-              />
-            </label>
+            <div className={label}>
+              <label htmlFor="license-number-0">License number</label>
+              <div className="relative">
+                <input
+                  id="license-number-0"
+                  value={values.license_number}
+                  onChange={set("license_number")}
+                  maxLength={255}
+                  autoComplete="off"
+                  placeholder="e.g. WIN11-PRO-XXXX-XXXX"
+                  className={`${input} pr-11 font-mono`}
+                />
+                {values.extra_licenses.length < 10 && (
+                  <button
+                    type="button"
+                    aria-label="Add another license"
+                    title="Add another license number"
+                    onClick={() =>
+                      setValues((current) => ({ ...current, extra_licenses: [...current.extra_licenses, { license_type: "", license_number: "" }] }))
+                    }
+                    className="absolute inset-y-0 right-1.5 my-auto flex h-7 w-7 items-center justify-center rounded-md bg-brand-600 text-base font-bold leading-none text-white hover:bg-brand-700"
+                  >
+                    +
+                  </button>
+                )}
+              </div>
+              {values.extra_licenses.map((entry, index) => (
+                <div key={index} className="relative mt-2">
+                  <input
+                    aria-label={`License number ${index + 2}`}
+                    value={entry.license_number}
+                    onChange={(event) =>
+                      setValues((current) => ({
+                        ...current,
+                        extra_licenses: current.extra_licenses.map((item, i) => (i === index ? { ...item, license_number: event.target.value } : item)),
+                      }))
+                    }
+                    maxLength={255}
+                    autoComplete="off"
+                    placeholder={`License number ${index + 2}`}
+                    className={`${input} pr-11 font-mono`}
+                  />
+                  <button
+                    type="button"
+                    aria-label={`Remove license ${index + 2}`}
+                    title="Remove this license number"
+                    onClick={() =>
+                      setValues((current) => ({ ...current, extra_licenses: current.extra_licenses.filter((_, i) => i !== index) }))
+                    }
+                    className="absolute inset-y-0 right-1.5 my-auto flex h-7 w-7 items-center justify-center rounded-md border border-rose-200 text-base font-bold leading-none text-rose-600 hover:bg-rose-50"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
             <label className={label}>
               License expiry
               <input type="date" value={values.license_expiry} onChange={set("license_expiry")} className={input} />
             </label>
+
           </Fieldset>
 
           <Fieldset title="AMC (annual maintenance contract)" hint="All optional. Fill these if the device is covered by an AMC.">

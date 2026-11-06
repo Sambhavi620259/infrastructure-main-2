@@ -1,4 +1,5 @@
 """Implementation file: app/schemas/schemas.py"""
+import json
 from datetime import datetime
 from decimal import Decimal
 import re
@@ -214,6 +215,20 @@ def clean_asset_tag(value: Optional[str]) -> Optional[str]:
     return value
 
 
+class LicenseEntry(BaseModel):
+    """One more license that comes with a device."""
+    license_type: Optional[Literal["PERPETUAL", "SUBSCRIPTION", "PER_USER", "PER_DEVICE", "SITE", "VOLUME", "OEM", "TRIAL"]] = None
+    license_number: str = Field(..., max_length=255)
+
+    @field_validator("license_number", mode="before")
+    @classmethod
+    def _number(cls, value):
+        cleaned = clean_license_number(value)
+        if not cleaned:
+            raise ValueError("Enter the license number, or remove the empty row.")
+        return cleaned
+
+
 class AssetBase(BaseModel):
     # Optional: blank is stored as no tag / no serial number. Only the name is required.
     asset_tag: Optional[str] = Field(None, max_length=100)
@@ -238,6 +253,7 @@ class AssetBase(BaseModel):
     license_type: Optional[Literal["PERPETUAL", "SUBSCRIPTION", "PER_USER", "PER_DEVICE", "SITE", "VOLUME", "OEM", "TRIAL"]] = None
     license_number: Optional[str] = Field(None, max_length=255)
     license_expiry: Optional[datetime] = None
+    extra_licenses: List[LicenseEntry] = Field(default_factory=list, max_length=10)
     location_id: Optional[str] = None
     department_id: Optional[str] = None
     condition: str = "EXCELLENT"
@@ -293,6 +309,7 @@ class AssetUpdate(BaseModel):
     license_type: Optional[Literal["PERPETUAL", "SUBSCRIPTION", "PER_USER", "PER_DEVICE", "SITE", "VOLUME", "OEM", "TRIAL"]] = None
     license_number: Optional[str] = Field(None, max_length=255)
     license_expiry: Optional[datetime] = None
+    extra_licenses: Optional[List[LicenseEntry]] = Field(None, max_length=10)
     location_id: Optional[str] = None
     department_id: Optional[str] = None
     status: Optional[AssetStatusEnum] = None
@@ -328,6 +345,19 @@ class AssetResponse(AssetBase):
     @field_validator("license_number", mode="before")
     @classmethod
     def _license_number(cls, value):
+        return value
+
+    # Stored as JSON text on the asset.
+    @field_validator("extra_licenses", mode="before")
+    @classmethod
+    def _extra_licenses(cls, value):
+        if not value:
+            return []
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except ValueError:
+                return []
         return value
 
     @field_validator("category", mode="before")

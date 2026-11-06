@@ -229,6 +229,8 @@ class Asset(Base):
     license_type = Column(String(30), nullable=True)
     license_number = Column(String(255), nullable=True)
     license_expiry = Column(DateTime, nullable=True)
+    # More licenses on the same device (e.g. Office, antivirus): a JSON list of {license_type, license_number}.
+    extra_licenses = Column(Text, nullable=True)
     # Depreciation inputs and the last calculated book value.
     depreciation_method = Column(String(30), default="STRAIGHT_LINE", nullable=False, server_default="STRAIGHT_LINE")
     useful_life_years = Column(Integer, default=5, nullable=False, server_default="5")

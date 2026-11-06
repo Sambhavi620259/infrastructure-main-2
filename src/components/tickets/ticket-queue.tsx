@@ -36,7 +36,7 @@ import { listDepartments, type DirectoryEntry } from "@/lib/users";
 import type { Asset } from "@/types/asset";
 import type { Department } from "@/types/user";
 import { CategoryPicker, resolveCategoryId } from "@/components/tickets/category-picker";
-import { TicketStatusBadge, TicketTypeChip, ticketHandler, ticketHref, ticketNumber } from "@/components/tickets/ticket-actions";
+import { TicketActions, TicketStatusBadge, TicketTypeChip, ticketHandler, ticketHref, ticketNumber } from "@/components/tickets/ticket-actions";
 import { getProfile } from "@/lib/profile";
 import { softwareCatalog, type CatalogEntry } from "@/lib/software";
 import { accessCatalog, type AccessResource } from "@/lib/access-management";
@@ -415,6 +415,8 @@ function TicketRow({
   onError: (message: string) => void;
 }) {
   const [updating, setUpdating] = useState(false);
+  const [changing, setChanging] = useState(false);
+  const [stock, setStock] = useState<Asset[]>([]);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const handler = ticketHandler(ticket);
@@ -492,7 +494,26 @@ function TicketRow({
             {canHandle && isOpenTicket(ticket.status) && (
               <button
                 type="button"
-                onClick={() => setUpdating((v) => !v)}
+                onClick={() => {
+                  const next = !changing;
+                  setChanging(next);
+                  setUpdating(false);
+                  // Devices to hand over are only needed once the panel opens.
+                  if (next) listAssets({ status: "IN_STOCK", limit: 200 }).then(setStock).catch(() => setStock([]));
+                }}
+                aria-expanded={changing}
+                className="rounded-lg border border-brand-200 px-2.5 py-1.5 text-[11px] font-bold text-brand-700 hover:bg-brand-50"
+              >
+                Change status
+              </button>
+            )}
+            {canHandle && isOpenTicket(ticket.status) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setUpdating((v) => !v);
+                  setChanging(false);
+                }}
                 aria-expanded={updating}
                 className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-[11px] font-bold text-slate-700 hover:bg-slate-50"
               >
@@ -512,6 +533,26 @@ function TicketRow({
         )}
       </td>
     </tr>
+    {changing && (
+      <tr className="bg-slate-50">
+        <td colSpan={8} className="px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-xs font-semibold text-slate-600">
+              Now {ticketStatusLabel(ticket.status, ticket.ticket_type)}. Move {ticketNumber(ticket)} to:
+            </p>
+            <TicketActions
+              ticket={ticket}
+              stock={stock}
+              onDone={(message) => {
+                setChanging(false);
+                onUpdated(message);
+              }}
+              onError={onError}
+            />
+          </div>
+        </td>
+      </tr>
+    )}
     {updating && (
       <tr className="bg-slate-50">
         <td colSpan={8} className="px-4 py-3">

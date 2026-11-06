@@ -47,6 +47,8 @@ export interface Asset {
   license_type?: string | null;
   license_number?: string | null;
   license_expiry?: string | null;
+  /** More licenses on the same device, each with its own type and number. */
+  extra_licenses?: { license_type: string | null; license_number: string }[];
   location_id: string | null;
   department_id: string | null;
   condition: string;

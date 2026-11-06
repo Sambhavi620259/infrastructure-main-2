@@ -147,6 +147,17 @@ code, body = call("adminA", "POST", "/assets", {"serial_number": "X-1", "name": 
 check("two devices may share an asset number, each with its own Asset ID",
       code == 201 and body["asset_tag"] == "LAP-002" and body["asset_code"] != laptop2["asset_code"]
       and body["asset_code"].startswith("AST-"), body)
+code, multi = call("adminA", "POST", "/assets", {"serial_number": "ML-1", "name": "Multi license laptop", "category": "Laptop",
+                                                 "license_type": "OEM", "license_number": "WIN11-AAAA-0001",
+                                                 "extra_licenses": [{"license_type": "SUBSCRIPTION", "license_number": "OFFICE-BBBB-0002"},
+                                                                    {"license_number": "AV-CCCC-0003"}]})
+check("a device can carry several licenses", code == 201 and [e["license_number"] for e in multi["extra_licenses"]] == ["OFFICE-BBBB-0002", "AV-CCCC-0003"], multi)
+code, body = call("adminA", "POST", "/assets", {"serial_number": "ML-2", "name": "x", "category": "Laptop", "extra_licenses": [{"license_number": "bad key!"}]})
+check("a malformed extra license number is refused", code == 422, body)
+code, body = call("adminA", "PUT", f"/assets/{multi['id']}", {"extra_licenses": [{"license_type": "PERPETUAL", "license_number": "CAD-DDDD-0004"}]})
+check("extra licenses can be replaced", code == 200 and [e["license_number"] for e in body["extra_licenses"]] == ["CAD-DDDD-0004"], body)
+code, body = call("adminA", "PUT", f"/assets/{multi['id']}", {"extra_licenses": []})
+check("extra licenses can be cleared", code == 200 and body["extra_licenses"] == [], body)
 code, body = call("adminA", "POST", "/assets", {"serial_number": "X-1", "name": "x", "category": "Laptop"})
 check("a duplicate serial number is still refused", code == 400, body)
 code, listed = call("adminA", "GET", "/assets?limit=500")

@@ -1,5 +1,6 @@
 """Implementation file: app/routers/assets.py"""
 from typing import Dict, List, Optional
+import json
 from datetime import datetime, timedelta
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status, WebSocket, WebSocketDisconnect
 from sqlalchemy import func, or_
@@ -216,6 +217,9 @@ def _for_viewer(response: AssetResponse, viewer: User) -> AssetResponse:
     """Users see only the last four characters of a device's license number; admins see it in full."""
     if viewer.role == PlatformRole.EMPLOYEE and response.license_number:
         response.license_number = mask_license_number(response.license_number)
+    if viewer.role == PlatformRole.EMPLOYEE:
+        for entry in response.extra_licenses:
+            entry.license_number = mask_license_number(entry.license_number)
     return response
 
 
@@ -352,6 +356,7 @@ def create_asset(
         license_type=asset_in.license_type,
         license_number=asset_in.license_number,
         license_expiry=asset_in.license_expiry,
+        extra_licenses=json.dumps([entry.model_dump() for entry in asset_in.extra_licenses]) if asset_in.extra_licenses else None,
         location_id=asset_in.location_id or (receipt.location if receipt else None),
         department_id=asset_in.department_id,
         status=asset_in.status,
@@ -630,6 +635,10 @@ def update_asset(
             status_code=400,
             detail="Use POST /assets/{id}/assign to assign an asset to a user."
         )
+
+    if "extra_licenses" in update_data:
+        extra = update_data["extra_licenses"]
+        update_data["extra_licenses"] = json.dumps(extra) if extra else None
 
     for field, value in update_data.items():
         setattr(asset, field, value)

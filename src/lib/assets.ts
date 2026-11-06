@@ -47,6 +47,7 @@ export type AssetCreateInput = {
   license_type?: string;
   license_number?: string;
   license_expiry?: string;
+  extra_licenses?: { license_type: string | null; license_number: string }[];
 };
 
 function buildQuery(params: Record<string, string | number | undefined>): string {

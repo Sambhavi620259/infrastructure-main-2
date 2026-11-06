@@ -177,6 +177,10 @@ export default function AssetDetailPage() {
     ["License", asset.license_type ? licenseTypeLabel(asset.license_type) : "—"],
     ["License number", asset.license_number ?? "—"],
     ["License expiry", formatDate(asset.license_expiry ?? null)],
+    ...((asset.extra_licenses ?? []).map((entry, index) => [
+      `License ${index + 2}`,
+      `${entry.license_type ? licenseTypeLabel(entry.license_type) + " · " : ""}${entry.license_number}`,
+    ]) as [string, string][]),
     ["AMC vendor", amcVendor || "—"],
     ["AMC period", asset.amc_start || asset.amc_end ? `${formatDate(asset.amc_start ?? null)} – ${formatDate(asset.amc_end ?? null)}` : "—"],
     ["AMC cost", Number(asset.amc_cost) ? Number(asset.amc_cost).toLocaleString() : "—"],
