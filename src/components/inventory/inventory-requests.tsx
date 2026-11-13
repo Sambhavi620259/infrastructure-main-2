@@ -64,7 +64,7 @@ export function InventoryRequests({
       <div className="flex flex-col gap-2 border-b border-slate-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-sm font-bold">
-            {admin ? "Stock requests" : "My requests"}
+            {admin ? "Consumable requests" : "My requests"}
             {pending > 0 && (
               <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">
                 {pending} waiting
@@ -73,7 +73,7 @@ export function InventoryRequests({
           </h2>
           <p className="text-[11px] text-slate-500">
             {admin
-              ? "Approving issues the stock to the user and lowers the quantity."
+              ? "Approving gives the consumable to the user and lowers the quantity."
               : "Your IT Admin approves each request and issues the stock to you."}
           </p>
         </div>

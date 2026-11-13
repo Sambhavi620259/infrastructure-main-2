@@ -69,7 +69,7 @@ export default function MovementsPage() {
         ))}
       </div>
       {tab === "movements" && <MovementLedger />}
-      {tab === "consumables" && <StockManager eyebrow="Inventory · Consumables" canManage />}
+      {tab === "consumables" && <StockManager eyebrow="Assets · Consumables" canManage />}
       {tab === "orders" && <PurchaseOrdersPage />}
       {tab === "vendors" && <VendorsPage />}
     </div>

@@ -309,9 +309,11 @@ export function AppShell({ children }: { children: ReactNode }) {
     if (!counts || !countKey) return null;
     switch (countKey) {
       case "assets": return counts.assets.total;
-      case "tickets": return counts.tickets.pending;
+      // Tickets waiting on the IT team, the same set as the "Needs action" view.
+      case "tickets": return counts.tickets.needs_action ?? counts.tickets.pending;
       case "inventory": return counts.inventory.low_stock;
-      case "users": return counts.users.total;
+      // The All Users page lists ordinary users only.
+      case "users": return counts.users.employees ?? counts.users.total;
       default: return null;
     }
   };

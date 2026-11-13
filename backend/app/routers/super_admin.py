@@ -33,6 +33,9 @@ router = APIRouter(prefix="/super-admin", tags=["Super Admin"])
 
 _super = require_roles([PlatformRole.SUPER_ADMIN])
 
+# Tickets in these statuses are finished; every other ticket is still open.
+_DONE_TICKETS = [RequestStatusEnum.FULFILLED, RequestStatusEnum.CLOSED, RequestStatusEnum.REJECTED, RequestStatusEnum.CANCELLED]
+
 Plan = Literal["TRIAL", "STARTER", "BUSINESS", "ENTERPRISE"]
 CompanyStatus = Literal["ACTIVE", "SUSPENDED"]
 SubscriptionStatus = Literal["ACTIVE", "TRIAL", "PAST_DUE", "CANCELLED"]
@@ -214,7 +217,7 @@ def _company_details(db: Session, companies: List[Company]) -> List[CompanyDetai
     assets = grouped(db.query(Asset.company_id, func.count(Asset.id)).filter(Asset.company_id.in_(ids)).group_by(Asset.company_id))
     pending = grouped(
         db.query(AssetRequest.company_id, func.count(AssetRequest.id))
-        .filter(AssetRequest.company_id.in_(ids), AssetRequest.status == RequestStatusEnum.PENDING)
+        .filter(AssetRequest.company_id.in_(ids), AssetRequest.status.notin_(_DONE_TICKETS))
         .group_by(AssetRequest.company_id)
     )
     admins: Dict[str, User] = {}
@@ -283,7 +286,7 @@ def platform_overview(db: Session = Depends(get_db), admin_user: User = Depends(
             User.company_id.is_(None), User.role == PlatformRole.EMPLOYEE, User.status == "ACTIVE"
         ).count(),
         assets_total=db.query(Asset).count(),
-        pending_tickets=db.query(AssetRequest).filter(AssetRequest.status == RequestStatusEnum.PENDING).count(),
+        pending_tickets=db.query(AssetRequest).filter(AssetRequest.status.notin_(_DONE_TICKETS)).count(),
         plans=plans,
         recent_companies=_company_details(db, recent),
     )
