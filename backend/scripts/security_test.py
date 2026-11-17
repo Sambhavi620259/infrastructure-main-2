@@ -25,7 +25,7 @@ from sqlalchemy import create_engine  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 
 from app.core.database import Base, get_db  # noqa: E402
-from app.core.security import create_access_token  # noqa: E402
+from app.core.security import issue_token  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models.models import Company, PlatformRole, Subscription, User  # noqa: E402
 
@@ -58,14 +58,14 @@ with Session() as db:
                         role=role, company_id=company.id, status="ACTIVE", modules=modules)
             db.add(user)
             db.flush()
-            TOKENS[f"{key}{org}"] = create_access_token({"sub": user.id})
+            TOKENS[f"{key}{org}"] = issue_token(user)
             IDS[f"{key}{org}"] = user.id
         COMPANIES[org] = company.id
     # A platform Super Admin, outside any company.
     boss = User(email="super@example.com", hashed_password="x", full_name="Super", role=PlatformRole.SUPER_ADMIN, status="ACTIVE")
     db.add(boss)
     db.flush()
-    TOKENS["super"] = create_access_token({"sub": boss.id})
+    TOKENS["super"] = issue_token(boss)
     IDS["super"] = boss.id
     db.commit()
 
@@ -79,7 +79,8 @@ def override_db():
 
 
 app.dependency_overrides[get_db] = override_db
-server = uvicorn.Server(uvicorn.Config(app, port=PORT, log_level="critical", lifespan="off"))
+# Like the production command: uvicorn does not rewrite the client address from forwarded headers.
+server = uvicorn.Server(uvicorn.Config(app, port=PORT, log_level="critical", lifespan="off", proxy_headers=False))
 threading.Thread(target=server.run, daemon=True).start()
 while not server.started:
     time.sleep(0.05)
@@ -120,7 +121,8 @@ A["dept"] = created("adminA", "POST", "/departments", {"name": "Finance"})
 A["cat"] = created("adminA", "POST", "/assets/categories", {"name": "Laptop"})
 A["asset"] = created("adminA", "POST", "/assets", {"asset_tag": "A-1", "serial_number": "SA1", "name": "A laptop", "category": "Laptop"})
 A["user"] = created("adminA", "POST", "/users", {"email": "emp.a@example.com", "full_name": "Emp A", "password": "password123", "role": "EMPLOYEE"})
-TOKENS["empA"] = create_access_token({"sub": A["user"]})
+with Session() as _db:
+    TOKENS["empA"] = issue_token(_db.get(User, A["user"]))
 A["ticket"] = created("empA", "POST", "/asset-requests", {"asset_category_id": A["cat"], "reason": "need"})
 code, data = call("adminA", "POST", "/asset-requests", {"asset_category_id": A["cat"], "reason": "need"})
 check("an IT Admin cannot raise a ticket", code == 403, data)
@@ -312,7 +314,7 @@ check("a sub-admin cannot review the IT Admin's work", code == 403, data)
 for person in ("adminA", "adminB", "hamA", "agentA"):
     code, data = call("super", "GET", f"/users/{IDS[person]}/activity")
     check(f"the Super Admin reviews anyone's work ({person})", code == 200, data)
-code, data = call("super", "GET", "/users?limit=2000")
+code, data = call("super", "GET", "/users?limit=1000")
 check("the Super Admin lists people in every company",
       code == 200 and {IDS["adminA"], IDS["adminB"], IDS["agentA"]} <= {u["id"] for u in data}, data)
 code, data = call("super", "POST", "/users", {"email": "newadmin.b@example.com", "full_name": "New Admin", "password": "password123",
@@ -414,6 +416,271 @@ check("an IT Admin cannot change plan features", code == 403, data)
 call("super", "PUT", "/super-admin/plan-features", {"plans": {"ENTERPRISE": ["INVENTORY", "SOFTWARE", "REPORTS", "CLOUD"]}})
 code, data = call("adminA", "GET", "/software")
 check("adding the feature back restores access", code == 200, data)
+
+
+# --- Audit fixes: sessions, sign-in, registration, access control, limits ----
+import asyncio  # noqa: E402
+
+import websockets  # noqa: E402
+
+from app.core import rate_limit  # noqa: E402
+from app.core.config import settings  # noqa: E402
+from app.core.http_guard import BodySizeLimitMiddleware  # noqa: E402
+
+
+def raw(method, path, body=None, token=None, headers=None):
+    """A call with no test token: returns (status, parsed body, response headers)."""
+    request_headers = {"Content-Type": "application/json", **(headers or {})}
+    if token:
+        request_headers["Authorization"] = f"Bearer {token}"
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{PORT}/api{path}",
+        data=json.dumps(body).encode() if body is not None else None,
+        method=method, headers=request_headers,
+    )
+    try:
+        with urllib.request.urlopen(request) as response:
+            raw_body = response.read()
+            return response.status, (json.loads(raw_body) if raw_body else {}), dict(response.headers)
+    except urllib.error.HTTPError as error:
+        text = error.read().decode()
+        try:
+            return error.code, json.loads(text), dict(error.headers)
+        except ValueError:
+            return error.code, text[:160], dict(error.headers)
+
+
+def login(email, password, headers=None):
+    return raw("POST", "/auth/login", {"email": email, "password": password}, headers=headers)
+
+
+rate_limit.reset_for_tests()
+settings.AUTH_RATE_LIMIT_PER_MINUTE = 0  # per-address limit tested separately below
+
+print("Sessions end when the password changes")
+PW = "Passw0rd!123"
+created("adminA", "POST", "/users", {"email": "Case.User@Example.com", "full_name": "Case User", "password": PW, "role": "EMPLOYEE"})
+code, data, _ = login("CASE.USER@example.com", PW)
+check("sign-in ignores the case of the email", code == 200 and data.get("access_token"), data)
+old_token = data["access_token"]
+code, data, _ = raw("GET", "/profile", token=old_token)
+check("a freshly issued token works", code == 200, data)
+code, data, _ = raw("POST", "/users", {"email": "case.user@example.com", "full_name": "Dup", "password": PW, "role": "EMPLOYEE"},
+                    token=TOKENS["adminA"])
+check("an email in another case counts as a duplicate", code == 400, data)
+code, data, _ = raw("POST", "/auth/register", {"name": "Case Twin", "email": "CASE.USER@EXAMPLE.COM", "password": PW, "role": "IT_AGENT"})
+check("registration refuses an email that differs only by case", code == 400, data)
+code, data, _ = raw("GET", "/users?limit=500", token=TOKENS["adminA"])
+stored = [u["email"] for u in data] if code == 200 else []
+check("emails are stored in lower case", "case.user@example.com" in stored and "Case.User@Example.com" not in stored, stored)
+
+case_id = next(u["id"] for u in data if u["email"] == "case.user@example.com")
+code, data, _ = raw("POST", f"/users/{case_id}/reset-password", {"new_password": "NewPassw0rd!456"}, token=TOKENS["adminA"])
+check("an IT Admin resets a user's password", code == 200, data)
+code, data, _ = raw("GET", "/profile", token=old_token)
+check("the user's old token stops working after the reset", code == 401, data)
+code, data, _ = login("case.user@example.com", PW)
+check("the old password no longer signs in", code == 401, data)
+code, data, _ = login("case.user@example.com", "NewPassw0rd!456")
+check("the new password signs in", code == 200, data)
+token_before_change = data["access_token"]
+code, data, _ = raw("POST", "/auth/change-password", {"current_password": "NewPassw0rd!456", "new_password": "Another!Pass789"},
+                    token=token_before_change)
+check("a user changes their own password", code == 200 and data.get("access_token"), data)
+fresh_token = data.get("access_token", "")
+code, data, _ = raw("GET", "/profile", token=token_before_change)
+check("the token from before the change stops working", code == 401, data)
+code, data, _ = raw("GET", "/profile", token=fresh_token)
+check("the token returned by the change works", code == 200, data)
+code, data, _ = raw("POST", "/auth/change-password", {"current_password": "Another!Pass789", "new_password": "x" * 80}, token=fresh_token)
+check("a password over 72 bytes is refused, not silently cut", code == 422, data)
+
+print("Sign-in limits")
+code, data, _ = raw("POST", "/auth/login", {"email": "case.user@example.com", "password": "a" * 200})
+check("an oversized password is refused", code == 422, data)
+for _ in range(settings.LOGIN_FAILURE_LIMIT):
+    login("lockme@example.com", "wrong-password")
+code, data, _ = login("lockme@example.com", "wrong-password")
+check("too many failed sign-ins pause the account, whatever the address", code == 429, data)
+rate_limit.reset_for_tests()
+settings.AUTH_RATE_LIMIT_PER_MINUTE = 5
+codes = [login(f"nobody{i}@example.com", "wrong-password", headers={"X-Forwarded-For": f"10.9.9.{i}"})[0] for i in range(8)]
+check("a caller cannot dodge the address limit by inventing X-Forwarded-For", codes[-1] == 429 and 429 not in codes[:5], codes)
+settings.AUTH_RATE_LIMIT_PER_MINUTE = 0
+rate_limit.reset_for_tests()
+settings.TRUSTED_PROXY_COUNT = 1
+settings.AUTH_RATE_LIMIT_PER_MINUTE = 3
+codes = [login("who@example.com", "x", headers={"X-Forwarded-For": f"203.0.113.{i}"})[0] for i in range(6)]
+check("behind a trusted proxy each visitor address has its own limit", 429 not in codes, codes)
+settings.TRUSTED_PROXY_COUNT = 0
+settings.AUTH_RATE_LIMIT_PER_MINUTE = 0
+rate_limit.reset_for_tests()
+
+print("Registration")
+code, data, _ = raw("GET", "/auth/registration-options")
+check("the register page can ask which account types are open", code == 200 and data.get("it_admin") is True and data.get("super_admin") is False, data)
+settings.ALLOW_PUBLIC_IT_ADMIN_SIGNUP = False
+code, data, _ = raw("GET", "/auth/registration-options")
+check("IT Admin sign-up can be switched off", code == 200 and data.get("it_admin") is False, data)
+code, data, _ = raw("POST", "/auth/register", {"name": "Wannabe Admin", "email": "wannabe@example.com", "password": PW, "role": "IT_ADMIN"})
+check("public IT Admin registration is refused when switched off", code == 403, data)
+code, data, _ = raw("POST", "/auth/register", {"name": "Regular User", "email": "regular@example.com", "password": PW, "role": "IT_AGENT"})
+check("ordinary user sign-up still works", code == 200, data)
+settings.ALLOW_PUBLIC_IT_ADMIN_SIGNUP = True
+code, data, _ = raw("POST", "/auth/register", {"name": "Second Boss", "email": "boss2@example.com", "password": PW, "role": "SUPER_ADMIN",
+                                              "registrationKey": "whatever-key-1234", "registrationKeyConfirm": "whatever-key-1234"})
+check("a second Super Admin cannot register", code == 403, data)
+settings.ALLOW_PUBLIC_SUPER_ADMIN_SIGNUP = False
+code, data, _ = raw("POST", "/auth/register", {"name": "Boss", "email": "boss3@example.com", "password": PW, "role": "SUPER_ADMIN",
+                                              "registrationKey": "whatever-key-1234", "registrationKeyConfirm": "whatever-key-1234"})
+check("Super Admin sign-up can be closed", code == 403, data)
+settings.ALLOW_PUBLIC_SUPER_ADMIN_SIGNUP = True
+
+print("Who can manage whom")
+code, data, _ = raw("POST", "/auth/register", {"name": "Floating Agent", "email": "floating@example.com", "password": PW, "role": "IT_AGENT"})
+floating_id = raw("GET", "/users/unassigned", token=TOKENS["adminA"])[1][0]["id"] if code == 200 else None
+for action, method, path, body in [
+    ("reset the password of", "POST", f"/users/{floating_id}/reset-password", {"new_password": "Hijacked!1234"}),
+    ("deactivate", "DELETE", f"/users/{floating_id}", None),
+    ("reactivate", "POST", f"/users/{floating_id}/reactivate", None),
+]:
+    code, data, _ = raw(method, path, body, token=TOKENS["adminA"])
+    check(f"an IT Admin cannot {action} someone who is not in their organization", code == 404, (code, data))
+code, data, _ = raw("POST", f"/users/{floating_id}/add-to-organization", token=TOKENS["adminA"])
+check("an IT Admin can still add that person to their own organization", code == 200, data)
+code, data, _ = raw("POST", f"/users/{IDS['adminA']}/reset-password", {"new_password": "Hijacked!1234"}, token=TOKENS["adminB"])
+check("an IT Admin cannot reset another company's IT Admin", code == 404, data)
+code, data, _ = raw("POST", f"/users/{IDS['super']}/reset-password", {"new_password": "Hijacked!1234"}, token=TOKENS["adminA"])
+check("an IT Admin cannot reset the Super Admin", code in (403, 404), (code, data))
+code, data, _ = raw("DELETE", f"/users/{IDS['super']}", token=TOKENS["adminA"])
+check("an IT Admin cannot remove the Super Admin", code in (403, 404), (code, data))
+code, data, _ = raw("POST", "/users", {"email": "newadmin@example.com", "full_name": "New Admin", "password": PW, "role": "IT_ADMIN"}, token=TOKENS["adminA"])
+check("an IT Admin cannot create another IT Admin", code == 403, data)
+code, data, _ = raw("PUT", f"/users/{case_id}", {"role": "IT_ADMIN"}, token=TOKENS["adminA"])
+check("an IT Admin cannot promote someone to IT Admin", code == 403, data)
+code, data, _ = raw("POST", "/users", {"email": "newadmin@example.com", "full_name": "New Admin", "password": PW, "role": "IT_ADMIN",
+                                       "company_id": COMPANIES["A"]}, token=TOKENS["super"])
+check("the Super Admin can create an IT Admin", code == 201, data)
+
+print("Password recovery")
+rate_limit.reset_for_tests()
+code, data, _ = raw("POST", "/auth/forgot-password", {"email": "Case.User@example.com"})
+check("a forgotten-password request is accepted (same answer for any address)", code == 200, data)
+code, data, _ = raw("GET", "/notifications?limit=50", token=TOKENS["adminA"])
+check("the user's IT Admin is told", code == 200 and any("asked for a password reset" in n["title"] for n in data), data)
+code, data, _ = raw("POST", "/auth/forgot-password", {"email": "admin.a@example.com"})
+code, data, _ = raw("GET", "/notifications?limit=50", token=TOKENS["super"])
+check("an IT Admin's request reaches the Super Admin, with a link that exists",
+      code == 200 and any("asked for a password reset" in n["title"] and n.get("link") == "/super-admin/work" for n in data), data)
+code, data, _ = raw("POST", "/auth/forgot-password", {"email": "nobody.here@example.com"})
+check("an unknown address gets the same answer", code == 200 and "If that account exists" in data.get("message", ""), data)
+
+print("Limits and headers")
+code, data, hdrs = raw("GET", "/health")
+hdrs = {k.lower(): v for k, v in hdrs.items()}
+check("API answers carry security headers", code == 200 and hdrs.get("x-content-type-options") == "nosniff"
+      and hdrs.get("x-frame-options") == "DENY" and "no-store" in hdrs.get("cache-control", ""), hdrs)
+for path in ("/users?limit=100000", "/audit-logs?limit=100000", "/vendors?limit=100000", "/inventory?limit=100000", "/users?skip=-1"):
+    code, data, _ = raw("GET", path, token=TOKENS["adminA"])
+    check(f"GET {path.split('?')[0]} refuses an unbounded page", code == 422, (code, data))
+
+
+async def _size_limit_checks():
+    seen = {}
+
+    async def echo(scope, receive, send):
+        body = b""
+        while True:
+            message = await receive()
+            body += message.get("body", b"")
+            if not message.get("more_body"):
+                break
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": str(len(body)).encode()})
+
+    app_with_limit = BodySizeLimitMiddleware(echo, max_bytes=100)
+
+    async def call_app(chunks, headers):
+        responses = []
+        pending = list(chunks)
+
+        async def receive():
+            if pending:
+                chunk = pending.pop(0)
+                return {"type": "http.request", "body": chunk, "more_body": bool(pending)}
+            return {"type": "http.disconnect"}
+
+        async def send(message):
+            responses.append(message)
+
+        await app_with_limit({"type": "http", "method": "POST", "path": "/x", "headers": headers}, receive, send)
+        return responses[0]["status"]
+
+    seen["small"] = await call_app([b"a" * 50], [])
+    seen["declared"] = await call_app([b"a" * 500], [(b"content-length", b"500")])
+    seen["streamed"] = await call_app([b"a" * 60, b"a" * 60], [])
+    return seen
+
+
+sizes = asyncio.run(_size_limit_checks())
+check("a request body within the limit goes through", sizes["small"] == 200, sizes)
+check("a body larger than the limit is refused (declared length)", sizes["declared"] == 413, sizes)
+check("a body larger than the limit is refused (streamed, no length)", sizes["streamed"] == 413, sizes)
+
+print("Vendors and references")
+vendor_id = created("adminA", "POST", "/vendors", {"name": "Dell Inc"})
+code, data, _ = raw("POST", "/assets", {"name": "Dell box", "category": "Laptop", "serial_number": "V-1", "vendor_id": vendor_id}, token=TOKENS["adminA"])
+code, data, _ = raw("DELETE", f"/vendors/{vendor_id}", token=TOKENS["adminA"])
+check("a vendor still used by assets is not deleted (409, not a crash)", code == 409, (code, data))
+
+print("Reports stay private")
+code, data, _ = raw("POST", "/reports/runs", {"report_type": "my_tickets"}, token=TOKENS["empA"])
+code2, runs, _ = raw("GET", "/reports/runs", token=TOKENS["adminA"])
+check("an IT Admin's list does not show a user's personal report", code == 201 and code2 == 200 and all(r["id"] != data.get("id") for r in runs), (code, code2))
+code, data, _ = raw("GET", f"/reports/runs/{data.get('id')}/download", token=TOKENS["adminA"])
+check("nor can the IT Admin download it", code == 404, data)
+
+print("WebSockets")
+
+
+async def _ws_checks():
+    results = {}
+    url = f"ws://127.0.0.1:{PORT}/api/assets/ws/{COMPANIES['A']}"
+
+    async def opens(token, origin=None, query=False, company=COMPANIES["A"]):
+        target = f"ws://127.0.0.1:{PORT}/api/assets/ws/{company}"
+        try:
+            if query:
+                connection = websockets.connect(f"{target}?token={token}", origin=origin)
+            else:
+                connection = websockets.connect(target, subprotocols=["itam.v1", f"bearer.{token}"], origin=origin)
+            async with connection as ws:
+                await ws.send("hello")
+                reply = await asyncio.wait_for(ws.recv(), timeout=2)
+                return reply == "pong: hello", ws.subprotocol
+        except Exception:
+            return False, None
+
+    results["subprotocol"] = await opens(TOKENS["adminA"])
+    results["query"] = await opens(TOKENS["adminA"], query=True)
+    results["no_token"] = await opens("")
+    results["bad_token"] = await opens("not-a-token")
+    results["other_company"] = await opens(TOKENS["adminB"])
+    results["employee"] = await opens(TOKENS["empA"])
+    results["evil_origin"] = await opens(TOKENS["adminA"], origin="https://evil.example")
+    results["old_token"] = await opens(token_before_change)
+    return results
+
+
+ws_results = asyncio.run(_ws_checks())
+check("the socket opens with the token in the subprotocol", ws_results["subprotocol"] == (True, "itam.v1"), ws_results["subprotocol"])
+check("the older ?token= form still works", ws_results["query"][0] is True, ws_results["query"])
+check("a socket without a token is refused", ws_results["no_token"][0] is False, ws_results["no_token"])
+check("a socket with a bad token is refused", ws_results["bad_token"][0] is False, ws_results["bad_token"])
+check("another company's IT Admin cannot join the feed", ws_results["other_company"][0] is False, ws_results["other_company"])
+check("a user cannot join the company-wide feed", ws_results["employee"][0] is False, ws_results["employee"])
+check("a page on another website cannot open a signed-in socket", ws_results["evil_origin"][0] is False, ws_results["evil_origin"])
+check("a token from before a password change cannot open a socket", ws_results["old_token"][0] is False, ws_results["old_token"])
 
 print(f"\n{sum(RESULTS)}/{len(RESULTS)} passed")
 server.should_exit = True

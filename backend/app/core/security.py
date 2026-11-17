@@ -1,4 +1,6 @@
 """Implementation file: app/core/security.py"""
+import hashlib
+import hmac
 from datetime import datetime, timedelta
 from typing import Optional, Any, Union
 from jose import jwt
@@ -23,6 +25,27 @@ def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
 
 
+def password_fingerprint(hashed_password: Optional[str]) -> str:
+    """
+    A short value that changes whenever the user's password does. A token carries
+    it, so every token issued before a password change or reset stops working.
+    """
+    return hmac.new(settings.SECRET_KEY.encode(), (hashed_password or "").encode(), hashlib.sha256).hexdigest()[:24]
+
+
+def issue_token(user, expires_delta: Optional[timedelta] = None) -> str:
+    """The access token for a signed-in user, bound to their current password."""
+    return create_access_token(
+        data={
+            "sub": user.id,
+            "role": user.role.value,
+            "company_id": user.company_id,
+            "pv": password_fingerprint(user.hashed_password),
+        },
+        expires_delta=expires_delta,
+    )
+
+
 def create_access_token(
     data: dict, 
     expires_delta: Optional[timedelta] = None
@@ -36,7 +59,7 @@ def create_access_token(
     else:
         expire = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
         
-    to_encode.update({"exp": expire})
+    to_encode.update({"exp": expire, "iat": datetime.utcnow()})
     encoded_jwt = jwt.encode(
         to_encode, 
         settings.SECRET_KEY, 

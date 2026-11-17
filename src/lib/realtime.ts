@@ -14,13 +14,15 @@ const RECONNECT_DELAY_MS = 5000;
 const REJECTED_CLOSE_CODES = new Set([4004, 4401, 4403]);
 
 // WebSockets cannot go through the Next.js /api proxy, so they connect to the
-// backend directly. Default to the host the page was loaded from so that
-// localhost and 127.0.0.1 both work without configuration.
-function wsBaseUrl(): string {
+// backend directly. NEXT_PUBLIC_WS_URL (set when the app is built) names it. Without it,
+// local development uses port 8000 of the page's own host; anywhere else live updates are
+// simply off, instead of trying an address that cannot be right.
+function wsBaseUrl(): string | null {
   if (process.env.NEXT_PUBLIC_WS_URL) return process.env.NEXT_PUBLIC_WS_URL.replace(/\/$/, "");
-  if (typeof window === "undefined") return "ws://localhost:8000";
-  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-  return `${protocol}://${window.location.hostname}:8000`;
+  if (typeof window === "undefined") return null;
+  const host = window.location.hostname;
+  if (host !== "localhost" && host !== "127.0.0.1") return null;
+  return `${window.location.protocol === "https:" ? "wss" : "ws"}://${host}:8000`;
 }
 
 /**
@@ -40,10 +42,14 @@ function useWebSocket(path: string | null, label: string, onMessage: (message: u
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let disposed = false;
 
+    const base = wsBaseUrl();
+    if (!base) return;
+
     const connect = () => {
-      // Browsers cannot send an Authorization header on a WebSocket.
+      // Browsers cannot send an Authorization header on a WebSocket, so the token goes in the
+      // subprotocol list ("bearer.<token>"), which keeps it out of the address and the logs.
       const token = window.localStorage.getItem("auth-token") ?? "";
-      const ws = new WebSocket(`${wsBaseUrl()}${path}?token=${encodeURIComponent(token)}`);
+      const ws = new WebSocket(`${base}${path}`, ["itam.v1", `bearer.${token}`]);
       socket = ws;
 
       ws.onopen = () => setConnected(true);

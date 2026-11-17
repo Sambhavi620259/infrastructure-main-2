@@ -1,12 +1,14 @@
 """Implementation file: app/core/deps.py"""
+import hmac
 from typing import List, Optional
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.security import password_fingerprint
 from app.models.models import User, PlatformRole
 
 oauth2_scheme = OAuth2PasswordBearer(
@@ -25,7 +27,8 @@ def user_from_token(token: Optional[str], db: Session) -> Optional[User]:
         payload = jwt.decode(
             token,
             settings.SECRET_KEY,
-            algorithms=[settings.ALGORITHM]
+            algorithms=[settings.ALGORITHM],
+            options={"require_exp": True, "require_sub": True},
         )
     except JWTError:
         return None
@@ -33,8 +36,12 @@ def user_from_token(token: Optional[str], db: Session) -> Optional[User]:
     if user_id is None:
         return None
 
-    user = db.query(User).filter(User.id == user_id).first()
+    # The company comes with the user in one query (the suspension check needs it).
+    user = db.query(User).options(joinedload(User.company)).filter(User.id == user_id).first()
     if not user or user.status != "ACTIVE" or organization_suspended(user):
+        return None
+    # The token must have been issued under the user's current password.
+    if not hmac.compare_digest(str(payload.get("pv") or ""), password_fingerprint(user.hashed_password)):
         return None
     return user
 

@@ -5,11 +5,13 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.access_guard import ScopedRoleWriteGuard
 from app.core.config import settings
+from app.core.http_guard import BodySizeLimitMiddleware, SecurityHeadersMiddleware
 from app.core.database import get_db
 from app.core.logging_config import configure_logging
 from app.core.seed import seed_initial_users
@@ -54,7 +56,9 @@ async def lifespan(app: FastAPI):
     yield
     warranty_task.cancel()
 
-app = FastAPI(title="ITAM API", lifespan=lifespan)
+# The interactive API docs are for development; production does not publish the schema.
+_docs = {} if not settings.is_production else {"docs_url": None, "redoc_url": None, "openapi_url": None}
+app = FastAPI(title="ITAM API", lifespan=lifespan, **_docs)
 
 # Configure CORS for frontend connection
 # The browser normally reaches the API through the Next.js proxy (same origin),
@@ -68,6 +72,9 @@ app.add_middleware(
 )
 
 app.add_middleware(ScopedRoleWriteGuard)
+# Outermost last: the size limit and headers wrap everything above them.
+app.add_middleware(BodySizeLimitMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 
 # Include routers
 app.include_router(auth.router, prefix="/api")
@@ -97,6 +104,16 @@ app.include_router(approvals.router, prefix="/api")
 app.include_router(access.router, prefix="/api")
 
 logger = logging.getLogger("app")
+
+
+@app.exception_handler(IntegrityError)
+async def integrity_error(request: Request, exc: IntegrityError) -> JSONResponse:
+    """A database constraint stopped the change (duplicate, or still referenced): a conflict, not a crash."""
+    logger.warning("Integrity error on %s %s: %s", request.method, request.url.path, str(exc.orig)[:200])
+    return JSONResponse(
+        status_code=409,
+        content={"detail": "This change conflicts with existing data (a duplicate, or the record is still in use)."},
+    )
 
 
 @app.exception_handler(Exception)

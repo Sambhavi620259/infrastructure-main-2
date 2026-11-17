@@ -456,8 +456,8 @@ def contact_directory(db: Session = Depends(get_db), admin_user: User = Depends(
 
 @router.get("/subscriptions", response_model=List[SubscriptionResponse])
 def list_subscriptions(
-    skip: int = 0,
-    limit: int = 100,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
     admin_user: User = Depends(_super)
 ):

@@ -246,6 +246,8 @@ def delete_report_run(
 
 @router.get("/saved", response_model=List[ReportConfigResponse])
 def list_saved_reports(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(200, ge=1, le=500),
     db: Session = Depends(get_db),
     current_user: User = Depends(_report_users),
     tenant_company_id: Optional[str] = Depends(get_tenant_company_id),
@@ -264,6 +266,8 @@ def list_saved_reports(
         .filter(ReportConfig.company_id == company_id)
         .filter(ReportConfig.created_by == current_user.id if _own_only(current_user) else true())
         .order_by(ReportConfig.created_at.desc())
+        .offset(skip)
+        .limit(limit)
         .all()
     )
     return [

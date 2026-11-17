@@ -113,8 +113,8 @@ def create_purchase_order(
 @router.get("", response_model=List[PurchaseOrderResponse])
 def list_purchase_orders(
     po_status: Optional[PoStatus] = Query(None, alias="status"),
-    skip: int = 0,
-    limit: int = 100,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     tenant_company_id: Optional[str] = Depends(get_tenant_company_id)

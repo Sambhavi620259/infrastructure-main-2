@@ -27,7 +27,8 @@ class Settings(BaseSettings):
     # JWT Security settings
     SECRET_KEY: str = os.getenv("JWT_SECRET", _DEFAULT_SECRET)
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 12  # 12 Hours session lifetime
+    # Session lifetime; a token also stops working as soon as its owner's password changes.
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", str(60 * 12)))
 
     # CORS Configuration (Supports both port 3000 and 3001 for Next.js dev server shifts)
     CORS_ORIGINS: Union[str, List[str]] = os.getenv(
@@ -42,6 +43,26 @@ class Settings(BaseSettings):
 
     # Attempts per client IP per minute on sign-in and registration.
     AUTH_RATE_LIMIT_PER_MINUTE: int = int(os.getenv("AUTH_RATE_LIMIT_PER_MINUTE", "20"))
+
+    # How many reverse proxies in front of this app each append to X-Forwarded-For.
+    # 0 (default) ignores that header and uses the connection's own address, so a
+    # caller cannot pick the address the rate limit sees. Behind one proxy use 1;
+    # Vercel -> Render use 2.
+    TRUSTED_PROXY_COUNT: int = int(os.getenv("TRUSTED_PROXY_COUNT", "0"))
+    # Failed sign-ins per account per 15 minutes before the account is paused.
+    LOGIN_FAILURE_LIMIT: int = int(os.getenv("LOGIN_FAILURE_LIMIT", "10"))
+
+    # Public sign-up switches. The first Super Admin registers once; IT Admins may
+    # self-register unless this is turned off (then a Super Admin adds them).
+    ALLOW_PUBLIC_IT_ADMIN_SIGNUP: bool = os.getenv("ALLOW_PUBLIC_IT_ADMIN_SIGNUP", "true").lower() in ("1", "true", "yes")
+    ALLOW_PUBLIC_SUPER_ADMIN_SIGNUP: bool = os.getenv("ALLOW_PUBLIC_SUPER_ADMIN_SIGNUP", "true").lower() in ("1", "true", "yes")
+
+    # Largest request body the API accepts, in bytes (file uploads are base64 in JSON).
+    MAX_REQUEST_BODY_BYTES: int = int(os.getenv("MAX_REQUEST_BODY_BYTES", str(8 * 1024 * 1024)))
+
+    # Database connections.
+    DB_POOL_SIZE: int = int(os.getenv("DB_POOL_SIZE", "10"))
+    DB_MAX_OVERFLOW: int = int(os.getenv("DB_MAX_OVERFLOW", "10"))
 
     @property
     def is_production(self) -> bool:

@@ -1,6 +1,6 @@
 """Implementation file: app/routers/audit_logs.py"""
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -13,8 +13,8 @@ router = APIRouter(prefix="/audit-logs", tags=["Audit Logs"])
 
 @router.get("", response_model=List[AuditLogResponse])
 def list_audit_logs(
-    skip: int = 0,
-    limit: int = 100,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
     action: Optional[str] = None,
     entity: Optional[str] = None,
     user_id: Optional[str] = None,

@@ -23,6 +23,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 
 # Apply database migrations, then serve. Hosts such as Render set PORT.
 # Live updates (WebSockets) are held in process memory, so run one worker
-# unless you add a shared message broker. FORWARDED_ALLOW_IPS lets uvicorn
-# take the client address from the host's proxy (needed for rate limiting).
-CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers ${WEB_CONCURRENCY:-1} --proxy-headers"]
+# unless you add a shared message broker. uvicorn is told not to rewrite the client
+# address from forwarded headers; the app reads X-Forwarded-For itself, and only for
+# the number of proxies named in TRUSTED_PROXY_COUNT (see app/core/rate_limit.py).
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers ${WEB_CONCURRENCY:-1} --no-proxy-headers"]

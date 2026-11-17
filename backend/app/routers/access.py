@@ -205,6 +205,8 @@ def my_access(
 @router.get("/resources", response_model=List[ResourceResponse])
 def list_resources(
     include_inactive: bool = False,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(500, ge=1, le=1000),
     db: Session = Depends(get_db),
     current_user: User = Depends(_readers),
     tenant_company_id: Optional[str] = Depends(get_tenant_company_id),
@@ -213,7 +215,7 @@ def list_resources(
     query = db.query(AccessResource).filter(AccessResource.company_id == company_id)
     if not include_inactive:
         query = query.filter(AccessResource.status == "ACTIVE")
-    return _resource_responses(db, query.order_by(AccessResource.name).all())
+    return _resource_responses(db, query.order_by(AccessResource.name).offset(skip).limit(limit).all())
 
 
 @router.post("/resources", response_model=ResourceResponse, status_code=status.HTTP_201_CREATED)

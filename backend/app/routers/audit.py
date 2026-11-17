@@ -7,7 +7,8 @@ from sqlalchemy import func
 from pydantic import BaseModel, ConfigDict
 
 from app.core.database import get_db
-from app.core.deps import get_current_user, require_roles, get_tenant_company_id, user_from_token
+from app.core.deps import get_current_user, require_roles, get_tenant_company_id
+from app.core.ws_auth import authenticate, reject, serve_socket
 from app.models.models import AuditSession, AuditScanRecord, Asset, PlatformRole, User
 from app.services.audit_service import log_audit_event
 from app.services.notification_service import notify_company
@@ -20,14 +21,14 @@ class AuditConnectionManager:
     def __init__(self):
         self.active_connections: Dict[str, List[WebSocket]] = {}
 
-    async def connect(self, session_id: str, websocket: WebSocket):
-        await websocket.accept()
+    async def connect(self, session_id: str, websocket: WebSocket, subprotocol: Optional[str] = None):
+        await websocket.accept(subprotocol=subprotocol)
         if session_id not in self.active_connections:
             self.active_connections[session_id] = []
         self.active_connections[session_id].append(websocket)
 
     def disconnect(self, session_id: str, websocket: WebSocket):
-        if session_id in self.active_connections:
+        if session_id in self.active_connections and websocket in self.active_connections[session_id]:
             self.active_connections[session_id].remove(websocket)
             if not self.active_connections[session_id]:
                 del self.active_connections[session_id]
@@ -52,30 +53,35 @@ async def audit_websocket(
     websocket: WebSocket,
     session_id: str,
     token: Optional[str] = Query(None),
-    db: Session = Depends(get_db)
 ):
     """
-    WebSocket endpoint for real-time audit scan updates.
-    Browsers cannot set headers on a WebSocket, so the JWT comes as ?token=.
+    WebSocket endpoint for real-time audit scan updates. The token is sent as the
+    "bearer.<jwt>" subprotocol (see app/core/ws_auth.py); ?token= still works.
     """
-    user = user_from_token(token, db)
-    if user is None:
-        await websocket.accept()  # so the browser receives the close code
-        await websocket.close(code=4401, reason="Not authenticated")
+    identity = authenticate(websocket, token)
+    if identity is None:
+        await reject(websocket, 4401, "Not authenticated")
+        return
+    if identity.role == PlatformRole.EMPLOYEE:
+        await reject(websocket, 4403, "Not allowed")
         return
 
-    sess = db.query(AuditSession).filter(AuditSession.id == session_id).first()
-    if not sess or (user.role != PlatformRole.SUPER_ADMIN and sess.company_id != user.company_id):
-        await websocket.accept()  # so the browser receives the close code
-        await websocket.close(code=4004, reason="Session not found")
-        return
-
-    await audit_manager.connect(session_id, websocket)
+    # Short session: it is closed before the socket starts waiting.
+    source = websocket.app.dependency_overrides.get(get_db, get_db)()
+    db = next(source)
     try:
-        while True:
-            data = await websocket.receive_text()
-            await websocket.send_text(f"pong: {data}")
-    except WebSocketDisconnect:
+        sess = db.query(AuditSession).filter(AuditSession.id == session_id).first()
+        allowed = bool(sess) and (identity.role == PlatformRole.SUPER_ADMIN or sess.company_id == identity.company_id)
+    finally:
+        source.close()
+    if not allowed:
+        await reject(websocket, 4004, "Session not found")
+        return
+
+    await audit_manager.connect(session_id, websocket, identity.subprotocol)
+    try:
+        await serve_socket(websocket, identity)
+    finally:
         audit_manager.disconnect(session_id, websocket)
 
 
@@ -168,6 +174,8 @@ def _session_response(sess: AuditSession, counts: Dict[bool, int]) -> AuditSessi
 
 @router.get("/sessions", response_model=List[AuditSessionResponse])
 def list_audit_sessions(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(500, ge=1, le=1000),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
@@ -183,7 +191,7 @@ def list_audit_sessions(
     if current_user.role != PlatformRole.SUPER_ADMIN:
         query = query.filter(AuditSession.company_id == company_id)
 
-    sessions = query.order_by(AuditSession.started_at.desc()).all()
+    sessions = query.order_by(AuditSession.started_at.desc()).offset(skip).limit(limit).all()
     counts = _scan_counts(db, [sess.id for sess in sessions])
     return [_session_response(sess, counts.get(sess.id, {})) for sess in sessions]
 
@@ -233,6 +241,8 @@ def get_audit_session(
 @router.get("/sessions/{session_id}/scans", response_model=List[ScanRecordResponse])
 def list_session_scans(
     session_id: str,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(500, ge=1, le=2000),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
@@ -245,6 +255,8 @@ def list_session_scans(
         db.query(AuditScanRecord)
         .filter(AuditScanRecord.audit_session_id == sess.id)
         .order_by(AuditScanRecord.scanned_at.desc())
+        .offset(skip)
+        .limit(limit)
         .all()
     )
 

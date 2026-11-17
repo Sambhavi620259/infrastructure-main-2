@@ -24,9 +24,16 @@ class TokenData(BaseModel):
     role: Optional[PlatformRole] = None
 
 
+def check_password_length(value: str) -> str:
+    """bcrypt reads only the first 72 bytes, so longer passwords are refused instead of silently cut."""
+    if len(value.encode("utf-8")) > 72:
+        raise ValueError("A password can be at most 72 bytes (about 72 characters).")
+    return value
+
+
 class LoginRequest(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(..., max_length=128)
     # The role picked on the login page. Informational only: the account's
     # own role decides the workspace. Accepts frontend names such as IT_AGENT.
     role: Optional[str] = None
@@ -37,11 +44,13 @@ class LoginRequest(BaseModel):
 class RegisterRequest(BaseModel):
     name: str = Field(..., min_length=2, max_length=150)
     email: EmailStr
-    password: str = Field(..., min_length=8)
+    password: str = Field(..., min_length=8, max_length=128)
     role: str = Field(..., pattern="^(IT_ADMIN|IT_AGENT|SUPER_ADMIN)$")
     # Super Admin only: the platform key, or (if none exists yet) the key to create.
     registrationKey: Optional[str] = Field(None, max_length=128)
     registrationKeyConfirm: Optional[str] = Field(None, max_length=128)
+
+    _password_length = field_validator("password")(check_password_length)
 
 
 # --- Company & Subscription Schemas ---
@@ -115,8 +124,10 @@ class UserBase(BaseModel):
 
 
 class UserCreate(UserBase):
-    password: str = Field(..., min_length=8)
+    password: str = Field(..., min_length=8, max_length=128)
     company_id: Optional[str] = None  # Admin creates user for tenant
+
+    _password_length = field_validator("password")(check_password_length)
 
 
 class UserUpdate(BaseModel):

@@ -26,7 +26,7 @@ from sqlalchemy.exc import IntegrityError  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 
 from app.core.database import Base, get_db  # noqa: E402
-from app.core.security import create_access_token  # noqa: E402
+from app.core.security import issue_token  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models.models import AssetAssignment, AuditLog, Company, PlatformRole, Subscription, User  # noqa: E402
 
@@ -55,7 +55,7 @@ with Session() as db:
                         role=role, company_id=company.id, status="ACTIVE", modules=modules)
             db.add(user)
             db.flush()
-            TOKENS[key + org] = create_access_token({"sub": user.id})
+            TOKENS[key + org] = issue_token(user)
             IDS[key + org] = user.id
     db.commit()
 

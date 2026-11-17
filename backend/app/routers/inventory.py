@@ -305,8 +305,8 @@ def create_inventory_item(
 
 @router.get("", response_model=List[InventoryItemResponse])
 def list_inventory_items(
-    skip: int = 0,
-    limit: int = 100,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
     category: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(_staff),

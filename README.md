@@ -125,6 +125,12 @@ paid plans for real use.
 ## Security notes
 
 - No default accounts: the first Super Admin registers (creating the Super Admin key) or is seeded from `SEED_SUPER_ADMIN_EMAIL` / `SEED_SUPER_ADMIN_PASSWORD`.
-- Passwords and the Super Admin key are stored as bcrypt hashes.
+- Passwords and the Super Admin key are stored as bcrypt hashes. A token is tied to the password it was issued under: changing or resetting a password signs that user out everywhere (the device that changed it gets a fresh token).
+- Emails are compared and stored in lower case. Sign-in is limited per address and per account (10 failures in 15 minutes pause the account). `X-Forwarded-For` is used only for the number of proxies in `TRUSTED_PROXY_COUNT` (0 = ignored; 1 for docker compose; 2 for Vercel → Render).
+- After your IT Admins exist, set `ALLOW_PUBLIC_IT_ADMIN_SIGNUP=false` so only the Super Admin adds them. Super Admin sign-up closes after the first Super Admin; `ALLOW_PUBLIC_SUPER_ADMIN_SIGNUP=false` closes it earlier (then seed one with `SEED_SUPER_ADMIN_*`).
+- IT Admins manage users, Sub Admins and Reporting users of their own organization. IT Admin and Super Admin accounts are managed by the Super Admin only.
+- A Super Admin who forgot their password recovers it on the server: `cd backend && .venv/bin/python scripts/reset_password.py their@email`.
+- Live-update sockets take the token as a `bearer.<jwt>` subprotocol (not in the address), only from the configured `CORS_ORIGINS`, and re-check the session every minute.
+- Request bodies are limited to 8 MB, list endpoints are paged, API responses are not cached and carry security headers, and the API docs are off in production.
 - Suspending an organization (Super Admin → Companies) locks out all its users immediately.
 - IT Agents get operational permissions only (tickets, asset hand-over, stock moves, maintenance, reports) and see colleagues' names only, never contact details.

@@ -18,8 +18,17 @@ services:
           property: connectionString
       - key: JWT_SECRET
         generateValue: true
-      - key: FORWARDED_ALLOW_IPS
-        value: "*"
+      # Proxies in front of the app that each add to X-Forwarded-For: the Vercel
+      # proxy puts the visitor's address first and Render adds Vercel's address.
+      # Used for sign-in rate limits; use 1 if the frontend is not on Vercel.
+      - key: TRUSTED_PROXY_COUNT
+        value: "2"
+      # Who may sign up without being added: set to false once your IT Admins exist
+      # (a Super Admin then adds IT Admins from Add IT Admin).
+      - key: ALLOW_PUBLIC_IT_ADMIN_SIGNUP
+        value: "true"
+      - key: ALLOW_PUBLIC_SUPER_ADMIN_SIGNUP
+        value: "true"
       - key: CORS_ORIGINS
         sync: false
 

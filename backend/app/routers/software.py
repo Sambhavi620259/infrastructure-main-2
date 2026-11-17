@@ -337,6 +337,8 @@ def my_software(
 def list_licenses(
     search: Optional[str] = None,
     expiring_days: Optional[int] = Query(None, ge=1, le=365),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(500, ge=1, le=1000),
     db: Session = Depends(get_db),
     current_user: User = Depends(_viewers),
     tenant_company_id: Optional[str] = Depends(get_tenant_company_id),
@@ -352,7 +354,7 @@ def list_licenses(
         now = datetime.utcnow()
         query = query.filter(SoftwareLicense.expiry_date.isnot(None),
                              SoftwareLicense.expiry_date <= now + timedelta(days=expiring_days))
-    return _license_responses(db, query.order_by(Software.name, SoftwareLicense.created_at).all(), current_user)
+    return _license_responses(db, query.order_by(Software.name, SoftwareLicense.created_at).offset(skip).limit(limit).all(), current_user)
 
 
 @router.put("/licenses/{license_id}", response_model=LicenseResponse)
@@ -542,7 +544,7 @@ def create_software(
 
 @router.get("", response_model=List[SoftwareResponse])
 def list_software(
-    skip: int = 0,
+    skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     search: Optional[str] = None,
     db: Session = Depends(get_db),

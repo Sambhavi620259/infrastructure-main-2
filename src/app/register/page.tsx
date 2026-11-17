@@ -21,17 +21,29 @@ export default function RegisterPage() {
   // Super Admin option is offered and they create the Super Admin key.
   const [superKeyExists, setSuperKeyExists] = useState<boolean | null>(null);
   const [superRegistrationOpen, setSuperRegistrationOpen] = useState(false);
+  // The server decides which account types may sign up on their own.
+  const [itAdminSignupOpen, setItAdminSignupOpen] = useState(true);
 
   useEffect(() => {
-    apiFetch<{ exists: boolean; registration_open?: boolean }>("/api/auth/super-admin-key")
-      .then((data) => {
-        setSuperKeyExists(data.exists);
-        setSuperRegistrationOpen(Boolean(data.registration_open));
-      })
-      .catch(() => {
+    Promise.allSettled([
+      apiFetch<{ exists: boolean; registration_open?: boolean }>("/api/auth/super-admin-key"),
+      apiFetch<{ it_admin?: boolean; super_admin?: boolean }>("/api/auth/registration-options"),
+    ]).then(([keyStatus, options]) => {
+      if (keyStatus.status === "fulfilled") {
+        setSuperKeyExists(keyStatus.value.exists);
+        setSuperRegistrationOpen(
+          Boolean(keyStatus.value.registration_open) &&
+            !(options.status === "fulfilled" && options.value.super_admin === false),
+        );
+      } else {
         setSuperKeyExists(true);
         setSuperRegistrationOpen(false);
-      });
+      }
+      if (options.status === "fulfilled" && options.value.it_admin === false) {
+        setItAdminSignupOpen(false);
+        setRole((current) => (current === "IT_ADMIN" ? "IT_AGENT" : current));
+      }
+    });
   }, []);
 
   const creatingSuperKey = role === "SUPER_ADMIN" && superKeyExists === false;
@@ -105,7 +117,7 @@ export default function RegisterPage() {
             }}
             className="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3.5 py-3 text-base font-normal text-slate-900 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
           >
-            <option value="IT_ADMIN">IT Admin</option>
+            {itAdminSignupOpen && <option value="IT_ADMIN">IT Admin</option>}
             <option value="IT_AGENT">User</option>
             {superRegistrationOpen && <option value="SUPER_ADMIN">Super Admin (platform setup)</option>}
           </select>

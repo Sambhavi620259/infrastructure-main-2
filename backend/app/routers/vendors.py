@@ -1,9 +1,10 @@
 """Implementation file: app/routers/vendors.py"""
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.db_utils import count_references
 from app.core.deps import get_current_user, require_roles, get_tenant_company_id
 from app.models.models import Vendor, PlatformRole, User
 from app.schemas.schemas import VendorCreate, VendorResponse, VendorUpdate
@@ -49,8 +50,8 @@ def create_vendor(
 
 @router.get("", response_model=List[VendorResponse])
 def list_vendors(
-    skip: int = 0,
-    limit: int = 100,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
@@ -167,6 +168,12 @@ def delete_vendor(
             detail="Vendor record not found."
         )
 
+    uses = count_references(db, Vendor, vendor.id)
+    if uses:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"'{vendor.name}' is still used by {uses} record(s) (assets, contracts or orders). Change those first.",
+        )
     db.delete(vendor)
     db.commit()
 

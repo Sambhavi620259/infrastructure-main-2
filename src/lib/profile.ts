@@ -1,4 +1,4 @@
-import { apiFetch } from "@/lib/api";
+import { apiFetch, saveToken } from "@/lib/api";
 
 /** Mirrors UserProfile from GET /api/profile (role uses frontend names, e.g. IT_AGENT). */
 export interface Profile {
@@ -66,11 +66,14 @@ export async function getProfile(): Promise<Profile> {
   return data.user;
 }
 
-export function changePassword(currentPassword: string, newPassword: string): Promise<{ message: string }> {
-  return apiFetch("/api/auth/change-password", {
+export async function changePassword(currentPassword: string, newPassword: string): Promise<{ message: string }> {
+  const result = await apiFetch<{ message: string; access_token?: string }>("/api/auth/change-password", {
     method: "POST",
     body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
   });
+  // The old token stopped working with the old password; this device carries on with the new one.
+  if (result.access_token) saveToken(result.access_token);
+  return { message: result.message };
 }
 
 /** Upload a profile photo (a data URL; see resizePhoto). */

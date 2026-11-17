@@ -12,7 +12,7 @@ import {
   LockClosedIcon,
 } from "@heroicons/react/24/outline";
 import { ROLE_REDIRECT_MAP, type UserRole } from "@/lib/roles";
-import { apiFetch, clearAuth } from "@/lib/api";
+import { apiFetch, clearAuth, saveToken } from "@/lib/api";
 import { AuthLayout, IconField } from "@/components/auth/auth-layout";
 
 type LoginResponse = { access_token: string; role: UserRole };
@@ -72,10 +72,7 @@ export default function LoginPage() {
         body: JSON.stringify({ email, password, role, super_admin_key: role === "SUPER_ADMIN" ? superKey : undefined }),
       });
       const authenticatedRole = validRoles.includes(data.role) ? data.role : role;
-      localStorage.setItem("auth-token", data.access_token);
-      // Matches the 12-hour token lifetime (ACCESS_TOKEN_EXPIRE_MINUTES).
-      const secure = window.location.protocol === "https:" ? "; Secure" : "";
-      document.cookie = `auth-token=${encodeURIComponent(data.access_token)}; Path=/; Max-Age=43200; SameSite=Lax${secure}`;
+      saveToken(data.access_token);
       try {
         if (remember) localStorage.setItem(REMEMBER_KEY, JSON.stringify({ email, role: authenticatedRole }));
         else localStorage.removeItem(REMEMBER_KEY);

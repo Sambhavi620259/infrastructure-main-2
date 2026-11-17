@@ -34,7 +34,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base, get_db
 from app.core.deps import get_current_user
-from app.core.security import create_access_token
+from app.core.security import issue_token
 from app.models.models import AssetAssignment, AssetLifecycle, AuditLog, AuditSession, Company, PlatformRole, User
 from app.routers import (
     approvals, asset_requests, assets, audit, auth, departments, inventory, organization, purchase_orders, reports,
@@ -74,7 +74,8 @@ with TestSession() as db:
     db.commit()
     COMPANY_ID, ADMIN_ID, EMPLOYEE_ID, SESSION_ID = company.id, admin.id, employee.id, session.id
 
-TOKEN = create_access_token({"sub": ADMIN_ID})
+with TestSession() as _db:
+    TOKEN = issue_token(_db.get(User, ADMIN_ID))
 
 
 def override_db():
@@ -717,7 +718,8 @@ async def run_checks():
 
         code, body = call("GET", "/users")
         check("agent cannot read full user records (403)", code == 403, body)
-        user_token = create_access_token({"sub": rahul_id})
+        with TestSession() as _db:
+            user_token = issue_token(_db.get(User, rahul_id))
         check("user cannot subscribe to the company-wide asset feed",
               await ws_rejected(f"{WS_BASE}/assets/ws/{COMPANY_ID}?token={user_token}"))
         # Area-level blocking (directory, maintenance, vendors...) is enforced by

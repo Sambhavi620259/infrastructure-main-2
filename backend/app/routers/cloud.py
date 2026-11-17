@@ -104,6 +104,8 @@ def register_cloud_resource(
 def list_cloud_resources(
     provider: Optional[Provider] = None,
     resource_status: Optional[ResourceStatus] = Query(None, alias="status"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(500, ge=1, le=1000),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
@@ -115,7 +117,7 @@ def list_cloud_resources(
         query = query.filter(CloudResource.provider == provider)
     if resource_status:
         query = query.filter(CloudResource.status == resource_status)
-    return query.order_by(CloudResource.provider, CloudResource.resource_type).all()
+    return query.order_by(CloudResource.provider, CloudResource.resource_type).offset(skip).limit(limit).all()
 
 
 @router.put("/resources/{resource_id}", response_model=CloudResourceResponse)

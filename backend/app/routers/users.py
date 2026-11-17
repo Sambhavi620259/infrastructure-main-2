@@ -2,7 +2,7 @@
 from typing import List, Optional
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -12,7 +12,7 @@ from app.core.deps import get_current_user, require_roles, get_tenant_company_id
 from app.models.models import (
     AssetAssignment, AssetRequest, AuditLog, Company, Department, PlatformRole, RequestStatusEnum, Subscription, User,
 )
-from app.schemas.schemas import UserCreate, UserResponse, UserUpdate
+from app.schemas.schemas import check_password_length, UserCreate, UserResponse, UserUpdate
 from app.routers.asset_requests import OPEN_TICKET_STATUSES
 from app.services.agent_id_service import new_agent_id
 from app.services.audit_service import log_audit_event
@@ -110,16 +110,27 @@ def _is_unassigned_agent(user: User) -> bool:
     return user.company_id is None and user.role == PlatformRole.EMPLOYEE
 
 
-def _manageable_user(db: Session, user_id: str, current_user: User, tenant_company_id: Optional[str]) -> User:
+# Accounts an IT Admin may manage. IT Admins and the Super Admin are managed by the Super Admin only,
+# so one IT Admin cannot lock out, reset or promote a peer or the platform owner.
+_IT_ADMIN_MANAGES = {PlatformRole.EMPLOYEE, PlatformRole.SUB_ADMIN, PlatformRole.REPORTING_USER}
+
+
+def _manageable_user(db: Session, user_id: str, current_user: User, tenant_company_id: Optional[str],
+                     allow_unassigned: bool = False) -> User:
     """
-    A user this admin may add, remove or reactivate: anyone in their company,
-    or an IT Agent who is not in any organization yet. Super Admin: anyone.
+    A user this admin may act on: anyone in their own company, and (only when
+    allow_unassigned is set, to add them to the company) an IT Agent who is not in any
+    organization yet. An IT Admin cannot act on another IT Admin or on the Super Admin.
+    The Super Admin may act on anyone.
     """
     user = db.query(User).filter(User.id == user_id).first()
     if user and current_user.role != PlatformRole.SUPER_ADMIN:
         company_id = tenant_company_id or current_user.company_id
-        if user.company_id != company_id and not _is_unassigned_agent(user):
+        in_company = user.company_id is not None and user.company_id == company_id
+        if not in_company and not (allow_unassigned and _is_unassigned_agent(user)):
             user = None
+        elif user.role not in _IT_ADMIN_MANAGES and user.id != current_user.id:
+            raise HTTPException(status_code=403, detail="Only the Super Admin can manage IT Admin and Super Admin accounts.")
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
     return user
@@ -148,7 +159,7 @@ def create_user(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown company.")
 
     # Check for existing email across system
-    existing_user = db.query(User).filter(func.lower(User.email) == user_in.email.lower()).first()
+    existing_user = db.query(User).filter(func.lower(User.email) == user_in.email.strip().lower()).first()
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -156,12 +167,14 @@ def create_user(
         )
 
     _check_user_fields(db, target_company_id, user_in.role, user_in.modules, user_in.department_id)
+    if user_in.role == PlatformRole.IT_ADMIN and current_user.role != PlatformRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Only the Super Admin can add an IT Admin.")
     if target_company_id:
         _check_user_limit(db, target_company_id)
 
     hashed_pwd = get_password_hash(user_in.password)
     new_user = User(
-        email=user_in.email,
+        email=user_in.email.strip().lower(),
         hashed_password=hashed_pwd,
         full_name=user_in.full_name,
         role=user_in.role,
@@ -193,8 +206,8 @@ def create_user(
 
 @router.get("", response_model=List[UserResponse])
 def list_users(
-    skip: int = 0,
-    limit: int = 100,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000),
     department_id: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(_directory_readers),
@@ -263,6 +276,8 @@ def list_user_directory(
 
 @router.get("/unassigned", response_model=List[UserResponse])
 def list_unassigned_agents(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(200, ge=1, le=500),
     db: Session = Depends(get_db),
     current_user: User = Depends(_admins),
 ):
@@ -271,6 +286,8 @@ def list_unassigned_agents(
         db.query(User)
         .filter(User.company_id.is_(None), User.role == PlatformRole.EMPLOYEE)
         .order_by(User.created_at.desc())
+        .offset(skip)
+        .limit(limit)
         .all()
     )
 
@@ -286,7 +303,7 @@ def add_agent_to_organization(
     company_id = tenant_company_id or current_user.company_id
     if not company_id:
         raise HTTPException(status_code=400, detail="Your account is not in an organization.")
-    user = _manageable_user(db, user_id, current_user, tenant_company_id)
+    user = _manageable_user(db, user_id, current_user, tenant_company_id, allow_unassigned=True)
     if not _is_unassigned_agent(user):
         raise HTTPException(status_code=400, detail="This user is already in an organization.")
     if user.status == "ACTIVE":
@@ -320,6 +337,8 @@ def add_agent_to_organization(
 class PasswordReset(BaseModel):
     new_password: str = Field(..., min_length=8, max_length=128)
 
+    _length = field_validator("new_password")(check_password_length)
+
 
 @router.post("/{user_id}/reset-password")
 def reset_user_password(
@@ -331,8 +350,9 @@ def reset_user_password(
 ):
     """Set a temporary password for a user who cannot sign in (they can change it in Settings)."""
     user = _manageable_user(db, user_id, current_user, tenant_company_id)
-    if user.role == PlatformRole.SUPER_ADMIN and current_user.role != PlatformRole.SUPER_ADMIN:
-        raise HTTPException(status_code=403, detail="Only a Super Admin can reset a Super Admin's password.")
+    if user.id == current_user.id:
+        raise HTTPException(status_code=400, detail="Use Settings to change your own password.")
+    # Setting a new password also signs the user out everywhere (their old tokens stop working).
     user.hashed_password = get_password_hash(body.new_password)
     notify(
         db, user,
@@ -499,12 +519,16 @@ def update_user(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found."
         )
+    if current_user.role != PlatformRole.SUPER_ADMIN and user.id != current_user.id and user.role not in _IT_ADMIN_MANAGES:
+        raise HTTPException(status_code=403, detail="Only the Super Admin can manage IT Admin and Super Admin accounts.")
 
     old_role = user.role.value
 
     update_data = user_in.model_dump(exclude_unset=True)
     if user.id == current_user.id and ("role" in update_data or "status" in update_data):
         raise HTTPException(status_code=400, detail="You cannot change your own role or status.")
+    if update_data.get("role") == PlatformRole.IT_ADMIN and current_user.role != PlatformRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Only the Super Admin can make someone an IT Admin.")
     if "status" in update_data:
         update_data["status"] = (update_data["status"] or "").upper()
         if update_data["status"] not in USER_STATUSES:

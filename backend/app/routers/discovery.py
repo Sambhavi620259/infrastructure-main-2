@@ -107,6 +107,8 @@ def agent_discovery_ingest(
 @router.get("/devices", response_model=List[DiscoveredDeviceOut])
 def list_discovered_devices(
     device_status: Optional[DeviceStatus] = Query(None, alias="status"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(500, ge=1, le=1000),
     db: Session = Depends(get_db),
     current_user: User = Depends(_admins),
     tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
@@ -117,17 +119,20 @@ def list_discovered_devices(
         query = query.filter(DiscoveredDevice.company_id == _company_id(current_user, tenant_company_id))
     if device_status:
         query = query.filter(DiscoveredDevice.status == device_status)
-    return query.order_by(DiscoveredDevice.last_seen.desc()).all()
+    return query.order_by(DiscoveredDevice.last_seen.desc()).offset(skip).limit(limit).all()
 
 
 @router.get("/unmanaged", response_model=List[DiscoveredDeviceOut])
 def list_unmanaged_discovered_devices(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(500, ge=1, le=1000),
     db: Session = Depends(get_db),
     current_user: User = Depends(_admins),
     tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
 ):
     """Devices waiting to be promoted to assets or ignored."""
-    return list_discovered_devices("UNMANAGED", db, current_user, tenant_company_id)
+    return list_discovered_devices(device_status="UNMANAGED", skip=skip, limit=limit, db=db,
+                                   current_user=current_user, tenant_company_id=tenant_company_id)
 
 
 @router.post("/reconcile/{device_id}", status_code=status.HTTP_200_OK)

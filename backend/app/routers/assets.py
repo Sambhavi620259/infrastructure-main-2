@@ -7,7 +7,8 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.deps import get_current_user, require_roles, get_tenant_company_id, user_from_token
+from app.core.deps import get_current_user, require_roles, get_tenant_company_id
+from app.core.ws_auth import authenticate, reject, serve_socket
 from sqlalchemy.exc import IntegrityError
 
 from app.services.stock_service import record_movement
@@ -57,14 +58,14 @@ class ConnectionManager:
     def __init__(self):
         self.active_connections: Dict[str, List[WebSocket]] = {}
 
-    async def connect(self, company_id: str, websocket: WebSocket):
-        await websocket.accept()
+    async def connect(self, company_id: str, websocket: WebSocket, subprotocol: Optional[str] = None):
+        await websocket.accept(subprotocol=subprotocol)
         if company_id not in self.active_connections:
             self.active_connections[company_id] = []
         self.active_connections[company_id].append(websocket)
 
     def disconnect(self, company_id: str, websocket: WebSocket):
-        if company_id in self.active_connections:
+        if company_id in self.active_connections and websocket in self.active_connections[company_id]:
             self.active_connections[company_id].remove(websocket)
             if not self.active_connections[company_id]:
                 del self.active_connections[company_id]
@@ -89,32 +90,25 @@ async def asset_websocket(
     websocket: WebSocket,
     company_id: str,
     token: Optional[str] = Query(None),
-    db: Session = Depends(get_db)
 ):
     """
-    WebSocket endpoint for real-time asset updates.
-    Browsers cannot set headers on a WebSocket, so the JWT comes as ?token=.
+    WebSocket endpoint for real-time asset updates. The token is sent as the
+    "bearer.<jwt>" subprotocol (see app/core/ws_auth.py); ?token= still works.
     """
-    user = user_from_token(token, db)
-    if user is None:
-        await websocket.accept()  # so the browser receives the close code
-        await websocket.close(code=4401, reason="Not authenticated")
+    identity = authenticate(websocket, token)
+    if identity is None:
+        await reject(websocket, 4401, "Not authenticated")
         return
-    if (user.role != PlatformRole.SUPER_ADMIN and user.company_id != company_id) \
-            or user.role == PlatformRole.EMPLOYEE:
+    if (identity.role != PlatformRole.SUPER_ADMIN and identity.company_id != company_id) \
+            or identity.role == PlatformRole.EMPLOYEE:
         # The feed carries every asset in the company; users see only their own.
-        await websocket.accept()  # so the browser receives the close code
-        await websocket.close(code=4403, reason="Not allowed for this company")
+        await reject(websocket, 4403, "Not allowed for this company")
         return
 
-    await manager.connect(company_id, websocket)
+    await manager.connect(company_id, websocket, identity.subprotocol)
     try:
-        while True:
-            # Keep connection alive, listen for client messages (ping/pong)
-            data = await websocket.receive_text()
-            # Echo back for heartbeat
-            await websocket.send_text(f"pong: {data}")
-    except WebSocketDisconnect:
+        await serve_socket(websocket, identity)
+    finally:
         manager.disconnect(company_id, websocket)
 
 
@@ -271,6 +265,8 @@ def create_asset_category(
 
 @router.get("/categories", response_model=List[AssetCategoryResponse])
 def list_asset_categories(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(500, ge=1, le=1000),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
@@ -281,7 +277,7 @@ def list_asset_categories(
     query = db.query(AssetCategory)
     if current_user.role != PlatformRole.SUPER_ADMIN:
         query = query.filter(AssetCategory.company_id == tenant_company_id)
-    return query.order_by(AssetCategory.name).all()
+    return query.order_by(AssetCategory.name).offset(skip).limit(limit).all()
 
 
 # --- Asset CRUD Operations ---
@@ -919,6 +915,8 @@ def delete_asset(
 @router.get("/{asset_id}/lifecycle", response_model=List[AssetLifecycleResponse])
 def get_asset_lifecycle_history(
     asset_id: str,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(500, ge=1, le=1000),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
@@ -935,4 +933,4 @@ def get_asset_lifecycle_history(
     if current_user.role == PlatformRole.EMPLOYEE:
         # Only what happened since it was handed to them, not earlier holders' history.
         query = query.filter(AssetLifecycle.timestamp >= _held_since(db, current_user)[asset_id])
-    return query.order_by(AssetLifecycle.timestamp.desc()).all()
+    return query.order_by(AssetLifecycle.timestamp.desc()).offset(skip).limit(limit).all()

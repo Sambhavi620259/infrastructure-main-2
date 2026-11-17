@@ -71,7 +71,8 @@ class Company(Base):
     latitude = Column(Float, nullable=True)
     longitude = Column(Float, nullable=True)
 
-    users = relationship("User", back_populates="company", cascade="all, delete-orphan")
+    # No delete cascade: removing a company row must never silently delete its people and their history.
+    users = relationship("User", back_populates="company", cascade="save-update, merge")
     subscription = relationship("Subscription", back_populates="company", uselist=False, cascade="all, delete-orphan")
     invitation_tokens = relationship("InvitationToken", back_populates="company", cascade="all, delete-orphan")
 
