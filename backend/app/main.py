@@ -1,6 +1,7 @@
 """Implementation file: app/main.py"""
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -48,6 +49,11 @@ from app.routers import (
 async def lifespan(app: FastAPI):
     configure_logging()
     settings.check_production_safety()
+    if int(os.getenv("WEB_CONCURRENCY", "1")) > 1:
+        logging.getLogger("app").warning(
+            "WEB_CONCURRENCY > 1: sign-in limits and live-update sockets are kept per process, so "
+            "the effective limits multiply and updates reach only some viewers. Use one worker."
+        )
     # Schema is owned by Alembic (see backend/migrations/README.md).
     # Run `alembic upgrade head` before starting; create_all is deliberately gone
     # so migrations are the single source of truth.

@@ -8,6 +8,8 @@ store (e.g. Redis) or the reverse proxy in front for stricter limits.
 Two limits apply to sign-in: attempts per client address, and failed sign-ins
 per account, so changing address does not give unlimited guesses at one account.
 """
+import hmac
+import ipaddress
 import threading
 import time
 from collections import defaultdict, deque
@@ -27,12 +29,25 @@ _lock = threading.Lock()
 
 def client_ip(request: Request) -> str:
     """
-    The caller's address. X-Forwarded-For is client-controlled, so it is used only
-    for the number of trusted proxies set in TRUSTED_PROXY_COUNT, counting from the
-    right (each trusted proxy appends the address it saw). With none set, or when
-    the header is shorter than that, the connection's own address is used.
+    The caller's address. With PROXY_SHARED_SECRET set, the frontend proxy names the visitor
+    and proves it with the secret. Otherwise X-Forwarded-For, which a caller controls, is used
+    only for the number of trusted proxies in TRUSTED_PROXY_COUNT, counting from the right
+    (each trusted proxy appends the address it saw). With none set, or when the header is
+    shorter than that, the connection's own address is used.
     """
     peer = request.client.host if request.client else "unknown"
+    secret = settings.PROXY_SHARED_SECRET
+    if secret:
+        # Only the frontend proxy knows the secret. Its request names the visitor; anyone else is
+        # identified by the connection itself, whatever headers they send.
+        if not hmac.compare_digest(request.headers.get("x-itam-proxy-key", ""), secret):
+            return peer
+        visitor = request.headers.get("x-itam-client-ip", "").strip()
+        try:
+            ipaddress.ip_address(visitor)
+            return visitor
+        except ValueError:
+            return peer
     count = settings.TRUSTED_PROXY_COUNT
     if count <= 0:
         return peer

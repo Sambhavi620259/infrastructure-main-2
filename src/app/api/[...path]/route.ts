@@ -4,6 +4,9 @@ const BACKEND_API_URL = (process.env.BACKEND_API_URL || "http://127.0.0.1:8000")
 // Same limit as the backend's MAX_REQUEST_BODY_BYTES; larger uploads are refused here, before being forwarded.
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
 const UPSTREAM_TIMEOUT_MS = 30_000;
+// Shared with the API (PROXY_SHARED_SECRET there): proves this request came from this proxy,
+// so the API believes the visitor address below.
+const PROXY_KEY = process.env.BACKEND_PROXY_KEY || "";
 
 /**
  * The visitor's address for the backend's per-client limits. Only values a platform
@@ -34,6 +37,10 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
   // apply per person rather than to the proxy as a whole.
   const visitor = visitorAddress(request);
   if (visitor) headers.set("x-forwarded-for", visitor);
+  if (PROXY_KEY) {
+    headers.set("x-itam-proxy-key", PROXY_KEY);
+    if (visitor) headers.set("x-itam-client-ip", visitor);
+  }
 
   let body: ArrayBuffer | undefined;
   if (request.method !== "GET" && request.method !== "HEAD") {

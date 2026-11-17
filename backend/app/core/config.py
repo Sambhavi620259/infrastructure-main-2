@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     # caller cannot pick the address the rate limit sees. Behind one proxy use 1;
     # Vercel -> Render use 2.
     TRUSTED_PROXY_COUNT: int = int(os.getenv("TRUSTED_PROXY_COUNT", "0"))
+    # Shared secret between the frontend proxy and this API (also set as BACKEND_PROXY_KEY on the
+    # frontend). When set, the visitor address is taken only from requests that carry it, so a
+    # caller who reaches the API directly cannot choose the address the limits see.
+    PROXY_SHARED_SECRET: str = os.getenv("PROXY_SHARED_SECRET", "")
     # Failed sign-ins per account per 15 minutes before the account is paused.
     LOGIN_FAILURE_LIMIT: int = int(os.getenv("LOGIN_FAILURE_LIMIT", "10"))
 

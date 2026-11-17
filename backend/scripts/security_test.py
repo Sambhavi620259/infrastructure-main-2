@@ -516,6 +516,21 @@ settings.TRUSTED_PROXY_COUNT = 0
 settings.AUTH_RATE_LIMIT_PER_MINUTE = 0
 rate_limit.reset_for_tests()
 
+settings.PROXY_SHARED_SECRET = "proxy-secret-for-tests"
+settings.AUTH_RATE_LIMIT_PER_MINUTE = 3
+rate_limit.reset_for_tests()
+good = {"X-Itam-Proxy-Key": "proxy-secret-for-tests"}
+codes = [login("who@example.com", "x", headers={**good, "X-Itam-Client-Ip": f"198.51.100.{i}"})[0] for i in range(6)]
+check("with the proxy secret, each visitor address the proxy names has its own limit", 429 not in codes, codes)
+codes = [login("who@example.com", "x", headers={**good, "X-Itam-Client-Ip": "198.51.100.77"})[0] for i in range(6)]
+check("and one visitor still hits the limit", codes[-1] == 429, codes)
+rate_limit.reset_for_tests()
+codes = [login("who@example.com", "x", headers={"X-Itam-Proxy-Key": "wrong", "X-Itam-Client-Ip": f"198.51.100.{i}"})[0] for i in range(6)]
+check("without the secret, a named address is ignored and the limit applies", codes[-1] == 429, codes)
+settings.PROXY_SHARED_SECRET = ""
+settings.AUTH_RATE_LIMIT_PER_MINUTE = 0
+rate_limit.reset_for_tests()
+
 print("Registration")
 code, data, _ = raw("GET", "/auth/registration-options")
 check("the register page can ask which account types are open", code == 200 and data.get("it_admin") is True and data.get("super_admin") is False, data)
