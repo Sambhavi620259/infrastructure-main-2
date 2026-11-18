@@ -42,7 +42,7 @@ export default function TeamWorkPage() {
   };
 
   useEffect(() => {
-    listUsers({ limit: 2000 })
+    listUsers({ limit: 1000 })
       .then(setUsers)
       .catch((caught) => setError(caught instanceof Error ? caught.message : "Unable to load users."))
       .finally(() => setLoading(false));
