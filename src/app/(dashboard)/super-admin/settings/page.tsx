@@ -1,18 +1,13 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { apiFetch } from "@/lib/api";
-import { ContactCard, type CompanyContact } from "@/components/settings/contact-card";
 import {
   PLANS,
   changeSuperAdminKey,
-  getPlanFeatures,
   getProvisioningDefaults,
   planLabel,
-  updatePlanFeatures,
   updateProvisioningDefaults,
   type Plan,
-  type PlanFeatures,
   type ProvisioningDefaults,
 } from "@/lib/super-admin";
 
@@ -25,7 +20,7 @@ export default function PlatformSettingsPage() {
   useEffect(() => {
     getProvisioningDefaults()
       .then(setDefaults)
-      .catch((caught) => setError(caught instanceof Error ? caught.message : "Unable to load settings."));
+      .catch((caught) => setError(caught instanceof Error ? caught.message : "Unable to load platform settings."));
   }, []);
 
   const saveDefaults = async (event: FormEvent<HTMLFormElement>) => {
@@ -49,9 +44,9 @@ export default function PlatformSettingsPage() {
   return (
     <main className="mx-auto max-w-[1100px] space-y-5">
       <header>
-        <p className="text-[11px] font-bold uppercase tracking-wider text-violet-600">Super Admin · Settings</p>
-        <h1 className="mt-1 text-2xl font-extrabold text-slate-950">Settings</h1>
-        <p className="mt-1 text-sm text-slate-500">Company contact details and office location, features per plan and the Super Admin key.</p>
+        <p className="text-[11px] font-bold uppercase tracking-wider text-violet-600">Super Admin · Platform settings</p>
+        <h1 className="mt-1 text-2xl font-extrabold text-slate-950">Platform settings</h1>
+        <p className="mt-1 text-sm text-slate-500">Defaults for new organizations and the Super Admin key.</p>
       </header>
 
       {error && (
@@ -67,10 +62,6 @@ export default function PlatformSettingsPage() {
           </button>
         </div>
       )}
-
-      <CompanyContactCard onSaved={(message) => { setNotice(message); setError(""); }} onError={setError} />
-
-      <PlanFeaturesCard onSaved={(message) => { setNotice(message); setError(""); }} onError={setError} />
 
       <section className="grid gap-4 lg:grid-cols-2">
         <form onSubmit={saveDefaults} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -131,7 +122,7 @@ export default function PlatformSettingsPage() {
 
         <SuperKeyForm
           onChanged={() => {
-            setNotice("Super Admin key changed. You will need the new key the next time you sign in.");
+            setNotice("Super Admin key changed. Share the new key only with people who should become Super Admins.");
             setError("");
           }}
           onError={setError}
@@ -171,7 +162,7 @@ function SuperKeyForm({ onChanged, onError }: { onChanged: () => void; onError: 
     <form onSubmit={submit} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
       <h2 className="text-sm font-bold text-slate-900">Super Admin key</h2>
       <p className="mt-1 text-xs text-slate-500">
-        Entered, with your password, every time you sign in as Super Admin. Changing it takes effect at your next sign-in.
+        Required to register as a Super Admin. Changing it does not affect existing Super Admins.
       </p>
       <div className="mt-4 space-y-3">
         <label className="block text-xs font-semibold text-slate-700">
@@ -195,121 +186,5 @@ function SuperKeyForm({ onChanged, onError }: { onChanged: () => void; onError: 
         {busy ? "Saving…" : "Change key"}
       </button>
     </form>
-  );
-}
-
-/** Which modules each plan includes. Organizations reach only their plan's modules (the API enforces it). */
-function PlanFeaturesCard({ onSaved, onError }: { onSaved: (message: string) => void; onError: (message: string) => void }) {
-  const [data, setData] = useState<PlanFeatures | null>(null);
-  const [plans, setPlans] = useState<Record<string, string[]>>({});
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    getPlanFeatures()
-      .then((loaded) => {
-        setData(loaded);
-        setPlans(loaded.plans);
-      })
-      .catch((caught) => onError(caught instanceof Error ? caught.message : "Unable to load plan features."));
-  }, [onError]);
-
-  const toggle = (plan: string, feature: string) =>
-    setPlans((current) => {
-      const has = current[plan]?.includes(feature);
-      return { ...current, [plan]: has ? current[plan].filter((f) => f !== feature) : [...(current[plan] ?? []), feature] };
-    });
-
-  const changed = data !== null && PLANS.some((plan) => [...(plans[plan] ?? [])].sort().join() !== [...(data.plans[plan] ?? [])].sort().join());
-
-  const save = async () => {
-    setSaving(true);
-    try {
-      const saved = await updatePlanFeatures(plans);
-      setData(saved);
-      setPlans(saved.plans);
-      onSaved("Plan features saved. Organizations now see only the modules their plan includes.");
-    } catch (caught) {
-      onError(caught instanceof Error ? caught.message : "Could not save plan features.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-      <h2 className="text-sm font-bold text-slate-900">Features per plan</h2>
-      <p className="mt-1 text-xs text-slate-500">
-        Choose which modules each plan includes. Assets, tickets, users and settings are always included. An organization&rsquo;s IT
-        Admins and users see only the modules on its plan.
-      </p>
-      {!data ? (
-        <p className="mt-4 text-xs text-slate-500">Loading…</p>
-      ) : (
-        <div className="mt-4 overflow-x-auto">
-          <table className="w-full min-w-[560px] text-left text-sm">
-            <thead className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-              <tr>
-                <th className="py-2 pr-4">Feature</th>
-                {PLANS.map((plan) => (
-                  <th key={plan} className="px-3 py-2 text-center">
-                    {planLabel(plan)}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {Object.entries(data.features).map(([feature, label]) => (
-                <tr key={feature}>
-                  <td className="py-2.5 pr-4 font-semibold text-slate-700">{label}</td>
-                  {PLANS.map((plan) => (
-                    <td key={plan} className="px-3 py-2.5 text-center">
-                      <input
-                        type="checkbox"
-                        checked={plans[plan]?.includes(feature) ?? false}
-                        onChange={() => toggle(plan, feature)}
-                        aria-label={`${label} on the ${planLabel(plan)} plan`}
-                        className="h-4 w-4 rounded border-slate-300 text-brand-600"
-                      />
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-      <button
-        type="button"
-        onClick={save}
-        disabled={!changed || saving}
-        className="mt-4 rounded-lg bg-brand-600 px-4 py-2 text-sm font-bold text-white hover:bg-brand-700 disabled:opacity-50"
-      >
-        {saving ? "Saving…" : "Save plan features"}
-      </button>
-    </section>
-  );
-}
-
-/** The company's contact details and office location pin, shown with a map. */
-function CompanyContactCard({ onSaved, onError }: { onSaved: (message: string) => void; onError: (message: string) => void }) {
-  const [company, setCompany] = useState<CompanyContact | null>(null);
-
-  useEffect(() => {
-    apiFetch<CompanyContact>("/api/organization")
-      .then(setCompany)
-      .catch((caught) => onError(caught instanceof Error ? caught.message : "Unable to load the company."));
-  }, [onError]);
-
-  if (!company) return null;
-  return (
-    <ContactCard
-      org={company}
-      canEdit
-      onSaved={(updated) => {
-        setCompany((current) => (current ? { ...current, ...updated } : current));
-        onSaved("Company contact details saved.");
-      }}
-      onError={onError}
-    />
   );
 }

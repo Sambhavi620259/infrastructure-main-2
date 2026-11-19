@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowPathIcon, ExclamationTriangleIcon, CheckCircleIcon, ClockIcon } from "@heroicons/react/24/outline";
+import { PlusIcon, ArrowPathIcon, ExclamationTriangleIcon, CheckCircleIcon, ClockIcon } from "@heroicons/react/24/outline";
 import { listAssetRequests, getAssetRequestCounts, type AssetRequest, type AssetRequestCounts } from "@/lib/tickets";
 import { TicketStatusBadge } from "@/components/tickets/ticket-actions";
 
@@ -44,10 +44,10 @@ export default function TicketDashboardPage() {
           <p className="mt-1 text-sm text-slate-500">Monitor service requests and incident response across your organization.</p>
         </div>
         <Link
-          href="/requests"
+          href="/tickets/new"
           className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-brand-700"
         >
-          Open Requests &amp; Approvals
+          <PlusIcon className="h-4 w-4" /> Create ticket
         </Link>
       </header>
 
@@ -152,7 +152,7 @@ export default function TicketDashboardPage() {
                     </td>
                     <td className="px-5 py-3 text-slate-600">{ticket.requested_by_name ?? ticket.requested_for}</td>
                     <td className="px-5 py-3">
-                      <TicketStatusBadge status={ticket.status} ticketType={ticket.ticket_type} />
+                      <TicketStatusBadge status={ticket.status} />
                     </td>
                     <td className="px-5 py-3 text-slate-600">{ticket.category_name ?? "—"}</td>
                     <td className="px-5 py-3 text-slate-500">

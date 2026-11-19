@@ -11,11 +11,9 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from sqlalchemy import or_
-
 from app.models.models import (
-    AccessResource, Asset, AssetAssignment, AssetCategory, AssetLifecycle, AssetRequest, AssetStatusEnum, AuditScanRecord,
-    AuditSession, Department, InventoryItem, InventoryRequest, Software, User,
+    Asset, AssetAssignment, AssetLifecycle, AssetStatusEnum, AuditScanRecord, AuditSession,
+    Department, Software, User,
 )
 
 # Large enough for any realistic tenant export, small enough to keep a stored
@@ -48,11 +46,7 @@ class ReportType:
     label: str
     description: str
     filters: Sequence[str]
-    # (db, company_id, filters, user_id) -> table. user_id is the person running it.
-    build: Callable[[Session, str, ReportFilters, str], ReportTable]
-    # Personal reports cover only the requester's own data; they are the only
-    # ones users (EMPLOYEE) may run, and only users see them.
-    personal: bool = False
+    build: Callable[[Session, str, ReportFilters], ReportTable]
 
 
 def _day(value: Optional[datetime]) -> str:
@@ -79,7 +73,7 @@ def _department_names(db: Session, company_id: str) -> Dict[str, str]:
     return {d.id: d.name for d in db.query(Department).filter(Department.company_id == company_id).all()}
 
 
-def _asset_inventory(db: Session, company_id: str, f: ReportFilters, user_id: str = "") -> ReportTable:
+def _asset_inventory(db: Session, company_id: str, f: ReportFilters) -> ReportTable:
     query = db.query(Asset).filter(Asset.company_id == company_id)
     if f.status:
         query = query.filter(Asset.status == f.status)
@@ -106,7 +100,7 @@ def _asset_inventory(db: Session, company_id: str, f: ReportFilters, user_id: st
     )
 
 
-def _asset_assignments(db: Session, company_id: str, f: ReportFilters, user_id: str = "") -> ReportTable:
+def _asset_assignments(db: Session, company_id: str, f: ReportFilters) -> ReportTable:
     query = (
         db.query(AssetAssignment, Asset, User)
         .join(Asset, Asset.id == AssetAssignment.asset_id)
@@ -128,7 +122,7 @@ def _asset_assignments(db: Session, company_id: str, f: ReportFilters, user_id: 
     )
 
 
-def _warranty(db: Session, company_id: str, f: ReportFilters, user_id: str = "") -> ReportTable:
+def _warranty(db: Session, company_id: str, f: ReportFilters) -> ReportTable:
     now = datetime.utcnow()
     cutoff = now + timedelta(days=f.expiring_days)
     query = db.query(Asset).filter(Asset.company_id == company_id)
@@ -160,7 +154,7 @@ def _warranty(db: Session, company_id: str, f: ReportFilters, user_id: str = "")
     )
 
 
-def _lifecycle_events(db: Session, company_id: str, f: ReportFilters, user_id: str = "") -> ReportTable:
+def _lifecycle_events(db: Session, company_id: str, f: ReportFilters) -> ReportTable:
     query = (
         db.query(AssetLifecycle, Asset.asset_tag, Asset.name, User.full_name)
         .join(Asset, Asset.id == AssetLifecycle.asset_id)
@@ -185,7 +179,7 @@ def _lifecycle_events(db: Session, company_id: str, f: ReportFilters, user_id: s
     )
 
 
-def _license_utilization(db: Session, company_id: str, f: ReportFilters, user_id: str = "") -> ReportTable:
+def _license_utilization(db: Session, company_id: str, f: ReportFilters) -> ReportTable:
     items = db.query(Software).filter(Software.company_id == company_id).order_by(Software.name).limit(MAX_ROWS).all()
     rows = []
     for sw in items:
@@ -203,7 +197,7 @@ def _license_utilization(db: Session, company_id: str, f: ReportFilters, user_id
     )
 
 
-def _audit_results(db: Session, company_id: str, f: ReportFilters, user_id: str = "") -> ReportTable:
+def _audit_results(db: Session, company_id: str, f: ReportFilters) -> ReportTable:
     query = (
         db.query(AuditScanRecord, AuditSession, Asset.name, User.full_name)
         .join(AuditSession, AuditSession.id == AuditScanRecord.audit_session_id)
@@ -230,135 +224,6 @@ def _audit_results(db: Session, company_id: str, f: ReportFilters, user_id: str 
     )
 
 
-def _my_assets(db: Session, company_id: str, f: ReportFilters, user_id: str = "") -> ReportTable:
-    rows = (
-        db.query(Asset, AssetAssignment.assigned_at)
-        .join(AssetAssignment, AssetAssignment.asset_id == Asset.id)
-        .filter(Asset.company_id == company_id, AssetAssignment.user_id == user_id,
-                AssetAssignment.is_active.is_(True))
-        .order_by(Asset.asset_tag)
-        .limit(MAX_ROWS)
-        .all()
-    )
-    return ReportTable(
-        header=["Asset tag", "Name", "Category", "Brand", "Model", "Serial number", "Status", "Condition",
-                "Assigned to me on", "Warranty end"],
-        rows=[
-            [a.asset_tag, a.name, a.category, a.brand or "", a.model or "", a.serial_number, a.status.value,
-             a.condition or "", _day(since), _day(a.warranty_end)]
-            for a, since in rows
-        ],
-    )
-
-
-TICKET_KIND = {"REQUEST": "Asset request", "ISSUE": "Problem with asset", "SOFTWARE": "Software access",
-               "RETURN": "Return", "ACCESS": "Access request"}
-
-
-def _ticket_no(t: AssetRequest) -> str:
-    return f"TKT-{t.ticket_no:06d}" if t.ticket_no else f"#{t.id[:6].upper()}"
-
-
-def _ticket_status(t: AssetRequest) -> str:
-    """Status as people read it, e.g. SUBMITTED, WAITING FOR LICENSE, SEAT ASSIGNED."""
-    status = t.status.value
-    if status == "FULFILLED":
-        return {"ISSUE": "RESOLVED", "RETURN": "RETURNED", "SOFTWARE": "SEAT ASSIGNED",
-                "ACCESS": "ACCESS GRANTED"}.get(t.ticket_type, "FULFILLED")
-    return {"PENDING": "SUBMITTED", "WAITING_INVENTORY": "WAITING FOR INVENTORY",
-            "WAITING_LICENSE": "WAITING FOR LICENSE", "WAITING_USER": "WAITING FOR USER"}.get(status, status.replace("_", " "))
-
-
-def _my_tickets(db: Session, company_id: str, f: ReportFilters, user_id: str = "") -> ReportTable:
-    query = db.query(AssetRequest).filter(
-        AssetRequest.company_id == company_id,
-        or_(AssetRequest.requested_by == user_id, AssetRequest.raised_by == user_id),
-    )
-    if f.date_from:
-        query = query.filter(AssetRequest.created_at >= f.date_from)
-    if f.date_to:
-        query = query.filter(AssetRequest.created_at <= f.date_to)
-    tickets = query.order_by(AssetRequest.created_at.desc()).limit(MAX_ROWS).all()
-    categories = dict(db.query(AssetCategory.id, AssetCategory.name).filter(AssetCategory.company_id == company_id).all())
-    handler_ids = {t.processed_by for t in tickets if t.processed_by}
-    handlers = dict(db.query(User.id, User.full_name).filter(User.id.in_(handler_ids)).all()) if handler_ids else {}
-    asset_ids = {t.assigned_asset_id for t in tickets if t.assigned_asset_id} | {t.asset_id for t in tickets if t.asset_id}
-    tags = {a.id: a.label for a in db.query(Asset).filter(Asset.id.in_(asset_ids)).all()} if asset_ids else {}
-    return ReportTable(
-        header=["Ticket", "Type", "Priority", "Raised", "Category", "Asset", "Description", "Status", "Handled by",
-                "Outcome"],
-        rows=[
-            [_ticket_no(t), TICKET_KIND.get(t.ticket_type, t.ticket_type), (t.priority or "MEDIUM").title(),
-             _stamp(t.created_at), categories.get(t.asset_category_id, ""),
-             tags.get(t.asset_id or t.assigned_asset_id, ""), t.reason, _ticket_status(t),
-             handlers.get(t.processed_by, ""), t.resolution_note or t.rejection_reason or ""]
-            for t in tickets
-        ],
-    )
-
-
-def _approvals(db: Session, company_id: str, f: ReportFilters, user_id: str = "") -> ReportTable:
-    """Every decided request (tickets of all kinds and stock requests): who decided, when, and the work done."""
-    # Decided = moved beyond the queue by an admin (released tickets have no processed_at).
-    tickets = db.query(AssetRequest).filter(
-        AssetRequest.company_id == company_id, AssetRequest.processed_at.isnot(None),
-    )
-    stock = db.query(InventoryRequest).filter(
-        InventoryRequest.company_id == company_id, InventoryRequest.processed_at.isnot(None)
-    )
-    if f.date_from:
-        tickets = tickets.filter(AssetRequest.processed_at >= f.date_from)
-        stock = stock.filter(InventoryRequest.processed_at >= f.date_from)
-    if f.date_to:
-        tickets = tickets.filter(AssetRequest.processed_at <= f.date_to)
-        stock = stock.filter(InventoryRequest.processed_at <= f.date_to)
-    tickets = tickets.limit(MAX_ROWS).all()
-    stock = stock.limit(MAX_ROWS).all()
-
-    user_ids = {t.requested_by for t in tickets} | {t.processed_by for t in tickets if t.processed_by} \
-        | {r.requested_by for r in stock} | {r.processed_by for r in stock if r.processed_by}
-    names = dict(db.query(User.id, User.full_name).filter(User.id.in_(user_ids)).all()) if user_ids else {}
-    asset_ids = {t.assigned_asset_id for t in tickets if t.assigned_asset_id} | {t.asset_id for t in tickets if t.asset_id}
-    tags = {a.id: a.label for a in db.query(Asset).filter(Asset.id.in_(asset_ids)).all()} if asset_ids else {}
-    products = dict(db.query(Software.id, Software.name).filter(
-        Software.id.in_({t.software_id for t in tickets if t.software_id})).all())
-    categories = dict(db.query(AssetCategory.id, AssetCategory.name).filter(AssetCategory.company_id == company_id).all())
-    items = dict(db.query(InventoryItem.id, InventoryItem.name).filter(
-        InventoryItem.id.in_({r.item_id for r in stock})).all()) if stock else {}
-
-    kind_label = {**TICKET_KIND, "ISSUE": "Problem"}
-    resources = dict(db.query(AccessResource.id, AccessResource.name).filter(
-        AccessResource.id.in_({t.access_resource_id for t in tickets if t.access_resource_id})).all())
-    rows = []
-    for t in tickets:
-        status = _ticket_status(t)
-        what = (f"{resources.get(t.access_resource_id, '')} ({t.access_level})" if t.ticket_type == "ACCESS"
-                else (products.get(t.software_id) or t.requested_software_name) if t.ticket_type == "SOFTWARE"
-                else tags.get(t.asset_id) if t.ticket_type in ("ISSUE", "RETURN")
-                else categories.get(t.asset_category_id, ""))
-        work = (t.rejection_reason and f"Rejected: {t.rejection_reason}") or t.resolution_note \
-            or (t.return_condition and f"Returned in {t.return_condition.lower()} condition") \
-            or (t.assigned_asset_id and f"Assigned {tags.get(t.assigned_asset_id, '')}") \
-            or (t.license_assignment_id and "Seat assigned") or (t.access_grant_id and "Access recorded as granted") \
-            or (t.procurement_note and f"Waiting: {t.procurement_note}") or ""
-        rows.append((t.processed_at, [
-            _ticket_no(t), kind_label.get(t.ticket_type, t.ticket_type), names.get(t.requested_by, ""),
-            what or "", t.reason, _stamp(t.created_at), status, names.get(t.processed_by, ""), _stamp(t.processed_at), work,
-        ]))
-    for r in stock:
-        rows.append((r.processed_at, [
-            f"#{r.id[:6].upper()}", "Stock request", names.get(r.requested_by, ""), f"{r.quantity} × {items.get(r.item_id, '')}",
-            r.reason, _stamp(r.created_at), r.status, names.get(r.processed_by, ""), _stamp(r.processed_at),
-            f"Rejected: {r.rejection_reason}" if r.rejection_reason else ("Stock issued" if r.status == "APPROVED" else ""),
-        ]))
-    rows.sort(key=lambda pair: pair[0] or datetime.min, reverse=True)
-    return ReportTable(
-        header=["Request", "Type", "Requested by", "Item", "Reason", "Raised", "Decision", "Decided by", "Decided at",
-                "Work done"],
-        rows=[row for _, row in rows[:MAX_ROWS]],
-    )
-
-
 REPORT_TYPES: Dict[str, ReportType] = {
     t.key: t
     for t in [
@@ -378,22 +243,8 @@ REPORT_TYPES: Dict[str, ReportType] = {
         ReportType("audit_results", "Physical audit results",
                    "Verified scans and exceptions from audit sessions.",
                    ["session_id", "date_from", "date_to"], _audit_results),
-        ReportType("approvals", "Approvals & work done",
-                   "Every request decided by an admin: who approved or rejected it, when, and the work done.",
-                   ["date_from", "date_to"], _approvals),
-        ReportType("my_assets", "My assets",
-                   "The assets assigned to you, with status, condition and warranty.", [], _my_assets, personal=True),
-        ReportType("my_tickets", "My tickets",
-                   "Your tickets with their status, who handled them and the asset given.",
-                   ["date_from", "date_to"], _my_tickets, personal=True),
     ]
 }
-
-
-def report_types_for(role) -> List[ReportType]:
-    """Users (EMPLOYEE) get only personal reports; everyone else gets the organization reports."""
-    personal = getattr(role, "value", role) == "EMPLOYEE"
-    return [t for t in REPORT_TYPES.values() if t.personal == personal]
 
 
 def _csv_safe(value: Any) -> Any:

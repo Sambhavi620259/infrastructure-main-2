@@ -25,10 +25,10 @@ services:
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-itam_user}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-itam_db}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
       CORS_ORIGINS: ${PUBLIC_APP_URL:-http://localhost:3000}
-      # The frontend proxy is the only hop in front of the backend that adds to X-Forwarded-For.
-      TRUSTED_PROXY_COUNT: "1"
-      ALLOW_PUBLIC_IT_ADMIN_SIGNUP: ${ALLOW_PUBLIC_IT_ADMIN_SIGNUP:-true}
-      ALLOW_PUBLIC_SUPER_ADMIN_SIGNUP: ${ALLOW_PUBLIC_SUPER_ADMIN_SIGNUP:-true}
+      # The frontend container reaches the backend over the private Docker network.
+      TRUSTED_PROXIES: "127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7"
+      ALLOW_PUBLIC_ADMIN_REGISTRATION: ${ALLOW_PUBLIC_ADMIN_REGISTRATION:-false}
+      ALLOW_PUBLIC_AGENT_REGISTRATION: ${ALLOW_PUBLIC_AGENT_REGISTRATION:-false}
       SEED_SUPER_ADMIN_EMAIL: ${SEED_SUPER_ADMIN_EMAIL:-}
       SEED_SUPER_ADMIN_PASSWORD: ${SEED_SUPER_ADMIN_PASSWORD:-}
     ports:
@@ -45,13 +45,16 @@ services:
     restart: unless-stopped
     environment:
       BACKEND_API_URL: http://backend:8000
+      # Set to true only when a reverse proxy in front of the frontend sets
+      # X-Forwarded-For itself; otherwise visitors could forge their address.
+      TRUST_FORWARDED_HEADERS: ${TRUST_FORWARDED_HEADERS:-false}
     ports:
       - "3000:3000"
     healthcheck:
-      # The app's own health route, which also checks that the backend answers.
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      # /api/health also checks that the backend answers.
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health >/dev/null || exit 1"]
       interval: 30s
-      timeout: 6s
+      timeout: 5s
       start_period: 20s
       retries: 3
     depends_on:

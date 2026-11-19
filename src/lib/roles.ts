@@ -132,8 +132,8 @@ export const roleDefinitions: Record<
     permissions: ["reports:read", "reports:export"],
   },
   IT_AGENT: {
-    label: "User",
-    description: "Standard user: raises tickets, requests stock, updates asset status and runs reports. Assets and stock are given out by the IT Admin.",
+    label: "IT Agent",
+    description: "Operational support role for tickets, assigned assets, inventory and approved reports.",
     scope: "Company operations",
     permissions: [
       "tickets:read",
@@ -183,7 +183,6 @@ export function defaultRouteForRole(role: Role) {
 export function canAccessPath(role: Role, pathname: string) {
   if (pathname === "/profile") return true;
   const workspace = workspaceForRole(role);
-  // The Super Admin has only his own pages; the IT Admin's and the users' areas are not his.
   if (workspace === "super") return pathname === "/super-admin" || pathname.startsWith("/super-admin/");
   if (workspace === "agent") return pathname === "/agent/dashboard" || pathname.startsWith("/agent/");
   return !pathname.startsWith("/super-admin") && !pathname.startsWith("/agent/");

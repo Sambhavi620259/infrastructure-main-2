@@ -43,21 +43,18 @@ def notify_company(
     agent_link: Optional[str] = None,
     exclude_user_id: Optional[str] = None,
     type: str = "INFO",
-) -> int:
-    """Notify every active user in the organization with one of the roles; returns how many were told."""
+) -> None:
+    """Notify every active user in the organization with one of the roles."""
     users = db.query(User).filter(
         User.company_id == company_id,
         User.role.in_(list(roles)),
         User.status == "ACTIVE",
     ).all()
-    told = 0
     for user in users:
         if user.id == exclude_user_id:
             continue
         link = home_link(user, admin_link, agent_link) if admin_link or agent_link else None
         notify(db, user, title, message, link, type)
-        told += 1
-    return told
 
 
 def notify_super_admins(

@@ -43,7 +43,7 @@ class WarrantyClaimResponse(BaseModel):
 
 class WarrantyCoverageResponse(BaseModel):
     asset_id: str
-    asset_tag: Optional[str] = None
+    asset_tag: str
     name: str
     category: str
     vendor_id: Optional[str] = None

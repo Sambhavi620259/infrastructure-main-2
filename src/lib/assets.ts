@@ -20,14 +20,10 @@ export type AssetListParams = {
 };
 
 export type AssetCreateInput = {
-  /** Optional; blank means no tag. */
-  asset_tag?: string;
-  /** Register this device from a stock receipt. */
-  receipt_id?: string;
-  specifications?: string;
-  serial_number?: string;
+  asset_tag: string;
+  serial_number: string;
   name: string;
-  category?: string;
+  category: string;
   type?: string;
   brand?: string;
   model?: string;
@@ -40,14 +36,6 @@ export type AssetCreateInput = {
   purchase_price?: number;
   warranty_start?: string;
   warranty_end?: string;
-  amc_vendor_id?: string;
-  amc_start?: string;
-  amc_end?: string;
-  amc_cost?: number;
-  license_type?: string;
-  license_number?: string;
-  license_expiry?: string;
-  extra_licenses?: { license_type: string | null; license_number: string }[];
 };
 
 function buildQuery(params: Record<string, string | number | undefined>): string {
@@ -81,7 +69,6 @@ export type AssetUpdateInput = Partial<
   Pick<
     Asset,
     | "name"
-    | "specifications"
     | "category"
     | "type"
     | "brand"
@@ -94,18 +81,8 @@ export type AssetUpdateInput = Partial<
     | "purchase_date"
     | "warranty_start"
     | "warranty_end"
-    | "amc_vendor_id"
-    | "amc_start"
-    | "amc_end"
-    | "license_type"
-    | "license_number"
-    | "license_expiry"
   >
 > & {
-  amc_cost?: number | null;
-  /** Add, change or clear ("") the tag. */
-  asset_tag?: string;
-  serial_number?: string | null;
   purchase_price?: number;
   status?: AssetStatus;
   /** Stored on the lifecycle entry when the status changes. */

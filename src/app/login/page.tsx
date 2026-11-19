@@ -8,14 +8,14 @@ import {
   EnvelopeIcon,
   EyeIcon,
   EyeSlashIcon,
-  KeyIcon,
   LockClosedIcon,
 } from "@heroicons/react/24/outline";
-import { ROLE_REDIRECT_MAP, type UserRole } from "@/lib/roles";
-import { apiFetch, clearAuth, saveToken } from "@/lib/api";
+import { defaultRouteForRole, type Role, type UserRole } from "@/lib/roles";
+import { apiFetch, clearAuth } from "@/lib/api";
 import { AuthLayout, IconField } from "@/components/auth/auth-layout";
 
-type LoginResponse = { access_token: string; role: UserRole };
+// The server reports the account's real role (including SUB_ADMIN and REPORTING_USER).
+type LoginResponse = { access_token: string; role: Role };
 const validRoles: readonly UserRole[] = ["IT_AGENT", "IT_ADMIN", "SUPER_ADMIN"];
 
 // "Remember me" keeps the email and role on this device; it never stores the password.
@@ -37,7 +37,6 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [superKey, setSuperKey] = useState("");
   const [remember, setRemember] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -62,24 +61,28 @@ export default function LoginPage() {
     event.preventDefault();
     if (!/^\S+@\S+\.\S+$/.test(email)) return setError("Enter a valid email address.");
     if (password.length < 8) return setError("Password must be at least 8 characters.");
-    if (role === "SUPER_ADMIN" && !superKey) return setError("Enter the Super Admin key.");
     setError("");
     setSubmitting(true);
     try {
       clearAuth();
       const data = await apiFetch<LoginResponse>("/api/auth/login", {
         method: "POST",
-        body: JSON.stringify({ email, password, role, super_admin_key: role === "SUPER_ADMIN" ? superKey : undefined }),
+        body: JSON.stringify({ email, password, role }),
       });
-      const authenticatedRole = validRoles.includes(data.role) ? data.role : role;
-      saveToken(data.access_token);
+      const serverRole = data.role;
+      const authenticatedRole: UserRole = validRoles.includes(serverRole as UserRole) ? (serverRole as UserRole) : role;
+      localStorage.setItem("auth-token", data.access_token);
+      // Matches the 12-hour token lifetime (ACCESS_TOKEN_EXPIRE_MINUTES).
+      const secure = window.location.protocol === "https:" ? "; Secure" : "";
+      document.cookie = `auth-token=${encodeURIComponent(data.access_token)}; Path=/; Max-Age=43200; SameSite=Lax${secure}`;
       try {
         if (remember) localStorage.setItem(REMEMBER_KEY, JSON.stringify({ email, role: authenticatedRole }));
         else localStorage.removeItem(REMEMBER_KEY);
       } catch {
         // Not being able to remember the email must not block sign-in.
       }
-      router.replace(ROLE_REDIRECT_MAP[authenticatedRole]);
+      // Route by the role the server confirmed, not the one picked in the form.
+      router.replace(defaultRouteForRole(serverRole));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to sign in.");
     } finally {
@@ -100,7 +103,7 @@ export default function LoginPage() {
             onChange={(event) => setRole(event.target.value as UserRole)}
             className="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3.5 py-3 text-base font-normal text-slate-900 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
           >
-            <option value="IT_AGENT">User</option>
+            <option value="IT_AGENT">IT Agent</option>
             <option value="IT_ADMIN">IT Admin</option>
             <option value="SUPER_ADMIN">Super Admin</option>
           </select>
@@ -136,18 +139,6 @@ export default function LoginPage() {
             </button>
           }
         />
-
-        {role === "SUPER_ADMIN" && (
-          <IconField
-            label="Super Admin Key"
-            icon={KeyIcon}
-            type="password"
-            autoComplete="off"
-            value={superKey}
-            onChange={(event) => setSuperKey(event.target.value)}
-            placeholder="The platform's Super Admin key"
-          />
-        )}
 
         <div className="flex flex-wrap items-center justify-between gap-2">
           <label className="flex items-center gap-2 text-sm text-slate-600">

@@ -1,9 +1,9 @@
 # Database migrations
 
-Schema changes go through Alembic, and Alembic is the only thing that creates or
-changes tables (`create_all` is not used). The container runs `alembic upgrade head`
-before it starts serving. `alembic check` reports any difference between the models and
-the migrations, and should say "No new upgrade operations detected".
+Schema changes go through Alembic. `Base.metadata.create_all()` in `app/main.py`
+only ever creates _missing tables_ — it never adds a column to a table that
+already exists — so before this directory existed there was no way to evolve the
+schema short of dropping the database.
 
 ## Adopting this on an existing database
 

@@ -7,8 +7,8 @@ from sqlalchemy import func
 from pydantic import BaseModel, ConfigDict
 
 from app.core.database import get_db
-from app.core.deps import get_current_user, require_roles, get_tenant_company_id
-from app.core.ws_auth import authenticate, reject, serve_socket
+from app.core.permissions import reporting_user_may_read
+from app.core.deps import get_current_user, require_roles, get_tenant_company_id, user_from_token, ws_authenticate, ws_release, WS_MAX_MESSAGE_CHARS
 from app.models.models import AuditSession, AuditScanRecord, Asset, PlatformRole, User
 from app.services.audit_service import log_audit_event
 from app.services.notification_service import notify_company
@@ -21,15 +21,16 @@ class AuditConnectionManager:
     def __init__(self):
         self.active_connections: Dict[str, List[WebSocket]] = {}
 
-    async def connect(self, session_id: str, websocket: WebSocket, subprotocol: Optional[str] = None):
-        await websocket.accept(subprotocol=subprotocol)
+    async def connect(self, session_id: str, websocket: WebSocket):
+        await websocket.accept()
         if session_id not in self.active_connections:
             self.active_connections[session_id] = []
         self.active_connections[session_id].append(websocket)
 
     def disconnect(self, session_id: str, websocket: WebSocket):
-        if session_id in self.active_connections and websocket in self.active_connections[session_id]:
-            self.active_connections[session_id].remove(websocket)
+        if session_id in self.active_connections:
+            if websocket in self.active_connections[session_id]:
+                self.active_connections[session_id].remove(websocket)
             if not self.active_connections[session_id]:
                 del self.active_connections[session_id]
 
@@ -55,34 +56,38 @@ async def audit_websocket(
     token: Optional[str] = Query(None),
 ):
     """
-    WebSocket endpoint for real-time audit scan updates. The token is sent as the
-    "bearer.<jwt>" subprotocol (see app/core/ws_auth.py); ?token= still works.
+    WebSocket endpoint for real-time audit scan updates.
+    Browsers cannot set headers on a WebSocket, so the JWT comes as ?token=.
+    Origin is checked, no DB connection is held while the socket is open, and
+    inbound messages are size-limited.
     """
-    identity = authenticate(websocket, token)
-    if identity is None:
-        await reject(websocket, 4401, "Not authenticated")
-        return
-    if identity.role == PlatformRole.EMPLOYEE:
-        await reject(websocket, 4403, "Not allowed")
-        return
-
-    # Short session: it is closed before the socket starts waiting.
-    source = websocket.app.dependency_overrides.get(get_db, get_db)()
-    db = next(source)
-    try:
+    def authorize(db, user):
         sess = db.query(AuditSession).filter(AuditSession.id == session_id).first()
-        allowed = bool(sess) and (identity.role == PlatformRole.SUPER_ADMIN or sess.company_id == identity.company_id)
-    finally:
-        source.close()
-    if not allowed:
-        await reject(websocket, 4004, "Session not found")
+        if not sess or (user.role != PlatformRole.SUPER_ADMIN and sess.company_id != user.company_id):
+            return (4004, "Session not found")
+        if user.role == PlatformRole.REPORTING_USER and not reporting_user_may_read(user, "/api/physical-audit"):
+            return (4403, "Not allowed for this account")
+        return None
+
+    user_id, failure = ws_authenticate(websocket, token, authorize)
+    if failure:
+        await websocket.accept()  # so the browser receives the close code
+        await websocket.close(code=failure[0], reason=failure[1])
         return
 
-    await audit_manager.connect(session_id, websocket, identity.subprotocol)
+    await audit_manager.connect(session_id, websocket)
     try:
-        await serve_socket(websocket, identity)
+        while True:
+            data = await websocket.receive_text()
+            if len(data) > WS_MAX_MESSAGE_CHARS:
+                await websocket.close(code=1009, reason="Message too large")
+                break
+            await websocket.send_text(f"pong: {data}")
+    except WebSocketDisconnect:
+        pass
     finally:
         audit_manager.disconnect(session_id, websocket)
+        ws_release(user_id)
 
 
 # Helper to broadcast scan updates
@@ -242,7 +247,7 @@ def get_audit_session(
 def list_session_scans(
     session_id: str,
     skip: int = Query(0, ge=0),
-    limit: int = Query(500, ge=1, le=2000),
+    limit: int = Query(500, ge=1, le=1000),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
@@ -310,8 +315,7 @@ def scan_asset_qr(
 
     asset = db.query(Asset).filter(
         Asset.company_id == sess.company_id,
-        # Untagged devices are scanned by their serial number.
-        (Asset.asset_tag == scan_in.asset_tag) | (Asset.serial_number == scan_in.asset_tag)
+        Asset.asset_tag == scan_in.asset_tag
     ).first()
 
     record = AuditScanRecord(

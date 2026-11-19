@@ -4,13 +4,12 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import React, { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
-  ChartBarIcon,
+  BanknotesIcon,
   CloudIcon,
-  KeyIcon,
-  RectangleStackIcon,
+  SignalIcon,
+  ArrowPathRoundedSquareIcon,
   ArrowRightStartOnRectangleIcon,
   BuildingOffice2Icon,
-  BuildingStorefrontIcon,
   ChevronDownIcon,
   Cog6ToothIcon,
   ComputerDesktopIcon,
@@ -27,8 +26,6 @@ import {
   UserGroupIcon,
   UsersIcon,
   XMarkIcon,
-  LockOpenIcon,
-  UserPlusIcon,
   Bars3Icon,
 } from "@heroicons/react/24/outline";
 import { endDemoSession, type DemoSession } from "@/lib/demo-session";
@@ -38,76 +35,73 @@ import { routes } from "@/lib/routes";
 import { getDashboardCounts, type DashboardCounts } from "@/lib/dashboard";
 import { NotificationBell } from "@/components/layout/notification-bell";
 import { PROFILE_UPDATED_EVENT } from "@/lib/profile";
-import { sectionForPath, sectionsFor, userPageOnPlan, type Section } from "@/lib/access";
+import { LABEL_SECTION, sectionForPath, sectionsFor } from "@/lib/access";
 import { useResponsiveTables } from "@/lib/responsive-tables";
 
 type NavigationItem = readonly [label: string, href: string, countKey: string, icon: React.ComponentType<{ className?: string }>];
 
-type MenuLink = { label: string; href: string; icon: NavigationItem[3]; section: Section; badge?: string };
-type MenuEntry =
-  | ({ kind: "link" } & MenuLink)
-  | { kind: "group"; label: string; icon: NavigationItem[3]; children: MenuLink[]; badge?: string }
-  | { kind: "heading"; label: string };
+const itNavigation: readonly NavigationItem[] = [
+  ["Dashboard", routes.dashboard, "", Squares2X2Icon],
+  ["Tickets", routes.tickets, "tickets", TicketIcon],
+  ["Users", routes.users, "users", UserGroupIcon],
+  ["Inventory", routes.inventory, "inventory", FolderIcon],
+  ["Finance", routes.financial, "", BanknotesIcon],
+  ["Discovery", routes.discovery, "", SignalIcon],
+  ["Cloud", routes.cloud, "", CloudIcon],
+  ["Reports", routes.reports, "", FolderIcon],
+  ["Settings", routes.settings, "", Cog6ToothIcon],
+] as const;
 
-/** IT workspace sidebar. Assets and Inventory are separate groups; each link shows only if the role can open its section. */
-const itMenu: readonly MenuEntry[] = [
-  { kind: "link", label: "Dashboard", href: routes.dashboard, icon: Squares2X2Icon, section: "dashboard" },
-  {
-    kind: "group", label: "Assets", icon: ComputerDesktopIcon, children: [
-      { label: "All Assets", href: routes.assets, icon: Squares2X2Icon, section: "assets", badge: "assets" },
-      { label: "Hardware Assets", href: "/assets/hardware", icon: ComputerDesktopIcon, section: "assets" },
-      { label: "Software Assets", href: "/assets/software", icon: RectangleStackIcon, section: "software" },
-      { label: "Asset Assignments", href: routes.assetAssignment, icon: UserGroupIcon, section: "assets" },
-      { label: "Asset History", href: routes.assetHistory, icon: ClockIcon, section: "assets" },
-      { label: "Asset Status", href: routes.assetStatus, icon: CheckCircleIcon, section: "assets" },
-      { label: "Consumables", href: routes.inventoryStock, icon: FolderIcon, section: "inventory" },
-    ],
-  },
-  { kind: "link", label: "Requests & Approvals", href: "/requests", icon: ClipboardDocumentCheckIcon, section: "tickets", badge: "tickets" },
-  { kind: "link", label: "Access Management", href: "/access", icon: LockOpenIcon, section: "access" },
-  { kind: "link", label: "Reports & Analytics", href: routes.reports, icon: ChartBarIcon, section: "reports" },
-  { kind: "heading", label: "Administration" },
-  {
-    kind: "group", label: "Users", icon: UsersIcon, badge: "users", children: [
-      { label: "All Users", href: routes.users, icon: UsersIcon, section: "users" },
-      { label: "Add User", href: routes.userNew, icon: UserPlusIcon, section: "users" },
-      { label: "Departments / Teams", href: routes.userDepartments, icon: BuildingOffice2Icon, section: "users" },
-    ],
-  },
-  { kind: "link", label: "Vendors", href: routes.inventoryVendors, icon: BuildingStorefrontIcon, section: "inventory" },
-  { kind: "link", label: "Cloud", href: routes.cloud, icon: CloudIcon, section: "cloud" },
-  { kind: "link", label: "Settings", href: routes.settings, icon: Cog6ToothIcon, section: "settings" },
-];
+const assetNavigation: readonly NavigationItem[] = [
+  ["All Assets", routes.assets, "assets", CubeIcon],
+  ["Add New Asset", routes.assetNew, "", CubeIcon],
+  ["Asset Assignment", routes.assetAssignment, "", UserGroupIcon],
+  ["Asset Audit", routes.assetAudit, "", ClipboardDocumentCheckIcon],
+  ["Asset Lifecycle", routes.assetLifecycle, "", ArrowPathRoundedSquareIcon],
+  ["Warranty / AMC", routes.assetWarranty, "", ShieldCheckIcon],
+  ["Asset History", routes.assetHistory, "", ClockIcon],
+  ["Asset Status", routes.assetStatus, "", CheckCircleIcon],
+] as const;
 
-// Pages reached from inside other pages; listed so the search box still finds them.
-const itMorePages: readonly NavigationItem[] = [
-  ["Add hardware asset", routes.assetNew, "", ComputerDesktopIcon],
-  ["Add software asset", routes.softwareNew, "", KeyIcon],
-];
+const ticketNavigation: readonly NavigationItem[] = [
+  ["Ticket Dashboard", routes.ticketDashboard, "", Squares2X2Icon],
+  ["All Tickets", routes.tickets, "", TicketIcon],
+  ["My Tickets", routes.ticketMine, "", TicketIcon],
+  ["Create New Ticket", routes.ticketNew, "", TicketIcon],
+] as const;
 
-const itNavigation: readonly NavigationItem[] = itMenu.flatMap((entry): NavigationItem[] =>
-  entry.kind === "link"
-    ? [[entry.label, entry.href, entry.badge ?? "", entry.icon]]
-    : entry.kind === "group"
-      ? entry.children.map((child): NavigationItem => [child.label, child.href, child.badge ?? "", child.icon])
-      : [],
-);
+const userNavigation: readonly NavigationItem[] = [
+  ["All Users", routes.users, "", UserGroupIcon],
+  ["Add User", routes.userNew, "", UserGroupIcon],
+  ["Departments / Teams", routes.userDepartments, "", BuildingOffice2Icon],
+] as const;
+
+const inventoryNavigation: readonly NavigationItem[] = [
+  ["Inventory Dashboard", routes.inventory, "", Squares2X2Icon],
+  ["Hardware Inventory", routes.inventoryHardware, "", CubeIcon],
+  ["Software Inventory", routes.inventorySoftware, "", ComputerDesktopIcon],
+  ["Stock / Available Items", routes.inventoryStock, "", FolderIcon],
+  ["Purchase Orders", routes.inventoryPurchaseOrders, "", DocumentChartBarIcon],
+  ["Vendors", routes.inventoryVendors, "", BuildingOffice2Icon],
+] as const;
 
 const agentNavigation: readonly NavigationItem[] = [
   ["Dashboard", routes.agentDashboard, "", Squares2X2Icon],
-  ["My Assets", routes.agentAssets, "", CubeIcon],
+  ["Assets", routes.agentAssets, "", CubeIcon],
   ["Tickets", routes.agentTickets, "", TicketIcon],
+  ["Inventory", routes.agentInventory, "", FolderIcon],
   ["Reports", routes.agentReports, "", DocumentChartBarIcon],
   ["Settings", routes.agentSettings, "", Cog6ToothIcon],
 ] as const;
 
-/** The Super Admin's own menu: his dashboard, the team's work, audit logs and settings. */
 const superNavigation: readonly NavigationItem[] = [
-  ["Dashboard", routes.superAdmin, "", Squares2X2Icon],
-  ["Team work", "/super-admin/work", "", UserGroupIcon],
-  ["All assets", "/super-admin/assets", "", ComputerDesktopIcon],
+  ["Overview", routes.superAdmin, "", Squares2X2Icon],
+  ["Companies", routes.superCompanies, "", BuildingOffice2Icon],
+  ["Subscriptions", routes.superSubscriptions, "", DocumentChartBarIcon],
+  ["Tenant management", routes.superTenants, "", UsersIcon],
+  ["Platform admins", routes.superAdmins, "", ShieldCheckIcon],
   ["Audit logs", routes.superAudit, "", FolderIcon],
-  ["Settings", routes.superSettings, "", Cog6ToothIcon],
+  ["Platform settings", routes.superSettings, "", Cog6ToothIcon],
 ] as const;
 
 function isActiveRoute(pathname: string, href: string) {
@@ -125,16 +119,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   // An IT Agent who signed up on their own has no organization until an IT Admin adds them.
   const [awaitingOrganization, setAwaitingOrganization] = useState(false);
   const [modules, setModules] = useState<string[]>([]);
-  // Undefined until the profile loads, then the modules the organization's plan includes.
-  const [planFeatures, setPlanFeatures] = useState<string[] | undefined>(undefined);
-  const sections = useMemo(
-    () => sectionsFor(authenticatedUser?.role ?? "", modules, planFeatures),
-    [authenticatedUser, modules, planFeatures],
-  );
-  const isSuper = authenticatedUser?.role === roles.SUPER_ADMIN;
+  const sections = useMemo(() => sectionsFor(authenticatedUser?.role ?? "", modules), [authenticatedUser, modules]);
   const [sessionAttempt, setSessionAttempt] = useState(0);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [mainEl, setMainEl] = useState<HTMLDivElement | null>(null);
   useResponsiveTables(mainEl);
 
@@ -150,8 +137,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, [mobileNavOpen]);
   const [search, setSearch] = useState("");
   const [profileOpen, setProfileOpen] = useState(false);
-  // Sidebar groups (Assets, Inventory): open when you are inside one.
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({ Assets: true, Users: true });
+  const [assetsOpen, setAssetsOpen] = useState(pathname.startsWith("/assets"));
+  const [ticketsOpen, setTicketsOpen] = useState(pathname.startsWith("/tickets"));
+  const [usersOpen, setUsersOpen] = useState(pathname.startsWith("/users"));
+  const [inventoryOpen, setInventoryOpen] = useState(pathname.startsWith("/inventory"));
   // Dashboard counts for sidebar badges
   const [counts, setCounts] = useState<DashboardCounts | null>(null);
 
@@ -159,6 +148,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   // organization: an agent awaiting one would just get a 400.
   useEffect(() => {
     if (!authenticatedUser || awaitingOrganization || workspaceForRole(authenticatedUser.role) !== "it") return;
+    // The badges read assets, tickets, inventory and users: a Reporting user may not.
+    if (authenticatedUser.role === roles.REPORTING_USER) return;
     getDashboardCounts()
       .then(setCounts)
       // Badges are optional; a failure should not interrupt the page.
@@ -181,21 +172,11 @@ export function AppShell({ children }: { children: ReactNode }) {
       }
       try {
         const data = await apiFetch<{
-          user: {
-            name: string;
-            email: string;
-            role: DemoSession["role"];
-            companyId: string | null;
-            modules?: string[];
-            avatarUrl?: string | null;
-            planFeatures?: string[];
-          };
+          user: { name: string; email: string; role: DemoSession["role"]; companyId: string | null; modules?: string[] };
         }>("/api/profile");
         if (cancelled) return;
         setAwaitingOrganization(data.user.role === roles.IT_AGENT && !data.user.companyId);
         setModules(data.user.modules ?? []);
-        setPlanFeatures(data.user.planFeatures);
-        setAvatarUrl(data.user.avatarUrl ?? null);
         const name = data.user.name || data.user.email.split("@")[0];
         setAuthenticatedUser({
           name,
@@ -233,9 +214,17 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     setMobileNavOpen(false);
     setProfileOpen(false);
-    // Consumables lives under Assets.
-    if (pathname.startsWith("/assets") || pathname.startsWith("/inventory/stock")) setOpenGroups((current) => ({ ...current, Assets: true }));
+    if (pathname.startsWith("/assets")) setAssetsOpen(true);
+    if (pathname.startsWith("/tickets")) setTicketsOpen(true);
+    if (pathname.startsWith("/users")) setUsersOpen(true);
+    if (pathname.startsWith("/inventory")) setInventoryOpen(true);
   }, [pathname]);
+
+  const pageSection = sectionForPath(pathname);
+  const pageBlocked =
+    !!authenticatedUser &&
+    (!canAccessPath(authenticatedUser.role, pathname) ||
+      (workspaceForRole(authenticatedUser.role) === "it" && !!pageSection && !sections.has(pageSection)));
 
   useEffect(() => {
     if (authenticatedUser && !canAccessPath(authenticatedUser.role, pathname)) {
@@ -245,13 +234,9 @@ export function AppShell({ children }: { children: ReactNode }) {
     // Sub-admins and reporting users only open the sections their role allows.
     const section = sectionForPath(pathname);
     if (authenticatedUser && workspaceForRole(authenticatedUser.role) === "it" && section && !sections.has(section)) {
-      router.replace("/dashboard");
+      router.replace(sections.has("dashboard") ? "/dashboard" : "/reports");
     }
-    // Users only open the pages their organization's plan includes.
-    if (authenticatedUser && workspaceForRole(authenticatedUser.role) === "agent" && !userPageOnPlan(pathname, planFeatures)) {
-      router.replace(defaultRouteForRole(authenticatedUser.role));
-    }
-  }, [authenticatedUser, pathname, router, sections, planFeatures]);
+  }, [authenticatedUser, pathname, router, sections]);
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -266,21 +251,17 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, []);
 
   const workspace: Workspace = workspaceForRole(authenticatedUser?.role ?? roles.IT_ADMIN);
-  const navigation = useMemo(
-    () =>
-      workspace === "agent"
-        ? agentNavigation.filter(([, href]) => userPageOnPlan(href, planFeatures))
-        : isSuper
-          ? superNavigation
-          : itNavigation,
-    [workspace, isSuper, planFeatures],
-  );
+  const navigation =
+    workspace === "super" ? superNavigation : workspace === "agent" ? agentNavigation : itNavigation;
   const searchResults = useMemo(
     () =>
       (workspace === "it"
         ? [
-            ...navigation,
-            ...itMorePages,
+            ...itNavigation,
+            ...assetNavigation,
+            ...ticketNavigation,
+            ...userNavigation,
+            ...inventoryNavigation,
           ].filter(([, href]) => {
             const section = sectionForPath(href);
             return !section || sections.has(section);
@@ -309,11 +290,9 @@ export function AppShell({ children }: { children: ReactNode }) {
     if (!counts || !countKey) return null;
     switch (countKey) {
       case "assets": return counts.assets.total;
-      // Tickets waiting on the IT team, the same set as the "Needs action" view.
-      case "tickets": return counts.tickets.needs_action ?? counts.tickets.pending;
+      case "tickets": return counts.tickets.pending;
       case "inventory": return counts.inventory.low_stock;
-      // The All Users page lists ordinary users only.
-      case "users": return counts.users.employees ?? counts.users.total;
+      case "users": return counts.users.total;
       default: return null;
     }
   };
@@ -373,7 +352,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <section className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
           <h1 className="text-xl font-extrabold text-slate-950">Waiting for your IT Admin</h1>
           <p className="mt-3 text-sm text-slate-600">
-            Hi {authenticatedUser.name}, your account is ready. An IT Admin needs to add you to their
+            Hi {authenticatedUser.name}, your IT Agent account is ready. An IT Admin needs to add you to their
             organization before you can use the dashboard. Ask them to open <strong>Users</strong> and choose{" "}
             <strong>Add to organization</strong> next to your name.
           </p>
@@ -422,7 +401,13 @@ export function AppShell({ children }: { children: ReactNode }) {
           <XMarkIcon className="h-5 w-5" />
         </button>
         <Link
-          href={isSuper ? routes.superAdmin : workspace === "agent" ? routes.agentDashboard : routes.dashboard}
+          href={
+            workspace === "super"
+              ? routes.superAdmin
+              : workspace === "agent"
+                ? routes.agentDashboard
+                : routes.dashboard
+          }
           onClick={() => setMobileNavOpen(false)}
           className="mb-5 flex items-center gap-2.5 px-2"
           aria-label="Bold And Wise Ventures home"
@@ -441,9 +426,9 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="mb-5">
           <div className="flex w-full items-center gap-2.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-left">
             <span
-              className={`grid h-8 w-8 place-items-center rounded-lg ${isSuper ? "bg-violet-100 text-violet-700" : "bg-blue-100 text-blue-700"}`}
+              className={`grid h-8 w-8 place-items-center rounded-lg ${workspace === "super" ? "bg-violet-100 text-violet-700" : "bg-blue-100 text-blue-700"}`}
             >
-              {isSuper ? (
+              {workspace === "super" ? (
                 <ShieldCheckIcon className="h-4 w-4" />
               ) : (
                 <ComputerDesktopIcon className="h-4 w-4" />
@@ -454,122 +439,207 @@ export function AppShell({ children }: { children: ReactNode }) {
                 Workspace
               </span>
               <span className="block truncate text-xs font-bold text-slate-800">
-                {isSuper ? "Super Admin" : workspace === "agent" ? "User" : "IT Admin"}
+                {workspace === "super" ? "Super Admin" : workspace === "agent" ? "IT Agent" : "IT Admin"}
               </span>
             </span>
           </div>
         </div>
 
         <p className="mb-2 px-2 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">
-          {isSuper ? "Super Admin" : workspace === "agent" ? "User workspace" : "IT operations"}
+          {workspace === "super"
+            ? "Platform workspace"
+            : workspace === "agent"
+              ? "Agent workspace"
+              : "IT operations"}
         </p>
         <nav
           className="space-y-1"
-          aria-label={isSuper ? "Super Admin navigation" : workspace === "agent" ? "User navigation" : "IT Admin navigation"}
+          aria-label={
+            workspace === "super"
+              ? "Super Admin navigation"
+              : workspace === "agent"
+                ? "IT Agent navigation"
+                : "IT Admin navigation"
+          }
         >
-          {workspace === "it"
-            ? itMenu.map((entry, index) => {
-                const linkClass = (href: string) =>
-                  `flex items-center gap-3 rounded-lg px-3 py-2 text-[13px] font-semibold transition ${
-                    isActiveRoute(pathname, href) ? "bg-brand-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-                  }`;
-                if (entry.kind === "heading") {
-                  const anyVisible = itMenu
-                    .slice(index + 1)
-                    .some((e) => (e.kind === "link" && sections.has(e.section)) || (e.kind === "group" && e.children.some((c) => sections.has(c.section))));
-                  return anyVisible ? (
-                    <p key={entry.label} className="px-3 pb-1 pt-4 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">
-                      {entry.label}
-                    </p>
-                  ) : null;
-                }
-                if (entry.kind === "link") {
-                  if (!sections.has(entry.section)) return null;
-                  const Icon = entry.icon;
-                  return (
-                    <Link key={entry.href} href={entry.href} className={linkClass(entry.href)} aria-current={isActiveRoute(pathname, entry.href) ? "page" : undefined} onClick={() => setMobileNavOpen(false)}>
-                      <Icon className="h-[17px] w-[17px]" />
-                      <span className="flex-1">{entry.label}</span>
-                      {entry.badge && getBadge(entry.badge) && <Badge count={getBadge(entry.badge)!} />}
-                    </Link>
-                  );
-                }
-                const children = entry.children.filter((child) => sections.has(child.section));
-                if (children.length === 0) return null;
-                const GroupIcon = entry.icon;
-                const isOpen = openGroups[entry.label] ?? false;
-                const inside = children.some((child) => isActiveRoute(pathname, child.href));
-                return (
-                  <div key={entry.label}>
-                    <button
-                      type="button"
-                      data-feedback="off"
-                      onClick={() => setOpenGroups((current) => ({ ...current, [entry.label]: !isOpen }))}
-                      aria-expanded={isOpen}
-                      className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-[13px] font-semibold transition ${inside ? "text-brand-700" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"}`}
+          {workspace === "it" &&
+            sections.has("dashboard") &&
+            itNavigation
+              .filter(([label]) => label === "Dashboard")
+              .map(([label, href, countKey, Icon]) => (
+                <Link
+                  className={`flex items-center gap-3 rounded-lg px-3 py-2 text-[13px] font-semibold transition ${isActiveRoute(pathname, href) ? "bg-brand-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"}`}
+                  href={href}
+                  key={href}
+                  onClick={() => setMobileNavOpen(false)}
+                >
+                  <Icon className="h-[17px] w-[17px]" />
+                  {label}
+                  {getBadge(countKey) && <Badge count={getBadge(countKey)!} />}
+                </Link>
+              ))}
+          {workspace === "it" && sections.has("assets") && (
+            <div>
+              <button
+                type="button"
+                data-feedback="off"
+                onClick={() => setAssetsOpen((open) => !open)}
+                aria-expanded={assetsOpen}
+                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-[13px] font-semibold transition ${pathname.startsWith("/assets") ? "text-brand-700" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"}`}
+              >
+                <CubeIcon className="h-[17px] w-[17px]" /> <span className="flex-1 text-left">Assets</span>
+                {getBadge("assets") && <Badge count={getBadge("assets")!} />}
+                <ChevronDownIcon className={`h-4 w-4 transition ${assetsOpen ? "rotate-180" : ""}`} />
+              </button>
+              {assetsOpen && (
+                <div className="mt-1 space-y-0.5 border-l border-slate-200 pl-3 ml-4">
+                  {assetNavigation.map(([label, href]) => {
+                    const active = pathname === href;
+                    return (
+                      <Link
+                        key={href}
+                        href={href}
+                        onClick={() => setMobileNavOpen(false)}
+                        aria-current={active ? "page" : undefined}
+                        className={`block rounded-md px-3 py-1.5 text-[11px] font-semibold transition ${active ? "bg-brand-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"}`}
+                      >
+                        {label}
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+          {workspace === "it" && sections.has("tickets") && (
+            <div>
+              <button
+                type="button"
+                data-feedback="off"
+                onClick={() => setTicketsOpen((open) => !open)}
+                aria-expanded={ticketsOpen}
+                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-[13px] font-semibold transition ${pathname.startsWith("/tickets") ? "text-brand-700" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"}`}
+              >
+                <TicketIcon className="h-[17px] w-[17px]" />
+                <span className="flex-1 text-left">Tickets</span>
+                {getBadge("tickets") && <Badge count={getBadge("tickets")!} />}
+                <ChevronDownIcon className={`h-4 w-4 transition ${ticketsOpen ? "rotate-180" : ""}`} />
+              </button>
+              {ticketsOpen && (
+                <div className="mt-1 ml-4 space-y-0.5 border-l border-slate-200 pl-3">
+                  {ticketNavigation.map(([label, href, countKey]) => (
+                    <Link
+                      key={href}
+                      href={href}
+                      onClick={() => setMobileNavOpen(false)}
+                      className={`block rounded-md px-3 py-1.5 text-[11px] font-semibold transition ${pathname === href ? "bg-brand-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"}`}
                     >
-                      <GroupIcon className="h-[17px] w-[17px]" />
-                      <span className="flex-1 text-left">{entry.label}</span>
-                      {entry.badge && getBadge(entry.badge) && <Badge count={getBadge(entry.badge)!} />}
-                      <ChevronDownIcon className={`h-4 w-4 transition ${isOpen ? "rotate-180" : ""}`} />
-                    </button>
-                    {isOpen && (
-                      <div className="ml-4 mt-0.5 space-y-0.5 border-l border-slate-200 pl-3">
-                        {children.map((child) => {
-                          const ChildIcon = child.icon;
-                          // "/assets" must not light up on "/assets/software": a more specific sibling wins.
-                          const active =
-                            isActiveRoute(pathname, child.href) &&
-                            !children.some(
-                              (other) => other.href !== child.href && other.href.startsWith(child.href) && isActiveRoute(pathname, other.href),
-                            );
-                          return (
-                            <Link
-                              key={child.href}
-                              href={child.href}
-                              aria-current={active ? "page" : undefined}
-                              onClick={() => setMobileNavOpen(false)}
-                              className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[12px] font-semibold transition ${active ? "bg-brand-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"}`}
-                            >
-                              <ChildIcon className="h-4 w-4" />
-                              <span className="flex-1">{child.label}</span>
-                              {child.badge && getBadge(child.badge) && <Badge count={getBadge(child.badge)!} />}
-                            </Link>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                );
-              })
-            : navigation.map(([label, href, , Icon]) => {
-                const active = isActiveRoute(pathname, href);
-                return (
-                  <Link
-                    className={`flex items-center gap-3 rounded-lg px-3 py-2 text-[13px] font-semibold transition ${active ? "bg-brand-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"}`}
-                    href={href}
-                    key={href}
-                    aria-current={active ? "page" : undefined}
-                    onClick={() => setMobileNavOpen(false)}
-                  >
-                    <Icon className="h-[17px] w-[17px]" />
-                    {label}
-                  </Link>
-                );
-              })}
+                      {label}
+                      {getBadge(countKey) && <Badge count={getBadge(countKey)!} />}
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {workspace === "it" && sections.has("users") && (
+            <div>
+              <button
+                type="button"
+                data-feedback="off"
+                onClick={() => setUsersOpen((open) => !open)}
+                aria-expanded={usersOpen}
+                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-[13px] font-semibold transition ${pathname.startsWith("/users") ? "text-brand-700" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"}`}
+              >
+                <UserGroupIcon className="h-[17px] w-[17px]" />
+                <span className="flex-1 text-left">Users</span>
+                {getBadge("users") && <Badge count={getBadge("users")!} />}
+                <ChevronDownIcon className={`h-4 w-4 transition ${usersOpen ? "rotate-180" : ""}`} />
+              </button>
+              {usersOpen && (
+                <div className="mt-1 ml-4 space-y-0.5 border-l border-slate-200 pl-3">
+                  {userNavigation.map(([label, href, countKey]) => (
+                    <Link
+                      key={href}
+                      href={href}
+                      onClick={() => setMobileNavOpen(false)}
+                      className={`block rounded-md px-3 py-1.5 text-[11px] font-semibold transition ${pathname === href ? "bg-brand-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"}`}
+                    >
+                      {label}
+                      {getBadge(countKey) && <Badge count={getBadge(countKey)!} />}
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {workspace === "it" && (sections.has("inventory") || sections.has("software")) && (
+            <div>
+              <button
+                type="button"
+                data-feedback="off"
+                onClick={() => setInventoryOpen((open) => !open)}
+                aria-expanded={inventoryOpen}
+                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-[13px] font-semibold transition ${pathname.startsWith("/inventory") ? "text-brand-700" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"}`}
+              >
+                <FolderIcon className="h-[17px] w-[17px]" />
+                <span className="flex-1 text-left">Inventory</span>
+                {getBadge("inventory") && <Badge count={getBadge("inventory")!} />}
+                <ChevronDownIcon className={`h-4 w-4 transition ${inventoryOpen ? "rotate-180" : ""}`} />
+              </button>
+              {inventoryOpen && (
+                <div className="mt-1 ml-4 space-y-0.5 border-l border-slate-200 pl-3">
+                  {inventoryNavigation
+                    .filter(([label]) => sections.has(label === "Software Inventory" ? "software" : "inventory"))
+                    .map(([label, href, countKey]) => (
+                    <Link
+                      key={href}
+                      href={href}
+                      onClick={() => setMobileNavOpen(false)}
+                      className={`block rounded-md px-3 py-1.5 text-[11px] font-semibold transition ${pathname === href ? "bg-brand-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"}`}
+                    >
+                      {label}
+                      {getBadge(countKey) && <Badge count={getBadge(countKey)!} />}
+                    </Link>
+                  ))}
+</div>
+          )}
+        </div>
+      )}
+      {(workspace === "it"
+            ? navigation.filter(
+                ([label]) =>
+                  !["Dashboard", "Tickets", "Users", "Inventory"].includes(label) && sections.has(LABEL_SECTION[label]),
+              )
+            : navigation
+          ).map(([label, href, , Icon]) => {
+            const active = isActiveRoute(pathname, href);
+            return (
+              <Link
+                className={`flex items-center gap-3 rounded-lg px-3 py-2 text-[13px] font-semibold transition ${active ? "bg-brand-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"}`}
+                href={href}
+                key={href}
+                aria-current={active ? "page" : undefined}
+                onClick={() => setMobileNavOpen(false)}
+              >
+                <Icon className="h-[17px] w-[17px]" />
+                {label}
+              </Link>
+            );
+          })}
         </nav>
 
-        <div className={`mt-8 rounded-xl p-3 ${isSuper ? "bg-violet-50" : "bg-blue-50"}`}>
+        <div className={`mt-8 rounded-xl p-3 ${workspace === "super" ? "bg-violet-50" : "bg-blue-50"}`}>
           <p
-            className={`text-[10px] font-bold uppercase tracking-wider ${isSuper ? "text-violet-600" : "text-brand-600"}`}
+            className={`text-[10px] font-bold uppercase tracking-wider ${workspace === "super" ? "text-violet-600" : "text-brand-600"}`}
           >
             Current role
           </p>
           <p className="mt-1 text-xs font-bold text-slate-800">
-            {isSuper
+            {workspace === "super"
               ? "Super Administrator"
               : workspace === "agent"
-                ? "User"
+                ? "IT Agent"
                 : authenticatedUser.role === roles.SUB_ADMIN
                   ? "Sub-admin"
                   : authenticatedUser.role === roles.REPORTING_USER
@@ -577,10 +647,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                     : "IT Administrator"}
           </p>
           <p className="mt-1 text-[10px] leading-4 text-slate-500">
-            {isSuper
-              ? "Your dashboard, your team's work and settings."
+            {workspace === "super"
+              ? "Platform-wide company and subscription controls."
               : workspace === "agent"
-                ? "Your assets, tickets and stock."
+                ? "Ticket, asset and inventory operations."
                 : authenticatedUser.role === roles.SUB_ADMIN
                   ? "Administers the modules assigned to you."
                   : authenticatedUser.role === roles.REPORTING_USER
@@ -602,7 +672,11 @@ export function AppShell({ children }: { children: ReactNode }) {
             >
               <Bars3Icon className="h-6 w-6" />
             </button>
-            <Link href={isSuper ? routes.superAdmin : workspace === "agent" ? routes.agentDashboard : routes.dashboard} className="flex min-w-0 items-center gap-2" aria-label="Home">
+            <Link href={workspace === "super"
+              ? routes.superAdmin
+              : workspace === "agent"
+                ? routes.agentDashboard
+                : routes.dashboard} className="flex min-w-0 items-center gap-2" aria-label="Home">
               <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-brand-600 text-xs font-black text-white">B</span>
               <span className="truncate text-[13px] font-extrabold tracking-tight text-slate-900">Bold And Wise</span>
             </Link>
@@ -646,18 +720,13 @@ export function AppShell({ children }: { children: ReactNode }) {
                 onClick={() => setProfileOpen((open) => !open)}
                 className="flex items-center gap-2 rounded-lg py-1 pl-1 pr-2 hover:bg-slate-100"
               >
-                {avatarUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element -- a small data URL, not a remote image
-                  <img src={avatarUrl} alt="" className="h-7 w-7 rounded-full object-cover" />
-                ) : (
-                  <span className="grid h-7 w-7 place-items-center rounded-full bg-blue-100 text-[10px] font-extrabold text-brand-700">
-                    {authenticatedUser.initials}
-                  </span>
-                )}
+                <span className="grid h-7 w-7 place-items-center rounded-full bg-blue-100 text-[10px] font-extrabold text-brand-700">
+                  {authenticatedUser.initials}
+                </span>
                 <span className="hidden text-left sm:block">
                   <span className="block text-[11px] font-bold text-slate-700">{authenticatedUser.name}</span>
                   <span className="block text-[10px] text-slate-500">
-                    {isSuper ? "Super Admin" : workspace === "agent" ? "User" : "IT Admin"}
+                    {workspace === "super" ? "Super Admin" : workspace === "agent" ? "IT Agent" : "IT Admin"}
                   </span>
                 </span>
                 <ChevronDownIcon className="hidden h-3.5 w-3.5 text-slate-400 sm:block" />
@@ -689,7 +758,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </header>
         <div ref={setMainEl} className="app-main p-3 sm:p-5 md:p-7">
-          {children}
+          {/* Do not mount a page the role cannot open: it would call APIs that answer 403 before the redirect lands. */}
+          {pageBlocked ? null : children}
         </div>
       </section>
     </div>

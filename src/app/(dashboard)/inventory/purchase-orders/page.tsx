@@ -23,7 +23,7 @@ const STATUS_STYLE: Record<PoStatus, string> = {
 
 const ACTION_LABEL: Record<PoStatus, string> = {
   PENDING: "Pending",
-  ORDERED: "Approve & order",
+  ORDERED: "Mark ordered",
   RECEIVED: "Mark received",
   CANCELLED: "Cancel",
 };

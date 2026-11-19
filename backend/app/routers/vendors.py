@@ -1,12 +1,11 @@
 """Implementation file: app/routers/vendors.py"""
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.db_utils import count_references
 from app.core.deps import get_current_user, require_roles, get_tenant_company_id
-from app.models.models import Vendor, PlatformRole, User
+from app.models.models import Asset, Maintenance, PlatformRole, PurchaseOrder, User, Vendor
 from app.schemas.schemas import VendorCreate, VendorResponse, VendorUpdate
 from app.services.audit_service import log_audit_event
 
@@ -168,12 +167,17 @@ def delete_vendor(
             detail="Vendor record not found."
         )
 
-    uses = count_references(db, Vendor, vendor.id)
-    if uses:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"'{vendor.name}' is still used by {uses} record(s) (assets, contracts or orders). Change those first.",
-        )
+    # Assets, purchase orders and maintenance records point at the vendor; the
+    # database would refuse the delete with a 500, so say why instead.
+    in_use = {
+        "asset(s)": db.query(Asset.id).filter(Asset.vendor_id == vendor.id).count(),
+        "purchase order(s)": db.query(PurchaseOrder.id).filter(PurchaseOrder.vendor_id == vendor.id).count(),
+        "maintenance record(s)": db.query(Maintenance.id).filter(Maintenance.vendor_id == vendor.id).count(),
+    }
+    if any(in_use.values()):
+        used = ", ".join(f"{count} {label}" for label, count in in_use.items() if count)
+        raise HTTPException(status_code=409, detail=f"'{vendor.name}' is still used by {used}. Reassign or remove them first.")
+
     db.delete(vendor)
     db.commit()
 

@@ -1,6 +1,6 @@
 """Implementation file: app/routers/audit_logs.py"""
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db

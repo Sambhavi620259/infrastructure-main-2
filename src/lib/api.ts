@@ -68,12 +68,6 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   }
 
   const data = withUtcTimes((await response.json().catch(() => ({}))) as T & ApiError);
-  // A signed-in request the server no longer accepts (token expired, or the password was
-  // changed or reset elsewhere): sign out and go to the login page instead of showing errors.
-  if (response.status === 401 && token && typeof window !== "undefined" && !path.startsWith("/api/auth/")) {
-    clearAuth();
-    if (window.location.pathname !== "/login") window.location.assign("/login");
-  }
   if (!response.ok) {
     throw new ApiRequestError(
       errorMessage(data.detail) || data.message || `Request failed (${response.status})`,
@@ -83,15 +77,9 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   return data as T;
 }
 
-/** Keep the access token for this browser. It is sent to the API as a Bearer token. */
-export function saveToken(token: string) {
-  if (typeof window !== "undefined") window.localStorage.setItem("auth-token", token);
-}
-
 export function clearAuth() {
   if (typeof window === "undefined") return;
   window.localStorage.removeItem("auth-token");
-  // Older versions also kept a copy in a cookie; remove it if it is still there.
   document.cookie = "auth-token=; Path=/; Max-Age=0; SameSite=Lax";
   window.sessionStorage.removeItem("itam-demo-session");
 }

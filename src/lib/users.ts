@@ -15,8 +15,6 @@ export type UserCreateInput = {
   location?: string;
   department_id?: string;
   modules?: string[];
-  /** Super Admin only: the company the person joins. */
-  company_id?: string;
 };
 
 function buildQuery(params: Record<string, string | number | undefined>): string {
@@ -50,8 +48,8 @@ export interface DirectoryEntry {
 }
 
 /** GET /api/users/directory — active users in your organization, names only. Used by agent pages. */
-export function listUserDirectory(options: { onlyUsers?: boolean } = {}): Promise<DirectoryEntry[]> {
-  return apiFetch<DirectoryEntry[]>(`/api/users/directory${options.onlyUsers ? "?only_users=true" : ""}`);
+export function listUserDirectory(): Promise<DirectoryEntry[]> {
+  return apiFetch<DirectoryEntry[]>("/api/users/directory");
 }
 
 export function listDepartments(): Promise<Department[]> {
@@ -79,14 +77,17 @@ export async function deleteDepartment(departmentId: string): Promise<void> {
   }
 }
 
-/** GET /api/users/unassigned — IT Agents who signed up and are not in any organization yet. */
+/** GET /api/users/unassigned — Super Admin only: IT Agents who signed up and are not in any organization yet. */
 export function listUnassignedAgents(): Promise<AppUser[]> {
   return apiFetch<AppUser[]>("/api/users/unassigned");
 }
 
-/** POST /api/users/{id}/add-to-organization — move a self-registered agent into the admin's organization. */
-export function addToOrganization(userId: string): Promise<AppUser> {
-  return apiFetch<AppUser>(`/api/users/${encodeURIComponent(userId)}/add-to-organization`, { method: "POST" });
+/** POST /api/users/{id}/add-to-organization — Super Admin only: place a self-registered agent in an organization. */
+export function addToOrganization(userId: string, companyId: string): Promise<AppUser> {
+  return apiFetch<AppUser>(`/api/users/${encodeURIComponent(userId)}/add-to-organization`, {
+    method: "POST",
+    body: JSON.stringify({ company_id: companyId }),
+  });
 }
 
 /** DELETE /api/users/{id} — deactivates the account (it can no longer sign in). Reversible. */

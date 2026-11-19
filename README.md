@@ -96,6 +96,14 @@ docker compose up -d --build      # db + backend (runs migrations) + frontend
 - Put both services behind HTTPS (a reverse proxy or load balancer). Expose the frontend (port 3000) and the backend port 8000 for WebSockets, or route `wss://` to the backend and set `PUBLIC_WS_URL`.
 - Run **one backend worker** (the default): live-update connections live in process memory. Scaling out needs a shared message broker (e.g. Redis pub/sub).
 - Sign-in and registration are rate limited per client address (`AUTH_RATE_LIMIT_PER_MINUTE`, in memory, per process).
+- `X-Forwarded-For` is believed only when the direct peer is listed in `TRUSTED_PROXIES` (comma-separated IPs/CIDRs); otherwise the socket address is used. Run uvicorn with `--no-proxy-headers` (the Dockerfile does).
+- The Next.js proxy forwards the visitor's `X-Forwarded-For` only when `TRUST_FORWARDED_HEADERS=true` (set it only behind a reverse proxy that sets the header itself); otherwise the backend sees the proxy's own address, so the sign-in limit is shared by all visitors.
+- Email addresses are unique regardless of case (migration `b2c4d6e8f0a1`; it stops and lists clashes if existing accounts differ only by case).
+- Next.js pages send a Content-Security-Policy; adjust `connect-src` in `next.config.ts` if the API/WebSocket host is on another domain.
+- Access tokens carry a fingerprint of the password hash, so changing or resetting a password signs out every older session (and closes older WebSockets on reconnect).
+- IT Admin / Super Admin self-registration is off in production unless `ALLOW_PUBLIC_ADMIN_REGISTRATION=true`; seed the first Super Admin with `SEED_SUPER_ADMIN_EMAIL` / `SEED_SUPER_ADMIN_PASSWORD`.
+- Request bodies are capped at `MAX_REQUEST_BODY_BYTES` (default 2 MB). WebSockets check the `Origin` against `CORS_ORIGINS`.
+- Security tests: `cd backend && python scripts/security_test.py` (needs `pip install websockets` for the WebSocket checks).
 - `GET /api/health` checks the database; Docker uses it as the backend health check.
 - Back up the `postgres_data` volume.
 
@@ -125,12 +133,6 @@ paid plans for real use.
 ## Security notes
 
 - No default accounts: the first Super Admin registers (creating the Super Admin key) or is seeded from `SEED_SUPER_ADMIN_EMAIL` / `SEED_SUPER_ADMIN_PASSWORD`.
-- Passwords and the Super Admin key are stored as bcrypt hashes. A token is tied to the password it was issued under: changing or resetting a password signs that user out everywhere (the device that changed it gets a fresh token).
-- Emails are compared and stored in lower case. Sign-in is limited per address and per account (10 failures in 15 minutes pause the account). `X-Forwarded-For` is used only for the number of proxies in `TRUSTED_PROXY_COUNT` (0 = ignored; 1 for docker compose; 2 for Vercel → Render).
-- After your IT Admins exist, set `ALLOW_PUBLIC_IT_ADMIN_SIGNUP=false` so only the Super Admin adds them. Super Admin sign-up closes after the first Super Admin; `ALLOW_PUBLIC_SUPER_ADMIN_SIGNUP=false` closes it earlier (then seed one with `SEED_SUPER_ADMIN_*`).
-- IT Admins manage users, Sub Admins and Reporting users of their own organization. IT Admin and Super Admin accounts are managed by the Super Admin only.
-- A Super Admin who forgot their password recovers it on the server: `cd backend && .venv/bin/python scripts/reset_password.py their@email`.
-- Live-update sockets take the token as a `bearer.<jwt>` subprotocol (not in the address), only from the configured `CORS_ORIGINS`, and re-check the session every minute.
-- Request bodies are limited to 8 MB, list endpoints are paged, API responses are not cached and carry security headers, and the API docs are off in production.
+- Passwords and the Super Admin key are stored as bcrypt hashes.
 - Suspending an organization (Super Admin → Companies) locks out all its users immediately.
 - IT Agents get operational permissions only (tickets, asset hand-over, stock moves, maintenance, reports) and see colleagues' names only, never contact details.

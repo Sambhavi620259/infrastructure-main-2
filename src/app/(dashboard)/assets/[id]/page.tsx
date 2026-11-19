@@ -5,18 +5,16 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { deleteAsset, getAsset, listAssetLifecycle, updateAsset } from "@/lib/assets";
 import { getProfile } from "@/lib/profile";
-import { listVendors } from "@/lib/procurement";
-import { licenseTypeLabel } from "@/lib/software";
 import { AssetForm, assetToForm, formToPayload, type AssetFormValues } from "@/components/assets/asset-form";
 import { AssetCare } from "@/components/assets/asset-care";
-import { AssetTickets } from "@/components/tickets/asset-tickets";
 import { useAssetWebSocket } from "@/lib/realtime";
 import {
   assetStatusLabel,
   assetStatusStyle,
   formatDate,
   type Asset,
-  type AssetLifecycleEntry, assetLabel } from "@/types/asset";
+  type AssetLifecycleEntry,
+} from "@/types/asset";
 
 function initials(name: string): string {
   return name
@@ -35,7 +33,7 @@ export default function AssetDetailPage() {
   const [lifecycle, setLifecycle] = useState<AssetLifecycleEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  // Users (IT_AGENT role) may only change status, condition and location (see AssetCare).
+  // IT Agents may only change status, condition and location (see AssetCare).
   const [canEdit, setCanEdit] = useState(false);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -44,16 +42,6 @@ export default function AssetDetailPage() {
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [removeError, setRemoveError] = useState("");
-  const [amcVendor, setAmcVendor] = useState("");
-
-  // Vendors are admin data; users simply see no AMC vendor name.
-  const amcVendorId = asset?.amc_vendor_id ?? "";
-  useEffect(() => {
-    if (!amcVendorId) return setAmcVendor("");
-    listVendors()
-      .then((vendors) => setAmcVendor(vendors.find((v) => v.id === amcVendorId)?.name ?? ""))
-      .catch(() => setAmcVendor(""));
-  }, [amcVendorId]);
   const [removedElsewhere, setRemovedElsewhere] = useState(false);
 
   const removeAsset = async () => {
@@ -166,24 +154,13 @@ export default function AssetDetailPage() {
     ["Type", asset.type ?? "—"],
     ["Manufacturer", asset.brand ?? "—"],
     ["Model", asset.model ?? "—"],
-    ["Serial number", asset.serial_number ?? "—"],
+    ["Serial number", asset.serial_number],
     ["Condition", asset.condition],
     ["Assigned to", asset.assigned_to_name ?? "Unassigned"],
-    ...(asset.assigned_to_name ? ([["Assigned by", asset.assigned_by_name ?? "—"]] as [string, string][]) : []),
     ["Purchase date", formatDate(asset.purchase_date)],
     ["Purchase cost", Number(asset.purchase_price) ? Number(asset.purchase_price).toLocaleString() : "—"],
     ["Warranty starts", formatDate(asset.warranty_start)],
     ["Warranty expires", formatDate(asset.warranty_end)],
-    ["License", asset.license_type ? licenseTypeLabel(asset.license_type) : "—"],
-    ["License number", asset.license_number ?? "—"],
-    ["License expiry", formatDate(asset.license_expiry ?? null)],
-    ...((asset.extra_licenses ?? []).map((entry, index) => [
-      `License ${index + 2}`,
-      `${entry.license_type ? licenseTypeLabel(entry.license_type) + " · " : ""}${entry.license_number}`,
-    ]) as [string, string][]),
-    ["AMC vendor", amcVendor || "—"],
-    ["AMC period", asset.amc_start || asset.amc_end ? `${formatDate(asset.amc_start ?? null)} – ${formatDate(asset.amc_end ?? null)}` : "—"],
-    ["AMC cost", Number(asset.amc_cost) ? Number(asset.amc_cost).toLocaleString() : "—"],
     ["Registered", formatDate(asset.created_at)],
   ];
 
@@ -208,8 +185,7 @@ export default function AssetDetailPage() {
               </span>
             </div>
             <p className="mt-2 text-sm text-slate-500">
-              Asset ID: <span className="font-mono font-semibold text-slate-700">{asset.asset_code}</span>
-              {" · "}Asset number: <span className="font-semibold text-slate-700">{asset.asset_tag ?? "None"}</span>
+              Asset tag: <span className="font-semibold text-slate-700">{asset.asset_tag}</span>
               {asset.model ? ` · ${asset.model}` : ""}
             </p>
           </div>
@@ -288,8 +264,6 @@ export default function AssetDetailPage() {
         </article>
       </section>
 
-      <AssetTickets assetId={asset.id} onChanged={fetchAsset} />
-
       <AssetCare asset={asset} onAssetChanged={fetchAsset} />
 
       {canEdit && (
@@ -307,7 +281,7 @@ export default function AssetDetailPage() {
           )}
           {confirmingRemove ? (
             <div className="mt-4 flex flex-wrap items-center gap-3">
-              <span className="text-sm font-semibold text-slate-800">Remove {assetLabel(asset)} permanently?</span>
+              <span className="text-sm font-semibold text-slate-800">Remove {asset.asset_tag} permanently?</span>
               <button
                 type="button"
                 onClick={removeAsset}

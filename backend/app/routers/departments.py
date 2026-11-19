@@ -1,6 +1,6 @@
 """Implementation file: app/routers/departments.py"""
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func
@@ -93,6 +93,8 @@ def create_department(
 
 @router.get("", response_model=List[DepartmentResponse])
 def list_departments(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(500, ge=1, le=1000),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
@@ -104,7 +106,7 @@ def list_departments(
     if current_user.role != PlatformRole.SUPER_ADMIN:
         query = query.filter(Department.company_id == tenant_company_id)
 
-    departments = query.order_by(Department.name).all()
+    departments = query.order_by(Department.name).offset(skip).limit(limit).all()
     ids = [d.id for d in departments]
     users, assets = _counts(db, User, ids), _counts(db, Asset, ids)
     result = []

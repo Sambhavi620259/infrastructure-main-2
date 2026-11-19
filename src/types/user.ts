@@ -10,6 +10,9 @@ export type BackendRole = (typeof BACKEND_ROLES)[number];
  */
 export const SUB_ADMIN_MODULES = ["HAM", "SAM", "CLOUD", "SCAN", "REPORTS"] as const;
 
+/** Data modules a Reporting user may additionally read (reports are always readable). */
+export const REPORTING_USER_MODULES = ["HAM", "SAM", "CLOUD", "SCAN"] as const;
+
 export type SubAdminModule = (typeof SUB_ADMIN_MODULES)[number];
 
 const MODULE_LABEL: Record<string, string> = {
@@ -30,7 +33,7 @@ export interface AppUser {
   company_id: string | null;
   email: string;
   full_name: string;
-  /** Generated for users (IT_AGENT role), e.g. RAHULSHARMA01. */
+  /** Generated for IT Agents, e.g. RAHULSHARMA01. */
   agent_id: string | null;
   role: string;
   location: string | null;
@@ -63,12 +66,12 @@ const ROLE_LABEL: Record<string, string> = {
   IT_ADMIN: "IT Admin",
   SUB_ADMIN: "Sub Admin",
   REPORTING_USER: "Reporting User",
-  EMPLOYEE: "User",
+  EMPLOYEE: "IT Agent",
   HAM_ADMIN: "HAM Admin",
   SAM_ADMIN: "SAM Admin",
   CLOUD_ADMIN: "Cloud Admin",
   SCAN_ADMIN: "Scan Admin",
-  IT_AGENT: "User",
+  IT_AGENT: "IT Agent",
 };
 
 const ROLE_BADGE: Record<string, string> = {

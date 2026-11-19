@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createUser, listDepartments } from "@/lib/users";
-import { BACKEND_ROLES, SUB_ADMIN_MODULES, moduleLabel, roleLabel, type Department } from "@/types/user";
+import { BACKEND_ROLES, REPORTING_USER_MODULES, SUB_ADMIN_MODULES, moduleLabel, roleLabel, type Department } from "@/types/user";
 
 export default function NewUserPage() {
   const router = useRouter();
@@ -40,7 +40,7 @@ export default function NewUserPage() {
         role: text("role"),
         location: text("location") || undefined,
         department_id: text("department_id") || undefined,
-        modules: role === "SUB_ADMIN" ? form.getAll("modules").map(String) : undefined,
+        modules: role === "SUB_ADMIN" || role === "REPORTING_USER" ? form.getAll("modules").map(String) : undefined,
       });
       router.push("/users");
     } catch (caught) {
@@ -57,7 +57,7 @@ export default function NewUserPage() {
         </p>
         <h1 className="mt-1 text-2xl font-extrabold">Create user</h1>
         <p className="mt-1 text-sm text-slate-500">
-          Creates the account in your organization with the password you set. Users can also sign up
+          Creates the account in your organization with the password you set. IT Agents can also sign up
           themselves; they then appear on the{" "}
           <Link href="/users" className="font-semibold text-brand-600 hover:text-brand-700">
             users list
@@ -156,14 +156,18 @@ export default function NewUserPage() {
           </label>
         </div>
 
-        {role === "SUB_ADMIN" && (
+        {(role === "SUB_ADMIN" || role === "REPORTING_USER") && (
           <fieldset className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
-            <legend className="px-1 text-xs font-bold text-slate-700">Modules administered</legend>
+            <legend className="px-1 text-xs font-bold text-slate-700">
+              {role === "SUB_ADMIN" ? "Modules administered" : "Data this reporting user may view (read-only)"}
+            </legend>
             <p className="text-xs text-slate-500">
-              A Sub Admin manages one or more modules. Everything they can reach follows from this.
+              {role === "SUB_ADMIN"
+                ? "A Sub Admin manages one or more modules. Everything they can reach follows from this."
+                : "Reports are always available. Tick a module to let them also read its data; leave all unticked for reports only."}
             </p>
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
-              {SUB_ADMIN_MODULES.map((value) => (
+              {(role === "SUB_ADMIN" ? SUB_ADMIN_MODULES : REPORTING_USER_MODULES).map((value) => (
                 <label key={value} className="flex items-center gap-2 text-sm text-slate-700">
                   <input
                     type="checkbox"

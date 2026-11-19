@@ -18,21 +18,9 @@ services:
           property: connectionString
       - key: JWT_SECRET
         generateValue: true
-      # Proxies in front of the app that each add to X-Forwarded-For: the Vercel
-      # proxy puts the visitor's address first and Render adds Vercel's address.
-      # Used for sign-in rate limits; use 1 if the frontend is not on Vercel.
-      - key: TRUSTED_PROXY_COUNT
-        value: "2"
-      # Optional but recommended: the same secret as BACKEND_PROXY_KEY on Vercel. With it, only the
-      # Vercel proxy can name the visitor's address for the sign-in limits.
-      - key: PROXY_SHARED_SECRET
-        sync: false
-      # Who may sign up without being added: set to false once your IT Admins exist
-      # (a Super Admin then adds IT Admins from Add IT Admin).
-      - key: ALLOW_PUBLIC_IT_ADMIN_SIGNUP
-        value: "true"
-      - key: ALLOW_PUBLIC_SUPER_ADMIN_SIGNUP
-        value: "true"
+      # Only Render's private proxy hops may supply X-Forwarded-For.
+      - key: TRUSTED_PROXIES
+        value: "127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7"
       - key: CORS_ORIGINS
         sync: false
 

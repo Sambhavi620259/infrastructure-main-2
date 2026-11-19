@@ -1,44 +1,34 @@
 """Implementation file: app/routers/assets.py"""
 from typing import Dict, List, Optional
-import json
-from datetime import datetime, timedelta
+from datetime import datetime
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status, WebSocket, WebSocketDisconnect
-from sqlalchemy import func, or_
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.deps import get_current_user, require_roles, get_tenant_company_id
-from app.core.ws_auth import authenticate, reject, serve_socket
-from sqlalchemy.exc import IntegrityError
-
-from app.services.stock_service import record_movement
+from app.core.permissions import reporting_user_may_read
+from app.core.deps import get_current_user, require_roles, get_tenant_company_id, ws_authenticate, ws_release, WS_MAX_MESSAGE_CHARS
 from app.models.models import (
     Asset, AssetCategory, AssetAssignment, AssetLifecycle, AssetRequest, AssetReturnRequest, AuditScanRecord,
-    Department, Maintenance, Vendor, WarrantyClaim, AssetStatusEnum, PlatformRole, User, Subscription,
-    PurchaseOrder, SoftwareLicenseAssignment, StockMovement, StockReceipt,
+    Department, Maintenance, Vendor, WarrantyClaim, AssetStatusEnum, PlatformRole, User, Subscription
 )
 from app.schemas.schemas import (
     AssetCreate, AssetResponse, AssetUpdate, AssetAssignRequest,
     AssetCategoryCreate, AssetCategoryResponse, AssetLifecycleResponse,
     AssetCountsResponse, AssetEventResponse
 )
-from app.services.asset_code_service import next_asset_code
 from app.services.audit_service import log_audit_event
 from app.services.usage_alerts import check_usage_limits
 from app.services.notification_service import home_link, notify
-from app.services.software_service import mask_license_number
 
 router = APIRouter(prefix="/assets", tags=["Asset Management"])
 
-# Status, condition and location updates are open to users (stored with the
-# EMPLOYEE role); registering, editing and assigning assets is not.
+# Day-to-day asset work (assign, unassign, status) is open to IT Agents, who
+# are stored with the EMPLOYEE role; registering and editing asset records is not.
 _operators = require_roles([
     PlatformRole.SUPER_ADMIN, PlatformRole.IT_ADMIN, PlatformRole.SUB_ADMIN, PlatformRole.EMPLOYEE,
 ])
-# Only admins hand assets out or take them back; users (EMPLOYEE) cannot.
-# Handing devices out is the IT team's job; the Super Admin only views.
-_assigners = require_roles([PlatformRole.IT_ADMIN, PlatformRole.SUB_ADMIN])
-# Fields a user (EMPLOYEE) may change through PUT /assets/{id}.
+# Fields an IT Agent may change through PUT /assets/{id}.
 _AGENT_EDITABLE_FIELDS = {"status", "status_remarks", "condition", "location_id"}
 
 # Statuses in which someone holds the asset, so it can be unassigned.
@@ -58,15 +48,16 @@ class ConnectionManager:
     def __init__(self):
         self.active_connections: Dict[str, List[WebSocket]] = {}
 
-    async def connect(self, company_id: str, websocket: WebSocket, subprotocol: Optional[str] = None):
-        await websocket.accept(subprotocol=subprotocol)
+    async def connect(self, company_id: str, websocket: WebSocket):
+        await websocket.accept()
         if company_id not in self.active_connections:
             self.active_connections[company_id] = []
         self.active_connections[company_id].append(websocket)
 
     def disconnect(self, company_id: str, websocket: WebSocket):
-        if company_id in self.active_connections and websocket in self.active_connections[company_id]:
-            self.active_connections[company_id].remove(websocket)
+        if company_id in self.active_connections:
+            if websocket in self.active_connections[company_id]:
+                self.active_connections[company_id].remove(websocket)
             if not self.active_connections[company_id]:
                 del self.active_connections[company_id]
 
@@ -92,24 +83,38 @@ async def asset_websocket(
     token: Optional[str] = Query(None),
 ):
     """
-    WebSocket endpoint for real-time asset updates. The token is sent as the
-    "bearer.<jwt>" subprotocol (see app/core/ws_auth.py); ?token= still works.
+    WebSocket endpoint for real-time asset updates.
+    Browsers cannot set headers on a WebSocket, so the JWT comes as ?token=.
+    Origin is checked, no DB connection is held while the socket is open, and
+    inbound messages are size-limited.
     """
-    identity = authenticate(websocket, token)
-    if identity is None:
-        await reject(websocket, 4401, "Not authenticated")
-        return
-    if (identity.role != PlatformRole.SUPER_ADMIN and identity.company_id != company_id) \
-            or identity.role == PlatformRole.EMPLOYEE:
-        # The feed carries every asset in the company; users see only their own.
-        await reject(websocket, 4403, "Not allowed for this company")
+    def authorize(db, user):
+        if user.role != PlatformRole.SUPER_ADMIN and user.company_id != company_id:
+            return (4403, "Not allowed for this company")
+        if user.role == PlatformRole.REPORTING_USER and not reporting_user_may_read(user, "/api/assets"):
+            return (4403, "Not allowed for this account")
+        return None
+
+    user_id, failure = ws_authenticate(websocket, token, authorize)
+    if failure:
+        await websocket.accept()  # so the browser receives the close code
+        await websocket.close(code=failure[0], reason=failure[1])
         return
 
-    await manager.connect(company_id, websocket, identity.subprotocol)
+    await manager.connect(company_id, websocket)
     try:
-        await serve_socket(websocket, identity)
+        while True:
+            # Keep connection alive, listen for client messages (ping/pong)
+            data = await websocket.receive_text()
+            if len(data) > WS_MAX_MESSAGE_CHARS:
+                await websocket.close(code=1009, reason="Message too large")
+                break
+            await websocket.send_text(f"pong: {data}")
+    except WebSocketDisconnect:
+        pass
     finally:
         manager.disconnect(company_id, websocket)
+        ws_release(user_id)
 
 
 # Helper to broadcast asset changes
@@ -157,7 +162,7 @@ def _active_assignees(db: Session, asset_ids: List[str]) -> Dict[str, User]:
 
 
 def _check_references(db: Session, company_id: str, data: dict) -> None:
-    """Department and vendors must belong to the asset's organization; warranty and AMC must end after they start."""
+    """Department and vendor must belong to the asset's organization; warranty must end after it starts."""
     if data.get("department_id") and not db.query(Department.id).filter(
         Department.id == data["department_id"], Department.company_id == company_id
     ).first():
@@ -169,52 +174,6 @@ def _check_references(db: Session, company_id: str, data: dict) -> None:
     start, end = data.get("warranty_start"), data.get("warranty_end")
     if start and end and end < start:
         raise HTTPException(status_code=400, detail="Warranty end must be after warranty start.")
-    if data.get("amc_vendor_id") and not db.query(Vendor.id).filter(
-        Vendor.id == data["amc_vendor_id"], Vendor.company_id == company_id
-    ).first():
-        raise HTTPException(status_code=400, detail="Unknown AMC vendor.")
-    amc_start, amc_end = data.get("amc_start"), data.get("amc_end")
-    if amc_start and amc_end and amc_end < amc_start:
-        raise HTTPException(status_code=400, detail="AMC end must be after AMC start.")
-    purchased, license_expiry = data.get("purchase_date"), data.get("license_expiry")
-    if purchased and license_expiry and license_expiry < purchased:
-        raise HTTPException(status_code=400, detail="License expiry must be after the purchase date.")
-
-
-def _held_by(db: Session, user: User):
-    """Ids of the assets this user currently holds (a subquery)."""
-    return db.query(AssetAssignment.asset_id).filter(
-        AssetAssignment.user_id == user.id, AssetAssignment.is_active == True
-    )
-
-
-def _held_since(db: Session, user: User) -> Dict[str, datetime]:
-    """Asset id -> when this user was given it (a few seconds early, so the
-    lifecycle entry written alongside the hand-over is included)."""
-    rows = db.query(AssetAssignment.asset_id, AssetAssignment.assigned_at).filter(
-        AssetAssignment.user_id == user.id, AssetAssignment.is_active == True
-    ).all()
-    return {
-        asset_id: assigned_at - timedelta(seconds=5) if assigned_at else datetime(1970, 1, 1)
-        for asset_id, assigned_at in rows
-    }
-
-
-def _only_own(query, db: Session, user: User):
-    """Users (EMPLOYEE) see only the assets assigned to them; other roles are unchanged."""
-    if user.role == PlatformRole.EMPLOYEE:
-        return query.filter(Asset.id.in_(_held_by(db, user)))
-    return query
-
-
-def _for_viewer(response: AssetResponse, viewer: User) -> AssetResponse:
-    """Users see only the last four characters of a device's license number; admins see it in full."""
-    if viewer.role == PlatformRole.EMPLOYEE and response.license_number:
-        response.license_number = mask_license_number(response.license_number)
-    if viewer.role == PlatformRole.EMPLOYEE:
-        for entry in response.extra_licenses:
-            entry.license_number = mask_license_number(entry.license_number)
-    return response
 
 
 def _with_assignee(asset: Asset, assignee: Optional[User]) -> AssetResponse:
@@ -309,67 +268,40 @@ def create_asset(
 
     _check_references(db, company_id, asset_in.model_dump())
 
-    # Serial numbers are optional; when given they are unique per organization. Asset numbers may repeat:
-    # every device gets its own Asset ID.
-    if asset_in.serial_number and db.query(Asset.id).filter(Asset.company_id == company_id,
-                                                            Asset.serial_number == asset_in.serial_number).first():
-        raise HTTPException(status_code=400, detail="An asset with this serial number already exists.")
+    # Check unique constraint on Tag and Serial Number
+    duplicate = db.query(Asset).filter(
+        Asset.company_id == company_id,
+        (Asset.asset_tag == asset_in.asset_tag) | (Asset.serial_number == asset_in.serial_number)
+    ).first()
+    if duplicate:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="An asset with this asset tag or serial number already exists."
+        )
 
-    # Registering a device from a stock receipt: the receipt must have units left.
-    receipt = None
-    if asset_in.receipt_id:
-        receipt = db.query(StockReceipt).filter(
-            StockReceipt.id == asset_in.receipt_id, StockReceipt.company_id == company_id
-        ).with_for_update().first()
-        if not receipt:
-            raise HTTPException(status_code=404, detail="Stock receipt not found.")
-        registered = db.query(Asset).filter(Asset.receipt_id == receipt.id).count()
-        if registered >= receipt.quantity:
-            raise HTTPException(status_code=400, detail=f"All {receipt.quantity} devices on this receipt are already registered.")
-
-    po = db.query(PurchaseOrder).filter(PurchaseOrder.id == receipt.purchase_order_id).first() if receipt else None
     asset = Asset(
         company_id=company_id,
-        asset_code=next_asset_code(db, company_id),
         asset_tag=asset_in.asset_tag,
         serial_number=asset_in.serial_number,
         name=asset_in.name,
-        # From the receipt when the form leaves them out.
-        category=(receipt.category if receipt and asset_in.category == "Uncategorised" else asset_in.category),
+        category=asset_in.category,
         type=asset_in.type,
-        brand=asset_in.brand or (receipt.brand if receipt else None),
-        model=asset_in.model or (receipt.model if receipt else None),
-        specifications=asset_in.specifications or (receipt.specifications if receipt else None),
-        purchase_date=asset_in.purchase_date or (po.order_date if po else None),
-        purchase_price=asset_in.purchase_price or (receipt.unit_cost if receipt else asset_in.purchase_price),
-        vendor_id=asset_in.vendor_id or (po.vendor_id if po else None),
+        brand=asset_in.brand,
+        model=asset_in.model,
+        purchase_date=asset_in.purchase_date,
+        purchase_price=asset_in.purchase_price,
+        vendor_id=asset_in.vendor_id,
         warranty_start=asset_in.warranty_start,
         warranty_end=asset_in.warranty_end,
-        amc_vendor_id=asset_in.amc_vendor_id,
-        amc_start=asset_in.amc_start,
-        amc_end=asset_in.amc_end,
-        amc_cost=asset_in.amc_cost,
-        license_type=asset_in.license_type,
-        license_number=asset_in.license_number,
-        license_expiry=asset_in.license_expiry,
-        extra_licenses=json.dumps([entry.model_dump() for entry in asset_in.extra_licenses]) if asset_in.extra_licenses else None,
-        location_id=asset_in.location_id or (receipt.location if receipt else None),
+        location_id=asset_in.location_id,
         department_id=asset_in.department_id,
         status=asset_in.status,
         condition=asset_in.condition,
         description=asset_in.description,
-        receipt_id=receipt.id if receipt else None,
         created_by=current_user.id
     )
     db.add(asset)
-    try:
-        db.flush()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(status_code=400, detail="An asset with this asset tag or serial number already exists.")
-    record_movement(db, company_id, "REGISTER", "HARDWARE", current_user.id, asset_id=asset.id,
-                    receipt_id=asset.receipt_id, to_location=asset.location_id,
-                    reason=f"Registered {asset.label}" + (" from a stock receipt" if receipt else ""))
+    db.flush()
 
     # Track lifecycle creation event
     lifecycle = AssetLifecycle(
@@ -393,7 +325,7 @@ def create_asset(
         company_id=company_id,
         user_id=current_user.id,
         entity_id=asset.id,
-        new_value=f"Tag: {asset.label}, Name: {asset.name}"
+        new_value=f"Tag: {asset.asset_tag}, Name: {asset.name}"
     )
 
     # A new asset has no assignment yet.
@@ -422,7 +354,6 @@ def list_assets(
     query = db.query(Asset)
     if current_user.role != PlatformRole.SUPER_ADMIN:
         query = query.filter(Asset.company_id == tenant_company_id)
-    query = _only_own(query, db, current_user)
 
     if status_filter:
         query = query.filter(Asset.status == status_filter)
@@ -435,7 +366,6 @@ def list_assets(
         query = query.filter(
             (Asset.name.ilike(search_fmt)) |
             (Asset.asset_tag.ilike(search_fmt)) |
-            (Asset.asset_code.ilike(search_fmt)) |
             (Asset.serial_number.ilike(search_fmt))
         )
 
@@ -446,7 +376,7 @@ def list_assets(
 
     assets = query.offset(skip).limit(limit).all()
     assignees = _active_assignees(db, [asset.id for asset in assets])
-    return [_for_viewer(_with_assignee(asset, assignees.get(asset.id)), current_user) for asset in assets]
+    return [_with_assignee(asset, assignees.get(asset.id)) for asset in assets]
 
 
 @router.get("/counts", response_model=AssetCountsResponse)
@@ -465,7 +395,6 @@ def get_asset_counts(
     query = db.query(Asset.status, func.count()).group_by(Asset.status)
     if current_user.role != PlatformRole.SUPER_ADMIN:
         query = query.filter(Asset.company_id == company_id)
-    query = _only_own(query, db, current_user)
 
     by_status = {value.value: 0 for value in AssetStatusEnum}
     for asset_status, count in query.all():
@@ -503,15 +432,6 @@ def list_asset_events(
     )
     if current_user.role != PlatformRole.SUPER_ADMIN:
         query = query.filter(AssetLifecycle.company_id == tenant_company_id)
-    if current_user.role == PlatformRole.EMPLOYEE:
-        # Events on the assets they hold, since each was handed to them.
-        held = _held_since(db, current_user)
-        if not held:
-            return []
-        query = query.filter(or_(*[
-            (AssetLifecycle.asset_id == asset_id) & (AssetLifecycle.timestamp >= since)
-            for asset_id, since in held.items()
-        ]))
     if action:
         query = query.filter(AssetLifecycle.action == action)
     if date_from:
@@ -547,19 +467,11 @@ def get_asset(
     query = db.query(Asset).filter(Asset.id == asset_id)
     if current_user.role != PlatformRole.SUPER_ADMIN:
         query = query.filter(Asset.company_id == tenant_company_id)
-    query = _only_own(query, db, current_user)
 
     asset = query.first()
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found.")
-    response = _with_assignee(asset, _active_assignees(db, [asset.id]).get(asset.id))
-    if response.assigned_to_id:
-        handed = db.query(AssetAssignment.assigned_at, User.full_name).outerjoin(
-            User, User.id == AssetAssignment.assigned_by
-        ).filter(AssetAssignment.asset_id == asset.id, AssetAssignment.is_active.is_(True)).first()
-        if handed:
-            response.assigned_at, response.assigned_by_name = handed
-    return _for_viewer(response, current_user)
+    return _with_assignee(asset, _active_assignees(db, [asset.id]).get(asset.id))
 
 
 @router.put("/{asset_id}", response_model=AssetResponse)
@@ -577,7 +489,6 @@ def update_asset(
     query = db.query(Asset).filter(Asset.id == asset_id)
     if current_user.role != PlatformRole.SUPER_ADMIN:
         query = query.filter(Asset.company_id == tenant_company_id)
-    query = _only_own(query, db, current_user)
 
     asset = query.first()
     if not asset:
@@ -590,7 +501,7 @@ def update_asset(
         if blocked:
             raise HTTPException(
                 status_code=403,
-                detail=f"Users can change status, condition and location only (not: {', '.join(blocked)})."
+                detail=f"IT Agents can change status, condition and location only (not: {', '.join(blocked)})."
             )
     status_remarks = update_data.pop("status_remarks", None)
     _check_references(db, asset.company_id, {
@@ -598,31 +509,8 @@ def update_asset(
         "vendor_id": update_data.get("vendor_id"),
         "warranty_start": update_data.get("warranty_start", asset.warranty_start),
         "warranty_end": update_data.get("warranty_end", asset.warranty_end),
-        "amc_vendor_id": update_data.get("amc_vendor_id"),
-        "amc_start": update_data.get("amc_start", asset.amc_start),
-        "amc_end": update_data.get("amc_end", asset.amc_end),
-        "purchase_date": update_data.get("purchase_date", asset.purchase_date),
-        "license_expiry": update_data.get("license_expiry", asset.license_expiry),
     })
-    if "serial_number" in update_data:
-        update_data["serial_number"] = (update_data["serial_number"] or "").strip() or None
-        if update_data["serial_number"] and db.query(Asset.id).filter(
-            Asset.company_id == asset.company_id, Asset.serial_number == update_data["serial_number"], Asset.id != asset.id
-        ).first():
-            raise HTTPException(status_code=400, detail="An asset with this serial number already exists.")
-    if "category" in update_data and not (update_data["category"] or "").strip():
-        update_data["category"] = "Uncategorised"
     status_changed = asset_in.status is not None and asset_in.status.value != old_status
-
-    # A status such as In stock or Retired takes the asset back from its holder,
-    # which is the IT Admin's call, like unassigning.
-    if (status_changed and current_user.role == PlatformRole.EMPLOYEE
-            and asset_in.status in _RELEASES_ASSIGNMENT
-            and _active_assignees(db, [asset.id]).get(asset.id) is not None):
-        raise HTTPException(
-            status_code=403,
-            detail="This asset is assigned to someone. Only an IT Admin can take it back."
-        )
 
     # Assignment lives in asset_assignments, so a bare status edit would claim
     # the asset is assigned with no holder on record.
@@ -631,10 +519,6 @@ def update_asset(
             status_code=400,
             detail="Use POST /assets/{id}/assign to assign an asset to a user."
         )
-
-    if "extra_licenses" in update_data:
-        extra = update_data["extra_licenses"]
-        update_data["extra_licenses"] = json.dumps(extra) if extra else None
 
     for field, value in update_data.items():
         setattr(asset, field, value)
@@ -646,10 +530,6 @@ def update_asset(
                 AssetAssignment.is_active.is_(True)
             ).update({"is_active": False, "returned_at": datetime.utcnow()})
 
-        if asset.status == AssetStatusEnum.IN_REPAIR or asset.status in (AssetStatusEnum.RETIRED, AssetStatusEnum.DISPOSED):
-            record_movement(db, asset.company_id, "REPAIR" if asset.status == AssetStatusEnum.IN_REPAIR else "RETIRE",
-                            "HARDWARE", current_user.id, asset_id=asset.id,
-                            reason=status_remarks or f"Status changed to {asset.status.value}")
         lifecycle = AssetLifecycle(
             company_id=asset.company_id,
             asset_id=asset.id,
@@ -671,13 +551,13 @@ def update_asset(
         company_id=asset.company_id,
         user_id=current_user.id,
         entity_id=asset.id,
-        old_value=f"{asset.label} status: {old_status}",
-        new_value=f"{asset.label} status: {asset.status.value}"
+        old_value=f"{asset.asset_tag} status: {old_status}",
+        new_value=f"{asset.asset_tag} status: {asset.status.value}"
     )
 
     response = _with_assignee(asset, _active_assignees(db, [asset.id]).get(asset.id))
     _queue_broadcast(background_tasks, "ASSET_UPDATED", response)
-    return _for_viewer(response.model_copy(), current_user)
+    return response
 
 
 @router.post("/{asset_id}/assign", response_model=AssetResponse)
@@ -686,7 +566,7 @@ def assign_asset_to_user(
     assign_in: AssetAssignRequest,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    current_user: User = Depends(_assigners),
+    current_user: User = Depends(_operators),
     tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
 ):
     """
@@ -695,19 +575,14 @@ def assign_asset_to_user(
     query = db.query(Asset).filter(Asset.id == asset_id)
     if current_user.role != PlatformRole.SUPER_ADMIN:
         query = query.filter(Asset.company_id == tenant_company_id)
-    query = _only_own(query, db, current_user)
 
-    # Lock the row: two simultaneous assignments of the same device cannot both pass.
-    asset = query.with_for_update().first()
+    asset = query.first()
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found.")
 
-    if asset.status == AssetStatusEnum.REQUESTED:
-        # Reserved for an approved ticket: it is handed over from that ticket.
-        raise HTTPException(status_code=400, detail="This asset is reserved for a ticket. Hand it over from that ticket.")
-    if asset.status != AssetStatusEnum.IN_STOCK:
+    if asset.status not in [AssetStatusEnum.IN_STOCK, AssetStatusEnum.REQUESTED]:
         raise HTTPException(
-            status_code=400,
+            status_code=400, 
             detail=f"Asset cannot be assigned because its status is currently {asset.status.value}."
         )
 
@@ -719,8 +594,6 @@ def assign_asset_to_user(
     ).first()
     if not target_user:
         raise HTTPException(status_code=404, detail="Target active user not found.")
-    if target_user.role != PlatformRole.EMPLOYEE:
-        raise HTTPException(status_code=400, detail="Assets can only be assigned to users, not to IT Admins or the Super Admin.")
 
     old_status = asset.status.value
     asset.status = AssetStatusEnum.ASSIGNED
@@ -734,17 +607,9 @@ def assign_asset_to_user(
         company_id=asset.company_id,
         asset_id=asset.id,
         user_id=target_user.id,
-        assigned_by=current_user.id,
         is_active=True
     )
     db.add(new_assignment)
-    try:
-        db.flush()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(status_code=409, detail="This asset was just assigned by someone else.")
-    record_movement(db, asset.company_id, "ASSIGN", "HARDWARE", current_user.id, asset_id=asset.id,
-                    reason=f"Assigned to {target_user.full_name}")
 
     lifecycle = AssetLifecycle(
         company_id=asset.company_id,
@@ -759,7 +624,7 @@ def assign_asset_to_user(
     if target_user.id != current_user.id:
         notify(
             db, target_user,
-            title=f"{asset.name} ({asset.label}) was assigned to you",
+            title=f"{asset.name} ({asset.asset_tag}) was assigned to you",
             message=f"Assigned by {current_user.full_name}.",
             link=home_link(target_user, f"/assets/{asset.id}", "/agent/assets"),
         )
@@ -774,7 +639,7 @@ def assign_asset_to_user(
         company_id=asset.company_id,
         user_id=current_user.id,
         entity_id=asset.id,
-        new_value=f"{asset.label} assigned to {target_user.full_name}"
+        new_value=f"{asset.asset_tag} assigned to {target_user.full_name}"
     )
 
     response = _with_assignee(asset, target_user)
@@ -787,7 +652,7 @@ def unassign_asset(
     asset_id: str,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    current_user: User = Depends(_assigners),
+    current_user: User = Depends(_operators),
     tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
 ):
     """
@@ -796,7 +661,6 @@ def unassign_asset(
     query = db.query(Asset).filter(Asset.id == asset_id)
     if current_user.role != PlatformRole.SUPER_ADMIN:
         query = query.filter(Asset.company_id == tenant_company_id)
-    query = _only_own(query, db, current_user)
 
     asset = query.first()
     if not asset:
@@ -814,9 +678,7 @@ def unassign_asset(
     db.query(AssetAssignment).filter(
         AssetAssignment.asset_id == asset.id, 
         AssetAssignment.is_active == True
-    ).update({"is_active": False, "returned_at": datetime.utcnow()})
-    record_movement(db, asset.company_id, "RETURN", "HARDWARE", current_user.id, asset_id=asset.id,
-                    reason="Returned to stock")
+    ).update({"is_active": False})
 
     lifecycle = AssetLifecycle(
         company_id=asset.company_id,
@@ -839,7 +701,7 @@ def unassign_asset(
         company_id=asset.company_id,
         user_id=current_user.id,
         entity_id=asset.id,
-        new_value=f"Returned to stock: {asset.label}"
+        new_value=f"Returned to stock: {asset.asset_tag}"
     )
 
     # The active assignment was just closed, so there is no holder.
@@ -881,20 +743,9 @@ def delete_asset(
     db.query(AssetRequest).filter(AssetRequest.assigned_asset_id == asset.id).update(
         {"assigned_asset_id": None}, synchronize_session=False
     )
-    db.query(AssetRequest).filter(AssetRequest.asset_id == asset.id).update(
-        {"asset_id": None}, synchronize_session=False
-    )
     db.query(AuditScanRecord).filter(AuditScanRecord.asset_id == asset.id).update(
         {"asset_id": None}, synchronize_session=False
     )
-    db.query(StockMovement).filter(StockMovement.asset_id == asset.id).update(
-        {"asset_id": None}, synchronize_session=False
-    )
-    db.query(SoftwareLicenseAssignment).filter(SoftwareLicenseAssignment.asset_id == asset.id).update(
-        {"asset_id": None}, synchronize_session=False
-    )
-    # Tag and serial number are optional, so fall back to the name.
-    label = response.asset_tag or (f"S/N {response.serial_number}" if response.serial_number else response.name)
     db.delete(asset)
     db.commit()
 
@@ -905,8 +756,7 @@ def delete_asset(
         company_id=response.company_id,
         user_id=current_user.id,
         entity_id=response.id,
-        old_value=f"{label} - {response.name} ({response.status.value})" if label != response.name
-        else f"{response.name} ({response.status.value})",
+        old_value=f"{response.asset_tag} - {response.name} ({response.status.value})",
     )
     _queue_broadcast(background_tasks, "ASSET_DELETED", response)
     return None
@@ -927,10 +777,7 @@ def get_asset_lifecycle_history(
     asset_query = db.query(Asset.id).filter(Asset.id == asset_id)
     if current_user.role != PlatformRole.SUPER_ADMIN:
         asset_query = asset_query.filter(Asset.company_id == tenant_company_id)
-    if not _only_own(asset_query, db, current_user).first():
+    if not asset_query.first():
         raise HTTPException(status_code=404, detail="Asset not found.")
     query = db.query(AssetLifecycle).filter(AssetLifecycle.asset_id == asset_id)
-    if current_user.role == PlatformRole.EMPLOYEE:
-        # Only what happened since it was handed to them, not earlier holders' history.
-        query = query.filter(AssetLifecycle.timestamp >= _held_since(db, current_user)[asset_id])
     return query.order_by(AssetLifecycle.timestamp.desc()).offset(skip).limit(limit).all()

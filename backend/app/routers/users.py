@@ -2,7 +2,7 @@
 from typing import List, Optional
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -12,7 +12,7 @@ from app.core.deps import get_current_user, require_roles, get_tenant_company_id
 from app.models.models import (
     AssetAssignment, AssetRequest, AuditLog, Company, Department, PlatformRole, RequestStatusEnum, Subscription, User,
 )
-from app.schemas.schemas import check_password_length, UserCreate, UserResponse, UserUpdate
+from app.schemas.schemas import UserCreate, UserResponse, UserUpdate
 from app.routers.asset_requests import OPEN_TICKET_STATUSES
 from app.services.agent_id_service import new_agent_id
 from app.services.audit_service import log_audit_event
@@ -25,11 +25,14 @@ _admins = require_roles([PlatformRole.SUPER_ADMIN, PlatformRole.IT_ADMIN])
 # Full user records (emails, roles, status). IT Agents (EMPLOYEE) are not
 # included: they get names only, from GET /users/directory.
 _directory_readers = require_roles([
-    PlatformRole.SUPER_ADMIN, PlatformRole.IT_ADMIN, PlatformRole.SUB_ADMIN, PlatformRole.REPORTING_USER,
+    PlatformRole.SUPER_ADMIN, PlatformRole.IT_ADMIN, PlatformRole.SUB_ADMIN,
 ])
+_super_only = require_roles([PlatformRole.SUPER_ADMIN])
 
 
 SUB_ADMIN_MODULES = {"HAM", "SAM", "CLOUD", "SCAN", "REPORTS"}
+# Data a Reporting user may additionally read (reports are always readable).
+REPORTING_USER_MODULES = {"HAM", "SAM", "CLOUD", "SCAN"}
 USER_STATUSES = {"ACTIVE", "INACTIVE"}
 
 
@@ -42,6 +45,10 @@ def _check_user_fields(db: Session, company_id: Optional[str], role: Optional[Pl
         if not modules:
             raise HTTPException(status_code=400, detail="Choose at least one module for a Sub-admin.")
         unknown = sorted(set(modules) - SUB_ADMIN_MODULES)
+        if unknown:
+            raise HTTPException(status_code=400, detail=f"Unknown module(s): {', '.join(unknown)}.")
+    if role == PlatformRole.REPORTING_USER and modules:
+        unknown = sorted(set(modules) - REPORTING_USER_MODULES)
         if unknown:
             raise HTTPException(status_code=400, detail=f"Unknown module(s): {', '.join(unknown)}.")
     if department_id and not db.query(Department.id).filter(
@@ -110,27 +117,17 @@ def _is_unassigned_agent(user: User) -> bool:
     return user.company_id is None and user.role == PlatformRole.EMPLOYEE
 
 
-# Accounts an IT Admin may manage. IT Admins and the Super Admin are managed by the Super Admin only,
-# so one IT Admin cannot lock out, reset or promote a peer or the platform owner.
-_IT_ADMIN_MANAGES = {PlatformRole.EMPLOYEE, PlatformRole.SUB_ADMIN, PlatformRole.REPORTING_USER}
-
-
-def _manageable_user(db: Session, user_id: str, current_user: User, tenant_company_id: Optional[str],
-                     allow_unassigned: bool = False) -> User:
+def _manageable_user(db: Session, user_id: str, current_user: User, tenant_company_id: Optional[str]) -> User:
     """
-    A user this admin may act on: anyone in their own company, and (only when
-    allow_unassigned is set, to add them to the company) an IT Agent who is not in any
-    organization yet. An IT Admin cannot act on another IT Admin or on the Super Admin.
-    The Super Admin may act on anyone.
+    A user this admin may manage: anyone in their own company. Super Admin:
+    anyone. Users with no organization belong to nobody, so only a Super Admin
+    can reach them; another company's admin gets "not found".
     """
     user = db.query(User).filter(User.id == user_id).first()
     if user and current_user.role != PlatformRole.SUPER_ADMIN:
         company_id = tenant_company_id or current_user.company_id
-        in_company = user.company_id is not None and user.company_id == company_id
-        if not in_company and not (allow_unassigned and _is_unassigned_agent(user)):
+        if user.company_id is None or user.company_id != company_id:
             user = None
-        elif user.role not in _IT_ADMIN_MANAGES and user.id != current_user.id:
-            raise HTTPException(status_code=403, detail="Only the Super Admin can manage IT Admin and Super Admin accounts.")
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
     return user
@@ -149,17 +146,14 @@ def create_user(
     """
     target_company_id = user_in.company_id if current_user.role == PlatformRole.SUPER_ADMIN else (tenant_company_id or current_user.company_id)
 
-    if not target_company_id:
+    if not target_company_id and current_user.role != PlatformRole.SUPER_ADMIN:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Choose the company this person belongs to." if current_user.role == PlatformRole.SUPER_ADMIN
-            else "Target company context must be provided."
+            detail="Target company context must be provided."
         )
-    if current_user.role == PlatformRole.SUPER_ADMIN and not db.query(Company.id).filter(Company.id == target_company_id).first():
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown company.")
 
     # Check for existing email across system
-    existing_user = db.query(User).filter(func.lower(User.email) == user_in.email.strip().lower()).first()
+    existing_user = db.query(User).filter(func.lower(User.email) == user_in.email.lower()).first()
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -167,21 +161,19 @@ def create_user(
         )
 
     _check_user_fields(db, target_company_id, user_in.role, user_in.modules, user_in.department_id)
-    if user_in.role == PlatformRole.IT_ADMIN and current_user.role != PlatformRole.SUPER_ADMIN:
-        raise HTTPException(status_code=403, detail="Only the Super Admin can add an IT Admin.")
     if target_company_id:
         _check_user_limit(db, target_company_id)
 
     hashed_pwd = get_password_hash(user_in.password)
     new_user = User(
-        email=user_in.email.strip().lower(),
+        email=user_in.email,
         hashed_password=hashed_pwd,
         full_name=user_in.full_name,
         role=user_in.role,
         company_id=target_company_id,
         department_id=user_in.department_id,
         location=user_in.location,
-        modules=sorted(set(user_in.modules)) if user_in.role == PlatformRole.SUB_ADMIN else None,
+        modules=sorted(set(user_in.modules or [])) if user_in.role in (PlatformRole.SUB_ADMIN, PlatformRole.REPORTING_USER) and user_in.modules else None,
         agent_id=new_agent_id(db, user_in.full_name) if user_in.role == PlatformRole.EMPLOYEE else None,
         status="ACTIVE"
     )
@@ -207,7 +199,7 @@ def create_user(
 @router.get("", response_model=List[UserResponse])
 def list_users(
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=1000),
+    limit: int = Query(100, ge=1, le=500),
     department_id: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(_directory_readers),
@@ -258,7 +250,6 @@ def get_user_counts(
 
 @router.get("/directory", response_model=List[UserDirectoryEntry])
 def list_user_directory(
-    only_users: bool = False,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
@@ -267,21 +258,22 @@ def list_user_directory(
     company_id = tenant_company_id or current_user.company_id
     if not company_id:
         raise HTTPException(status_code=400, detail="Company context required.")
-    query = db.query(User).filter(User.company_id == company_id, User.status == "ACTIVE")
-    if only_users:
-        # Ordinary users only: no IT Admins, Sub Admins, Reporting users or Super Admin.
-        query = query.filter(User.role == PlatformRole.EMPLOYEE)
-    return query.order_by(User.full_name).all()
+    return (
+        db.query(User)
+        .filter(User.company_id == company_id, User.status == "ACTIVE")
+        .order_by(User.full_name)
+        .all()
+    )
 
 
 @router.get("/unassigned", response_model=List[UserResponse])
 def list_unassigned_agents(
     skip: int = Query(0, ge=0),
-    limit: int = Query(200, ge=1, le=500),
+    limit: int = Query(500, ge=1, le=1000),
     db: Session = Depends(get_db),
-    current_user: User = Depends(_admins),
+    current_user: User = Depends(_super_only),
 ):
-    """IT Agents who signed up on their own and are not in any organization yet, newest first."""
+    """Super Admin only: IT Agents who signed up on their own and are not in any organization yet, newest first."""
     return (
         db.query(User)
         .filter(User.company_id.is_(None), User.role == PlatformRole.EMPLOYEE)
@@ -292,29 +284,39 @@ def list_unassigned_agents(
     )
 
 
+class AddToOrganization(BaseModel):
+    company_id: str
+
+
 @router.post("/{user_id}/add-to-organization", response_model=UserResponse)
 def add_agent_to_organization(
     user_id: str,
+    body: AddToOrganization,
     db: Session = Depends(get_db),
-    current_user: User = Depends(_admins),
-    tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
+    current_user: User = Depends(_super_only),
 ):
-    """Move a self-registered IT Agent into this admin's organization."""
-    company_id = tenant_company_id or current_user.company_id
-    if not company_id:
-        raise HTTPException(status_code=400, detail="Your account is not in an organization.")
-    user = _manageable_user(db, user_id, current_user, tenant_company_id, allow_unassigned=True)
+    """Super Admin only: place a self-registered IT Agent in an organization.
+
+    IT Admins cannot claim unassigned accounts: they would be taking over
+    someone else's account. They create agents in their own company with
+    POST /users instead."""
+    company = db.query(Company).filter(Company.id == body.company_id).first()
+    if not company or company.status != "ACTIVE":
+        raise HTTPException(status_code=404, detail="Organization not found.")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
     if not _is_unassigned_agent(user):
         raise HTTPException(status_code=400, detail="This user is already in an organization.")
+    company_id = company.id
     if user.status == "ACTIVE":
         _check_user_limit(db, company_id)
 
     user.company_id = company_id
-    company = db.query(Company).filter(Company.id == company_id).first()
     notify(
         db, user,
-        title=f"You've been added to {company.name if company else 'an organization'}",
-        message="Your dashboard is ready.",
+        title=f"You've been added to {company.name}",
+        message="Your IT Agent dashboard is ready.",
         link="/agent/dashboard",
         type="SUCCESS",
     )
@@ -337,8 +339,6 @@ def add_agent_to_organization(
 class PasswordReset(BaseModel):
     new_password: str = Field(..., min_length=8, max_length=128)
 
-    _length = field_validator("new_password")(check_password_length)
-
 
 @router.post("/{user_id}/reset-password")
 def reset_user_password(
@@ -350,9 +350,8 @@ def reset_user_password(
 ):
     """Set a temporary password for a user who cannot sign in (they can change it in Settings)."""
     user = _manageable_user(db, user_id, current_user, tenant_company_id)
-    if user.id == current_user.id:
-        raise HTTPException(status_code=400, detail="Use Settings to change your own password.")
-    # Setting a new password also signs the user out everywhere (their old tokens stop working).
+    if user.role == PlatformRole.SUPER_ADMIN and current_user.role != PlatformRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Only a Super Admin can reset a Super Admin's password.")
     user.hashed_password = get_password_hash(body.new_password)
     notify(
         db, user,
@@ -419,9 +418,6 @@ def get_user_activity(
     user = query.first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")
-    # Admins review the work of users (employees) only, not of other admins.
-    if current_user.role != PlatformRole.SUPER_ADMIN and user.role != PlatformRole.EMPLOYEE:
-        raise HTTPException(status_code=403, detail="You can review the work of users only, not of other admins.")
 
     actions = dict(
         db.query(AuditLog.action, func.count(AuditLog.id))
@@ -519,16 +515,12 @@ def update_user(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found."
         )
-    if current_user.role != PlatformRole.SUPER_ADMIN and user.id != current_user.id and user.role not in _IT_ADMIN_MANAGES:
-        raise HTTPException(status_code=403, detail="Only the Super Admin can manage IT Admin and Super Admin accounts.")
 
     old_role = user.role.value
 
     update_data = user_in.model_dump(exclude_unset=True)
     if user.id == current_user.id and ("role" in update_data or "status" in update_data):
         raise HTTPException(status_code=400, detail="You cannot change your own role or status.")
-    if update_data.get("role") == PlatformRole.IT_ADMIN and current_user.role != PlatformRole.SUPER_ADMIN:
-        raise HTTPException(status_code=403, detail="Only the Super Admin can make someone an IT Admin.")
     if "status" in update_data:
         update_data["status"] = (update_data["status"] or "").upper()
         if update_data["status"] not in USER_STATUSES:
@@ -536,13 +528,15 @@ def update_user(
     new_role = update_data.get("role") or user.role
     _check_user_fields(
         db, user.company_id,
-        update_data.get("role") or (PlatformRole.SUB_ADMIN if new_role == PlatformRole.SUB_ADMIN and "modules" in update_data else None),
-        update_data.get("modules", user.modules) if new_role == PlatformRole.SUB_ADMIN else None,
+        update_data.get("role") or (new_role if new_role in (PlatformRole.SUB_ADMIN, PlatformRole.REPORTING_USER) and "modules" in update_data else None),
+        update_data.get("modules", user.modules) if new_role in (PlatformRole.SUB_ADMIN, PlatformRole.REPORTING_USER) else None,
         update_data.get("department_id"),
     )
-    if new_role == PlatformRole.SUB_ADMIN:
+    if new_role in (PlatformRole.SUB_ADMIN, PlatformRole.REPORTING_USER):
         if "modules" in update_data:
-            update_data["modules"] = sorted(set(update_data["modules"] or []))
+            update_data["modules"] = sorted(set(update_data["modules"] or [])) or None
+        elif new_role != user.role:
+            update_data["modules"] = None  # a new role starts without the old role's modules
     else:
         update_data["modules"] = None
     if new_role == PlatformRole.EMPLOYEE and not user.agent_id:

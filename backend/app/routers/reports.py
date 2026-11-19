@@ -6,7 +6,7 @@ from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import ValidationError
-from sqlalchemy import func, true
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -16,16 +16,25 @@ from app.schemas.schemas import (
     ReportConfigResponse, ReportRunCreate, ReportRunResponse, ReportSummaryResponse, ReportTypeResponse,
 )
 from app.services.audit_service import log_audit_event
-from app.services.report_service import REPORT_TYPES, ReportFilters, render_csv, report_types_for
+from app.services.report_service import REPORT_TYPES, ReportFilters, render_csv
 
 router = APIRouter(prefix="/reports", tags=["Reporting & Analytics"])
 
-# Users (stored as EMPLOYEE) run personal reports on their own data and see
-# only the reports they generated; the other roles see the organization's.
-_report_users = require_roles([
+# IT Agents (stored as EMPLOYEE) generate operational reports too.
+_report_roles = require_roles([
     PlatformRole.SUPER_ADMIN, PlatformRole.IT_ADMIN, PlatformRole.SUB_ADMIN, PlatformRole.REPORTING_USER,
     PlatformRole.EMPLOYEE,
 ])
+
+
+def _report_users(current_user: User = Depends(_report_roles)) -> User:
+    """A Sub-admin reads and runs reports only with the REPORTS module on their account."""
+    if current_user.role == PlatformRole.SUB_ADMIN and "REPORTS" not in set(current_user.modules or []):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="The Reports module is not assigned to your Sub-admin account.",
+        )
+    return current_user
 
 
 def _company(current_user: User, tenant_company_id: Optional[str]) -> str:
@@ -34,19 +43,6 @@ def _company(current_user: User, tenant_company_id: Optional[str]) -> str:
     if not company_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company context required for reports.")
     return company_id
-
-
-def _own_only(user: User) -> bool:
-    """Everyone sees only the reports they generated or saved themselves; an admin's list never
-    shows other admins' work or users' personal exports."""
-    return user.role != PlatformRole.SUPER_ADMIN
-
-
-def _check_type(report_type: str, user: User) -> None:
-    if report_type not in {t.key for t in report_types_for(user.role)}:
-        if report_type in REPORT_TYPES:
-            raise HTTPException(status_code=403, detail="This report is not available to you.")
-        raise HTTPException(status_code=400, detail=f"Unknown report type '{report_type}'.")
 
 
 def _parse_filters(report_type: str, raw: Dict) -> ReportFilters:
@@ -87,7 +83,7 @@ def _generate(
     filters: ReportFilters,
     config_id: Optional[str],
 ) -> ReportRun:
-    table = REPORT_TYPES[report_type].build(db, company_id, filters, user.id)
+    table = REPORT_TYPES[report_type].build(db, company_id, filters)
     run = ReportRun(
         company_id=company_id,
         report_config_id=config_id,
@@ -119,7 +115,7 @@ def list_report_types(current_user: User = Depends(_report_users)):
     """Report types and the filters each one accepts."""
     return [
         ReportTypeResponse(key=t.key, label=t.label, description=t.description, filters=list(t.filters))
-        for t in report_types_for(current_user.role)
+        for t in REPORT_TYPES.values()
     ]
 
 
@@ -132,14 +128,10 @@ def get_report_summary(
     company_id = _company(current_user, tenant_company_id)
     month_start = datetime.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     runs = db.query(ReportRun).filter(ReportRun.company_id == company_id)
-    configs = db.query(ReportConfig).filter(ReportConfig.company_id == company_id)
-    if _own_only(current_user):
-        runs = runs.filter(ReportRun.generated_by == current_user.id)
-        configs = configs.filter(ReportConfig.created_by == current_user.id)
     return ReportSummaryResponse(
         generated_this_month=runs.filter(ReportRun.created_at >= month_start).count(),
-        saved_reports=configs.count(),
-        last_generated_at=runs.with_entities(func.max(ReportRun.created_at)).scalar(),
+        saved_reports=db.query(ReportConfig).filter(ReportConfig.company_id == company_id).count(),
+        last_generated_at=db.query(func.max(ReportRun.created_at)).filter(ReportRun.company_id == company_id).scalar(),
     )
 
 
@@ -155,7 +147,8 @@ def create_report(
     with save=true the settings are also kept as a saved report.
     """
     company_id = _company(current_user, tenant_company_id)
-    _check_type(run_in.report_type, current_user)
+    if run_in.report_type not in REPORT_TYPES:
+        raise HTTPException(status_code=400, detail=f"Unknown report type '{run_in.report_type}'.")
     filters = _parse_filters(run_in.report_type, run_in.filters)
     name = (run_in.name or "").strip() or REPORT_TYPES[run_in.report_type].label
 
@@ -189,7 +182,6 @@ def list_report_runs(
         db.query(ReportRun, User.full_name)
         .outerjoin(User, User.id == ReportRun.generated_by)
         .filter(ReportRun.company_id == company_id)
-        .filter(ReportRun.generated_by == current_user.id if _own_only(current_user) else true())
         .order_by(ReportRun.created_at.desc())
         .limit(limit)
         .all()
@@ -206,10 +198,7 @@ def download_report(
 ):
     """The stored CSV for a generated report."""
     company_id = _company(current_user, tenant_company_id)
-    query = db.query(ReportRun).filter(ReportRun.id == run_id, ReportRun.company_id == company_id)
-    if _own_only(current_user):
-        query = query.filter(ReportRun.generated_by == current_user.id)
-    run = query.first()
+    run = db.query(ReportRun).filter(ReportRun.id == run_id, ReportRun.company_id == company_id).first()
     if not run:
         raise HTTPException(status_code=404, detail="Report not found.")
     slug = re.sub(r"[^A-Za-z0-9]+", "-", run.name).strip("-").lower() or "report"
@@ -221,33 +210,10 @@ def download_report(
     )
 
 
-@router.delete("/runs/{run_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_report_run(
-    run_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(_report_users),
-    tenant_company_id: Optional[str] = Depends(get_tenant_company_id),
-):
-    """Remove a generated report. Users remove only their own; admins any in the organization."""
-    company_id = _company(current_user, tenant_company_id)
-    query = db.query(ReportRun).filter(ReportRun.id == run_id, ReportRun.company_id == company_id)
-    if _own_only(current_user) or current_user.role == PlatformRole.REPORTING_USER:
-        query = query.filter(ReportRun.generated_by == current_user.id)
-    run = query.first()
-    if not run:
-        raise HTTPException(status_code=404, detail="Report not found.")
-    name = run.name
-    db.delete(run)
-    db.commit()
-    log_audit_event(db=db, action="DELETE_REPORT", entity="ReportRun", company_id=company_id,
-                    user_id=current_user.id, entity_id=run_id, old_value=name)
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-
 @router.get("/saved", response_model=List[ReportConfigResponse])
 def list_saved_reports(
     skip: int = Query(0, ge=0),
-    limit: int = Query(200, ge=1, le=500),
+    limit: int = Query(500, ge=1, le=1000),
     db: Session = Depends(get_db),
     current_user: User = Depends(_report_users),
     tenant_company_id: Optional[str] = Depends(get_tenant_company_id),
@@ -264,7 +230,6 @@ def list_saved_reports(
         db.query(ReportConfig, last_runs.c.last_run_at)
         .outerjoin(last_runs, last_runs.c.report_config_id == ReportConfig.id)
         .filter(ReportConfig.company_id == company_id)
-        .filter(ReportConfig.created_by == current_user.id if _own_only(current_user) else true())
         .order_by(ReportConfig.created_at.desc())
         .offset(skip)
         .limit(limit)
@@ -293,15 +258,11 @@ def run_saved_report(
 ):
     """Generate a fresh copy of a saved report with its stored settings."""
     company_id = _company(current_user, tenant_company_id)
-    query = db.query(ReportConfig).filter(ReportConfig.id == config_id, ReportConfig.company_id == company_id)
-    if _own_only(current_user):
-        query = query.filter(ReportConfig.created_by == current_user.id)
-    config = query.first()
+    config = db.query(ReportConfig).filter(ReportConfig.id == config_id, ReportConfig.company_id == company_id).first()
     if not config:
         raise HTTPException(status_code=404, detail="Saved report not found.")
     if config.report_type not in REPORT_TYPES:
         raise HTTPException(status_code=400, detail=f"Report type '{config.report_type}' is no longer available.")
-    _check_type(config.report_type, current_user)
     filters = _parse_filters(config.report_type, json.loads(config.config_json or "{}"))
     run = _generate(db, company_id, current_user, config.report_type, config.name, filters, config.id)
     return _run_response(run, current_user.full_name)
@@ -316,10 +277,7 @@ def delete_saved_report(
 ):
     """Delete saved settings. Reports already generated from them are kept."""
     company_id = _company(current_user, tenant_company_id)
-    query = db.query(ReportConfig).filter(ReportConfig.id == config_id, ReportConfig.company_id == company_id)
-    if _own_only(current_user):
-        query = query.filter(ReportConfig.created_by == current_user.id)
-    config = query.first()
+    config = db.query(ReportConfig).filter(ReportConfig.id == config_id, ReportConfig.company_id == company_id).first()
     if not config:
         raise HTTPException(status_code=404, detail="Saved report not found.")
     db.query(ReportRun).filter(ReportRun.report_config_id == config.id).update({"report_config_id": None})

@@ -1,6 +1,5 @@
 """Implementation file: app/core/security.py"""
 import hashlib
-import hmac
 from datetime import datetime, timedelta
 from typing import Optional, Any, Union
 from jose import jwt
@@ -25,27 +24,6 @@ def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
 
 
-def password_fingerprint(hashed_password: Optional[str]) -> str:
-    """
-    A short value that changes whenever the user's password does. A token carries
-    it, so every token issued before a password change or reset stops working.
-    """
-    return hmac.new(settings.SECRET_KEY.encode(), (hashed_password or "").encode(), hashlib.sha256).hexdigest()[:24]
-
-
-def issue_token(user, expires_delta: Optional[timedelta] = None) -> str:
-    """The access token for a signed-in user, bound to their current password."""
-    return create_access_token(
-        data={
-            "sub": user.id,
-            "role": user.role.value,
-            "company_id": user.company_id,
-            "pv": password_fingerprint(user.hashed_password),
-        },
-        expires_delta=expires_delta,
-    )
-
-
 def create_access_token(
     data: dict, 
     expires_delta: Optional[timedelta] = None
@@ -66,3 +44,22 @@ def create_access_token(
         algorithm=settings.ALGORITHM
     )
     return encoded_jwt
+
+
+def password_fingerprint(hashed_password: str) -> str:
+    """
+    Short digest of the stored password hash. It is embedded in access tokens
+    (claim "pwf") and re-checked on every request, so changing or resetting a
+    password invalidates every token issued before it. No schema change needed.
+    """
+    return hashlib.sha256(hashed_password.encode("utf-8")).hexdigest()[:16]
+
+
+def token_claims(user) -> dict:
+    """Claims placed in an access token for ``user``."""
+    return {
+        "sub": user.id,
+        "role": user.role.value,
+        "company_id": user.company_id,
+        "pwf": password_fingerprint(user.hashed_password),
+    }

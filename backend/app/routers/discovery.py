@@ -14,8 +14,6 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.deps import get_tenant_company_id, require_roles
 from app.models.models import Asset, AssetLifecycle, AssetStatusEnum, DiscoveredDevice, PlatformRole, User
-from app.schemas.schemas import clean_asset_tag
-from app.services.asset_code_service import next_asset_code
 from app.services.audit_service import log_audit_event
 
 router = APIRouter(prefix="/discovery", tags=["Automated Network & Agent Discovery"])
@@ -52,8 +50,7 @@ class DiscoveredDeviceOut(BaseModel):
 
 
 class ReconcileRequest(BaseModel):
-    # Optional, like on the asset form.
-    asset_tag: Optional[str] = Field(None, max_length=100)
+    asset_tag: str = Field(..., min_length=1, max_length=100)
     category: str = Field(..., min_length=1, max_length=100)
     name: Optional[str] = Field(None, max_length=150)
 
@@ -107,11 +104,11 @@ def agent_discovery_ingest(
 @router.get("/devices", response_model=List[DiscoveredDeviceOut])
 def list_discovered_devices(
     device_status: Optional[DeviceStatus] = Query(None, alias="status"),
-    skip: int = Query(0, ge=0),
-    limit: int = Query(500, ge=1, le=1000),
     db: Session = Depends(get_db),
     current_user: User = Depends(_admins),
-    tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
+    tenant_company_id: Optional[str] = Depends(get_tenant_company_id),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(500, ge=1, le=1000),
 ):
     """Every discovered device, most recently seen first."""
     query = db.query(DiscoveredDevice)
@@ -124,15 +121,12 @@ def list_discovered_devices(
 
 @router.get("/unmanaged", response_model=List[DiscoveredDeviceOut])
 def list_unmanaged_discovered_devices(
-    skip: int = Query(0, ge=0),
-    limit: int = Query(500, ge=1, le=1000),
     db: Session = Depends(get_db),
     current_user: User = Depends(_admins),
     tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
 ):
     """Devices waiting to be promoted to assets or ignored."""
-    return list_discovered_devices(device_status="UNMANAGED", skip=skip, limit=limit, db=db,
-                                   current_user=current_user, tenant_company_id=tenant_company_id)
+    return list_discovered_devices("UNMANAGED", db, current_user, tenant_company_id, skip=0, limit=1000)
 
 
 @router.post("/reconcile/{device_id}", status_code=status.HTTP_200_OK)
@@ -148,17 +142,16 @@ def promote_discovered_device_to_asset(
     if device.status == "MANAGED":
         raise HTTPException(status_code=400, detail="This device is already an asset.")
 
-    try:
-        asset_tag = clean_asset_tag(body.asset_tag)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+    asset_tag = body.asset_tag.strip()
     serial = device.serial_number or f"SN-{device.mac_address.replace(':', '').upper()}"
-    if db.query(Asset.id).filter(Asset.company_id == device.company_id, Asset.serial_number == serial).first():
-        raise HTTPException(status_code=400, detail="An asset with this serial number already exists.")
+    if db.query(Asset.id).filter(
+        Asset.company_id == device.company_id,
+        (Asset.asset_tag == asset_tag) | (Asset.serial_number == serial),
+    ).first():
+        raise HTTPException(status_code=400, detail="An asset with this tag or serial number already exists.")
 
     asset = Asset(
         company_id=device.company_id,
-        asset_code=next_asset_code(db, device.company_id),
         asset_tag=asset_tag,
         serial_number=serial,
         name=(body.name or device.hostname or "Discovered device").strip(),
@@ -191,7 +184,7 @@ def promote_discovered_device_to_asset(
         company_id=device.company_id,
         user_id=current_user.id,
         entity_id=asset.id,
-        new_value=f"{asset.label} from {device.hostname or device.mac_address}"
+        new_value=f"{asset.asset_tag} from {device.hostname or device.mac_address}"
     )
     return {"message": "Discovered device reconciled to asset.", "asset_id": asset.id}
 

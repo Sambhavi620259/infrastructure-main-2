@@ -27,8 +27,7 @@ class Settings(BaseSettings):
     # JWT Security settings
     SECRET_KEY: str = os.getenv("JWT_SECRET", _DEFAULT_SECRET)
     ALGORITHM: str = "HS256"
-    # Session lifetime; a token also stops working as soon as its owner's password changes.
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", str(60 * 12)))
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 12  # 12 Hours session lifetime
 
     # CORS Configuration (Supports both port 3000 and 3001 for Next.js dev server shifts)
     CORS_ORIGINS: Union[str, List[str]] = os.getenv(
@@ -44,29 +43,21 @@ class Settings(BaseSettings):
     # Attempts per client IP per minute on sign-in and registration.
     AUTH_RATE_LIMIT_PER_MINUTE: int = int(os.getenv("AUTH_RATE_LIMIT_PER_MINUTE", "20"))
 
-    # How many reverse proxies in front of this app each append to X-Forwarded-For.
-    # 0 (default) ignores that header and uses the connection's own address, so a
-    # caller cannot pick the address the rate limit sees. Behind one proxy use 1;
-    # Vercel -> Render use 2.
-    TRUSTED_PROXY_COUNT: int = int(os.getenv("TRUSTED_PROXY_COUNT", "0"))
-    # Shared secret between the frontend proxy and this API (also set as BACKEND_PROXY_KEY on the
-    # frontend). When set, the visitor address is taken only from requests that carry it, so a
-    # caller who reaches the API directly cannot choose the address the limits see.
-    PROXY_SHARED_SECRET: str = os.getenv("PROXY_SHARED_SECRET", "")
-    # Failed sign-ins per account per 15 minutes before the account is paused.
-    LOGIN_FAILURE_LIMIT: int = int(os.getenv("LOGIN_FAILURE_LIMIT", "10"))
+    # Comma-separated IPs/CIDRs of reverse proxies whose X-Forwarded-For header
+    # may be believed (the Next.js proxy, nginx, ...). Empty: header ignored.
+    TRUSTED_PROXIES: Union[str, List[str]] = os.getenv("TRUSTED_PROXIES", "127.0.0.1,::1")
 
-    # Public sign-up switches. The first Super Admin registers once; IT Admins may
-    # self-register unless this is turned off (then a Super Admin adds them).
-    ALLOW_PUBLIC_IT_ADMIN_SIGNUP: bool = os.getenv("ALLOW_PUBLIC_IT_ADMIN_SIGNUP", "true").lower() in ("1", "true", "yes")
-    ALLOW_PUBLIC_SUPER_ADMIN_SIGNUP: bool = os.getenv("ALLOW_PUBLIC_SUPER_ADMIN_SIGNUP", "true").lower() in ("1", "true", "yes")
+    # Public self-registration policy. Both are OFF unless explicitly enabled, in
+    # every environment. IT Admins are normally provisioned by a Super Admin
+    # (POST /api/super-admin/companies) and the first Super Admin is seeded with
+    # SEED_SUPER_ADMIN_EMAIL / _PASSWORD. IT Agents are created by their IT Admin
+    # (POST /api/users); if public agent sign-up is on, a Super Admin must place
+    # each new agent in an organization.
+    ALLOW_PUBLIC_ADMIN_REGISTRATION: bool = os.getenv("ALLOW_PUBLIC_ADMIN_REGISTRATION", "false").lower() in ("1", "true", "yes")
+    ALLOW_PUBLIC_AGENT_REGISTRATION: bool = os.getenv("ALLOW_PUBLIC_AGENT_REGISTRATION", "false").lower() in ("1", "true", "yes")
 
-    # Largest request body the API accepts, in bytes (file uploads are base64 in JSON).
-    MAX_REQUEST_BODY_BYTES: int = int(os.getenv("MAX_REQUEST_BODY_BYTES", str(8 * 1024 * 1024)))
-
-    # Database connections.
-    DB_POOL_SIZE: int = int(os.getenv("DB_POOL_SIZE", "10"))
-    DB_MAX_OVERFLOW: int = int(os.getenv("DB_MAX_OVERFLOW", "10"))
+    # Largest accepted request body (bytes). Uploads in this API are small JSON.
+    MAX_REQUEST_BODY_BYTES: int = int(os.getenv("MAX_REQUEST_BODY_BYTES", str(2 * 1024 * 1024)))
 
     @property
     def is_production(self) -> bool:
@@ -93,6 +84,13 @@ class Settings(BaseSettings):
         for prefix in ("postgres://", "postgresql://"):
             if v.startswith(prefix):
                 return "postgresql+psycopg2://" + v[len(prefix):]
+        return v
+
+    @field_validator("TRUSTED_PROXIES", mode="before")
+    @classmethod
+    def assemble_trusted_proxies(cls, v):
+        if isinstance(v, str):
+            return [i.strip() for i in v.split(",") if i.strip()]
         return v
 
     @field_validator("CORS_ORIGINS", mode="before")

@@ -22,12 +22,8 @@ export type AssetStatus = (typeof ASSET_STATUSES)[number];
 export interface Asset {
   id: string;
   company_id: string;
-  /** The system's own unique Asset ID (AST-000001); the asset number below may repeat. */
-  asset_code: string;
-  /** Optional: null when the asset has no tag (see assetLabel). */
-  asset_tag: string | null;
-  /** Optional: null when no serial number was recorded. */
-  serial_number: string | null;
+  asset_tag: string;
+  serial_number: string;
   name: string;
   category: string;
   type: string | null;
@@ -38,24 +34,10 @@ export interface Asset {
   vendor_id: string | null;
   warranty_start: string | null;
   warranty_end: string | null;
-  /** Optional annual maintenance contract. */
-  amc_vendor_id?: string | null;
-  amc_start?: string | null;
-  amc_end?: string | null;
-  amc_cost?: string | number | null;
-  /** Optional license that comes with the device. Users see only the last 4 characters of the number. */
-  license_type?: string | null;
-  license_number?: string | null;
-  license_expiry?: string | null;
-  /** More licenses on the same device, each with its own type and number. */
-  extra_licenses?: { license_type: string | null; license_number: string }[];
   location_id: string | null;
   department_id: string | null;
   condition: string;
   description: string | null;
-  specifications?: string | null;
-  /** The stock receipt the device was registered from. */
-  receipt_id?: string | null;
   status: AssetStatus;
   created_by: string | null;
   created_at: string;
@@ -64,8 +46,6 @@ export interface Asset {
   assigned_to_id: string | null;
   assigned_to_name: string | null;
   assigned_to_email: string | null;
-  assigned_by_name?: string | null;
-  assigned_at?: string | null;
 }
 
 /** Mirrors AssetLifecycleResponse. */
@@ -82,7 +62,7 @@ export interface AssetLifecycleEntry {
 
 /** Mirrors AssetEventResponse: a lifecycle entry with asset and user names. */
 export interface AssetEvent extends AssetLifecycleEntry {
-  asset_tag: string | null;
+  asset_tag: string;
   asset_name: string;
   performed_by_name: string | null;
 }
@@ -105,17 +85,11 @@ export interface DashboardMetrics {
   pending_requests: number;
   low_stock_alerts: number;
   total_asset_valuation: number;
-  software_products?: number;
-  license_seats?: number;
-  license_seats_assigned?: number;
-  /** Open tickets + stock requests + purchase orders waiting for approval. */
-  pending_approvals?: number;
 }
 
 const STATUS_LABEL: Record<AssetStatus, string> = {
   IN_STOCK: "In stock",
-  // Held for an approved ticket until it is handed over.
-  REQUESTED: "Reserved",
+  REQUESTED: "Requested",
   ASSIGNED: "Assigned",
   IN_USE: "In use",
   RETURN_REQUESTED: "Return requested",
@@ -157,11 +131,4 @@ export function formatDate(value: string | null): string {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "—";
   return parsed.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
-}
-
-/** How to name an asset in the UI: its tag, or its serial number when it has none. */
-export function assetLabel(asset: { asset_tag: string | null; serial_number?: string | null; asset_code?: string }): string {
-  const name = asset.asset_tag || (asset.serial_number ? `S/N ${asset.serial_number}` : "No tag or serial");
-  // Several devices may share an asset number, so name the Asset ID too.
-  return asset.asset_code ? `${name} (${asset.asset_code})` : name;
 }

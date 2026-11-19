@@ -31,6 +31,12 @@ def seed_initial_users():
                 "SEED_SUPER_ADMIN_EMAIL and SEED_SUPER_ADMIN_PASSWORD."
             )
             return
+        try:
+            from email_validator import validate_email
+            validate_email(settings.SEED_SUPER_ADMIN_EMAIL.strip(), check_deliverability=False)
+        except Exception as exc:
+            # The login form rejects such addresses (e.g. "root@x.local"), so the account could never sign in.
+            raise RuntimeError(f"SEED_SUPER_ADMIN_EMAIL is not a valid email address: {exc}")
         if len(settings.SEED_SUPER_ADMIN_PASSWORD) < 12:
             raise RuntimeError("SEED_SUPER_ADMIN_PASSWORD must be at least 12 characters.")
 

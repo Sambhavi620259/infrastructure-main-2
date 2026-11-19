@@ -4,15 +4,6 @@ import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import { createAssetCategory, listAssetCategories, type AssetCategory } from "@/lib/tickets";
-import { ContactCard } from "@/components/settings/contact-card";
-import { getProfile } from "@/lib/profile";
-
-const FEATURE_LABEL: Record<string, string> = {
-  INVENTORY: "Inventory & vendors",
-  SOFTWARE: "Software assets & licenses",
-  REPORTS: "Reports & analytics",
-  CLOUD: "Cloud",
-};
 
 /** Mirrors OrganizationResponse in backend/app/routers/organization.py. */
 interface Organization {
@@ -29,18 +20,12 @@ interface Organization {
   departments: number;
   asset_categories: number;
   users_by_role: Record<string, number>;
-  contact_email: string | null;
-  contact_phone: string | null;
-  address: string | null;
-  latitude: number | null;
-  longitude: number | null;
-  plan_features: string[];
 }
 
 const ROLE_ROWS: [string, string, string][] = [
   ["IT_ADMIN", "IT Admin", "Organization settings, users, and every ITAM module."],
   ["SUB_ADMIN", "Sub-admin", "Administers the modules assigned to them."],
-  ["IT_AGENT", "User", "Raises tickets, requests stock, updates asset status and runs reports."],
+  ["IT_AGENT", "IT Agent", "Tickets, asset hand-over, stock moves and reports."],
   ["REPORTING_USER", "Reporting User", "Read-only access to reports and exports."],
 ];
 
@@ -68,8 +53,6 @@ function UsageBar({ used, limit }: { used: number; limit: number | null }) {
 
 export default function SettingsPage() {
   const [org, setOrg] = useState<Organization | null>(null);
-  // Only the Super Admin edits the company's contact details and office location.
-  const [isSuper, setIsSuper] = useState(false);
   const [name, setName] = useState("");
   const [categories, setCategories] = useState<AssetCategory[]>([]);
   const [newCategory, setNewCategory] = useState("");
@@ -84,9 +67,6 @@ export default function SettingsPage() {
         setName(data.name);
       })
       .catch((caught) => setError(caught instanceof Error ? caught.message : "Unable to load organization settings."));
-    getProfile()
-      .then((profile) => setIsSuper(profile.role === "SUPER_ADMIN"))
-      .catch(() => undefined);
     listAssetCategories()
       .then(setCategories)
       .catch(() => undefined);
@@ -194,38 +174,9 @@ export default function SettingsPage() {
               <UsageBar used={org?.assets ?? 0} limit={org?.asset_limit ?? null} />
             </div>
           </div>
-          <div className="mt-5">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Included in your plan</p>
-            <ul className="flex flex-wrap gap-2 text-xs">
-              {Object.entries(FEATURE_LABEL).map(([feature, label]) => {
-                const included = org?.plan_features.includes(feature);
-                return (
-                  <li
-                    key={feature}
-                    className={`rounded-full px-2.5 py-1 font-semibold ${included ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-400 line-through"}`}
-                  >
-                    {label}
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-          <p className="mt-5 text-xs text-slate-500">Plan limits and features are managed by the platform Super Admin.</p>
+          <p className="mt-5 text-xs text-slate-500">Plan limits are managed by the platform Super Admin.</p>
         </article>
       </section>
-
-      {org && (
-        <ContactCard
-          org={org}
-          canEdit={isSuper}
-          onSaved={(updated) => {
-            setOrg((current) => (current ? { ...current, ...updated } : current));
-            setNotice("Company contact details saved.");
-            setError("");
-          }}
-          onError={setError}
-        />
-      )}
 
       <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="flex items-center justify-between border-b border-slate-100 px-6 py-5">

@@ -1,13 +1,13 @@
 """Implementation file: app/core/deps.py"""
-import hmac
 from typing import List, Optional
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.permissions import reporting_user_may_read
 from app.core.security import password_fingerprint
 from app.models.models import User, PlatformRole
 
@@ -27,8 +27,7 @@ def user_from_token(token: Optional[str], db: Session) -> Optional[User]:
         payload = jwt.decode(
             token,
             settings.SECRET_KEY,
-            algorithms=[settings.ALGORITHM],
-            options={"require_exp": True, "require_sub": True},
+            algorithms=[settings.ALGORITHM]
         )
     except JWTError:
         return None
@@ -36,12 +35,13 @@ def user_from_token(token: Optional[str], db: Session) -> Optional[User]:
     if user_id is None:
         return None
 
-    # The company comes with the user in one query (the suspension check needs it).
+    # Load the company with the user: organization_suspended() reads it on every request.
     user = db.query(User).options(joinedload(User.company)).filter(User.id == user_id).first()
     if not user or user.status != "ACTIVE" or organization_suspended(user):
         return None
-    # The token must have been issued under the user's current password.
-    if not hmac.compare_digest(str(payload.get("pv") or ""), password_fingerprint(user.hashed_password)):
+    # Tokens issued before the last password change/reset (or without the
+    # claim) are no longer valid.
+    if payload.get("pwf") != password_fingerprint(user.hashed_password):
         return None
     return user
 
@@ -52,6 +52,7 @@ def organization_suspended(user: User) -> bool:
 
 
 def get_current_user(
+    request: Request,
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db)
 ) -> User:
@@ -64,6 +65,12 @@ def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",
             headers={"WWW-Authenticate": "Bearer"},
+        )
+    # A Reporting user reads reports plus only the modules assigned to them.
+    if user.role == PlatformRole.REPORTING_USER and not reporting_user_may_read(user, request.url.path):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your Reporting account does not include access to this data.",
         )
     return user
 
@@ -103,3 +110,55 @@ def get_tenant_company_id(
 def profile_role(role: PlatformRole) -> str:
     """Role name the frontend uses: IT Agents are stored as EMPLOYEE."""
     return "IT_AGENT" if role == PlatformRole.EMPLOYEE else role.value
+
+
+# --- WebSocket authentication -------------------------------------------------
+
+WS_MAX_MESSAGE_CHARS = 1024
+WS_MAX_CONNECTIONS_PER_USER = 10
+_ws_open: dict = {}
+
+
+def ws_origin_allowed(origin: Optional[str]) -> bool:
+    """Browsers always send Origin on a WebSocket. Reject pages from other sites
+    (cross-site WebSocket hijacking); clients that send no Origin are not browsers."""
+    if not origin:
+        return True
+    return origin.rstrip("/") in {o.rstrip("/") for o in settings.CORS_ORIGINS}
+
+
+def ws_authenticate(websocket, token: Optional[str], authorize=None):
+    """
+    Authenticate a WebSocket and run an optional ``authorize(db, user) -> close
+    code or None`` check. Uses a short-lived DB session that is closed before
+    returning, so an idle socket never holds a pooled connection.
+
+    Returns (user_id, None) on success or (None, (close_code, reason)).
+    """
+    if not ws_origin_allowed(websocket.headers.get("origin")):
+        return None, (4403, "Origin not allowed")
+    source = websocket.app.dependency_overrides.get(get_db, get_db)()
+    db = next(source)
+    try:
+        user = user_from_token(token, db)
+        if user is None:
+            return None, (4401, "Not authenticated")
+        if authorize is not None:
+            failure = authorize(db, user)
+            if failure:
+                return None, failure
+        user_id = user.id
+    finally:
+        source.close()
+    if _ws_open.get(user_id, 0) >= WS_MAX_CONNECTIONS_PER_USER:
+        return None, (4429, "Too many open connections")
+    _ws_open[user_id] = _ws_open.get(user_id, 0) + 1
+    return user_id, None
+
+
+def ws_release(user_id: str) -> None:
+    remaining = _ws_open.get(user_id, 0) - 1
+    if remaining > 0:
+        _ws_open[user_id] = remaining
+    else:
+        _ws_open.pop(user_id, None)

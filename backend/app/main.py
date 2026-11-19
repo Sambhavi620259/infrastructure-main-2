@@ -1,25 +1,21 @@
 """Implementation file: app/main.py"""
 import asyncio
 import logging
-import os
 from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.access_guard import ScopedRoleWriteGuard
 from app.core.config import settings
-from app.core.http_guard import BodySizeLimitMiddleware, SecurityHeadersMiddleware
 from app.core.database import get_db
 from app.core.logging_config import configure_logging
+from app.core.request_limits import RequestSizeLimitMiddleware, SecurityHeadersMiddleware
 from app.core.seed import seed_initial_users
 from app.services.warranty_alerts import warranty_alert_loop
 from app.routers import (
-    access,
-    approvals,
     auth,
     users,
     departments,
@@ -49,11 +45,6 @@ from app.routers import (
 async def lifespan(app: FastAPI):
     configure_logging()
     settings.check_production_safety()
-    if int(os.getenv("WEB_CONCURRENCY", "1")) > 1:
-        logging.getLogger("app").warning(
-            "WEB_CONCURRENCY > 1: sign-in limits and live-update sockets are kept per process, so "
-            "the effective limits multiply and updates reach only some viewers. Use one worker."
-        )
     # Schema is owned by Alembic (see backend/migrations/README.md).
     # Run `alembic upgrade head` before starting; create_all is deliberately gone
     # so migrations are the single source of truth.
@@ -62,9 +53,7 @@ async def lifespan(app: FastAPI):
     yield
     warranty_task.cancel()
 
-# The interactive API docs are for development; production does not publish the schema.
-_docs = {} if not settings.is_production else {"docs_url": None, "redoc_url": None, "openapi_url": None}
-app = FastAPI(title="ITAM API", lifespan=lifespan, **_docs)
+app = FastAPI(title="ITAM API", lifespan=lifespan)
 
 # Configure CORS for frontend connection
 # The browser normally reaches the API through the Next.js proxy (same origin),
@@ -78,8 +67,7 @@ app.add_middleware(
 )
 
 app.add_middleware(ScopedRoleWriteGuard)
-# Outermost last: the size limit and headers wrap everything above them.
-app.add_middleware(BodySizeLimitMiddleware)
+app.add_middleware(RequestSizeLimitMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 
 # Include routers
@@ -106,20 +94,8 @@ app.include_router(super_admin.router, prefix="/api")
 app.include_router(organization.router, prefix="/api")
 app.include_router(notifications.router, prefix="/api")
 app.include_router(profile.router, prefix="/api")
-app.include_router(approvals.router, prefix="/api")
-app.include_router(access.router, prefix="/api")
 
 logger = logging.getLogger("app")
-
-
-@app.exception_handler(IntegrityError)
-async def integrity_error(request: Request, exc: IntegrityError) -> JSONResponse:
-    """A database constraint stopped the change (duplicate, or still referenced): a conflict, not a crash."""
-    logger.warning("Integrity error on %s %s: %s", request.method, request.url.path, str(exc.orig)[:200])
-    return JSONResponse(
-        status_code=409,
-        content={"detail": "This change conflicts with existing data (a duplicate, or the record is still in use)."},
-    )
 
 
 @app.exception_handler(Exception)
@@ -134,6 +110,10 @@ async def unhandled_error(request: Request, exc: Exception) -> JSONResponse:
 
 @app.get("/api/health")
 def health(db: Session = Depends(get_db)):
-    """Liveness and database check for load balancers and Docker."""
-    db.execute(text("SELECT 1"))
+    """Liveness and database check for load balancers and Docker (503 when the database is down)."""
+    try:
+        db.execute(text("SELECT 1"))
+    except Exception:
+        logger.exception("Health check: database unreachable")
+        return JSONResponse(status_code=503, content={"status": "unavailable"})
     return {"status": "ok"}

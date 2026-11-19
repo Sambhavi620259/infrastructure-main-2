@@ -1,10 +1,8 @@
 """Implementation file: app/schemas/schemas.py"""
-import json
 from datetime import datetime
 from decimal import Decimal
-import re
-from typing import Dict, List, Literal, Optional
-from pydantic import field_validator, BaseModel, ConfigDict, EmailStr, Field
+from typing import Dict, List, Optional
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from app.models.models import AssetStatusEnum, PlatformRole, RequestStatusEnum
 
@@ -24,33 +22,22 @@ class TokenData(BaseModel):
     role: Optional[PlatformRole] = None
 
 
-def check_password_length(value: str) -> str:
-    """bcrypt reads only the first 72 bytes, so longer passwords are refused instead of silently cut."""
-    if len(value.encode("utf-8")) > 72:
-        raise ValueError("A password can be at most 72 bytes (about 72 characters).")
-    return value
-
-
 class LoginRequest(BaseModel):
     email: EmailStr
-    password: str = Field(..., max_length=128)
+    password: str
     # The role picked on the login page. Informational only: the account's
     # own role decides the workspace. Accepts frontend names such as IT_AGENT.
     role: Optional[str] = None
-    # Super Admins also enter the platform's Super Admin key on every sign-in.
-    super_admin_key: Optional[str] = None
 
 
 class RegisterRequest(BaseModel):
     name: str = Field(..., min_length=2, max_length=150)
     email: EmailStr
-    password: str = Field(..., min_length=8, max_length=128)
+    password: str = Field(..., min_length=8)
     role: str = Field(..., pattern="^(IT_ADMIN|IT_AGENT|SUPER_ADMIN)$")
     # Super Admin only: the platform key, or (if none exists yet) the key to create.
     registrationKey: Optional[str] = Field(None, max_length=128)
     registrationKeyConfirm: Optional[str] = Field(None, max_length=128)
-
-    _password_length = field_validator("password")(check_password_length)
 
 
 # --- Company & Subscription Schemas ---
@@ -124,10 +111,8 @@ class UserBase(BaseModel):
 
 
 class UserCreate(UserBase):
-    password: str = Field(..., min_length=8, max_length=128)
+    password: str = Field(..., min_length=8)
     company_id: Optional[str] = None  # Admin creates user for tenant
-
-    _password_length = field_validator("password")(check_password_length)
 
 
 class UserUpdate(BaseModel):
@@ -165,17 +150,7 @@ class UserProfile(BaseModel):
     memberSince: Optional[datetime] = None
     # The sign-in before the current one, so people can spot one they did not make.
     previousLoginAt: Optional[datetime] = None
-    # Profile photo as a data URL, or None.
     avatarUrl: Optional[str] = None
-    phone: Optional[str] = None
-    jobTitle: Optional[str] = None
-    employeeId: Optional[str] = None
-    bio: Optional[str] = None
-    # As the user typed them on their profile (display only).
-    organizationName: Optional[str] = None
-    organizationId: Optional[str] = None
-    # Modules the organization's plan includes (all of them for a Super Admin).
-    planFeatures: List[str] = []
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -200,53 +175,11 @@ class AssetCategoryResponse(AssetCategoryCreate):
     model_config = ConfigDict(from_attributes=True)
 
 
-ASSET_TAG_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9\-_./]{0,99}$")
-
-
-LICENSE_NUMBER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9\-_./# ]{2,254}$")
-
-
-def clean_license_number(value: Optional[str]) -> Optional[str]:
-    """Blank means no license number; otherwise 3-255 letters, digits and - _ . / # characters."""
-    value = (value or "").strip()
-    if not value:
-        return None
-    if not LICENSE_NUMBER_PATTERN.match(value):
-        raise ValueError("A license number is 3-255 letters, digits and - _ . / # characters.")
-    return value
-
-
-def clean_asset_tag(value: Optional[str]) -> Optional[str]:
-    """Blank means no tag; a given tag is letters, digits and - _ . / (it must be unique per organization)."""
-    value = (value or "").strip()
-    if not value:
-        return None
-    if not ASSET_TAG_PATTERN.match(value):
-        raise ValueError("An asset tag uses letters, digits and - _ . / only (no spaces).")
-    return value
-
-
-class LicenseEntry(BaseModel):
-    """One more license that comes with a device."""
-    license_type: Optional[Literal["PERPETUAL", "SUBSCRIPTION", "PER_USER", "PER_DEVICE", "SITE", "VOLUME", "OEM", "TRIAL"]] = None
-    license_number: str = Field(..., max_length=255)
-
-    @field_validator("license_number", mode="before")
-    @classmethod
-    def _number(cls, value):
-        cleaned = clean_license_number(value)
-        if not cleaned:
-            raise ValueError("Enter the license number, or remove the empty row.")
-        return cleaned
-
-
 class AssetBase(BaseModel):
-    # Optional: blank is stored as no tag / no serial number. Only the name is required.
-    asset_tag: Optional[str] = Field(None, max_length=100)
-    serial_number: Optional[str] = Field(None, max_length=100)
-    name: str = Field(..., min_length=1, max_length=150)
-    # Optional on input: blank is stored as "Uncategorised".
-    category: str = Field("Uncategorised", max_length=100)
+    asset_tag: str = Field(..., max_length=100)
+    serial_number: str = Field(..., max_length=100)
+    name: str = Field(..., max_length=150)
+    category: str = Field(..., max_length=100)
     type: Optional[str] = None
     brand: Optional[str] = None
     model: Optional[str] = None
@@ -255,54 +188,17 @@ class AssetBase(BaseModel):
     vendor_id: Optional[str] = None
     warranty_start: Optional[datetime] = None
     warranty_end: Optional[datetime] = None
-    # Optional annual maintenance contract.
-    amc_vendor_id: Optional[str] = None
-    amc_start: Optional[datetime] = None
-    amc_end: Optional[datetime] = None
-    amc_cost: Optional[Decimal] = Field(None, ge=0)
-    # Optional license that comes with the device (e.g. OEM Windows key).
-    license_type: Optional[Literal["PERPETUAL", "SUBSCRIPTION", "PER_USER", "PER_DEVICE", "SITE", "VOLUME", "OEM", "TRIAL"]] = None
-    license_number: Optional[str] = Field(None, max_length=255)
-    license_expiry: Optional[datetime] = None
-    extra_licenses: List[LicenseEntry] = Field(default_factory=list, max_length=10)
     location_id: Optional[str] = None
     department_id: Optional[str] = None
     condition: str = "EXCELLENT"
     description: Optional[str] = None
-    specifications: Optional[str] = Field(None, max_length=2000)
-
-    @field_validator("asset_tag", mode="before")
-    @classmethod
-    def _tag(cls, value):
-        return clean_asset_tag(value)
-
-    @field_validator("serial_number", mode="before")
-    @classmethod
-    def _serial(cls, value):
-        return (value or "").strip() or None
-
-    @field_validator("license_number", mode="before")
-    @classmethod
-    def _license_number(cls, value):
-        return clean_license_number(value)
-
-    @field_validator("category", mode="before")
-    @classmethod
-    def _category(cls, value):
-        return (value or "").strip() or "Uncategorised"
 
 
 class AssetCreate(AssetBase):
     status: AssetStatusEnum = AssetStatusEnum.IN_STOCK
-    # Register this device from a stock receipt (counts against its quantity).
-    receipt_id: Optional[str] = None
 
 
 class AssetUpdate(BaseModel):
-    # Add, change or clear (empty string) the tag; add a serial number the asset lacks.
-    asset_tag: Optional[str] = Field(None, max_length=100)
-    serial_number: Optional[str] = Field(None, max_length=100)
-    specifications: Optional[str] = Field(None, max_length=2000)
     name: Optional[str] = None
     category: Optional[str] = None
     type: Optional[str] = None
@@ -313,14 +209,6 @@ class AssetUpdate(BaseModel):
     vendor_id: Optional[str] = None
     warranty_start: Optional[datetime] = None
     warranty_end: Optional[datetime] = None
-    amc_vendor_id: Optional[str] = None
-    amc_start: Optional[datetime] = None
-    amc_end: Optional[datetime] = None
-    amc_cost: Optional[Decimal] = Field(None, ge=0)
-    license_type: Optional[Literal["PERPETUAL", "SUBSCRIPTION", "PER_USER", "PER_DEVICE", "SITE", "VOLUME", "OEM", "TRIAL"]] = None
-    license_number: Optional[str] = Field(None, max_length=255)
-    license_expiry: Optional[datetime] = None
-    extra_licenses: Optional[List[LicenseEntry]] = Field(None, max_length=10)
     location_id: Optional[str] = None
     department_id: Optional[str] = None
     status: Optional[AssetStatusEnum] = None
@@ -329,58 +217,15 @@ class AssetUpdate(BaseModel):
     # Not an asset field: recorded on the lifecycle entry when status changes.
     status_remarks: Optional[str] = Field(None, max_length=500)
 
-    @field_validator("asset_tag", mode="before")
-    @classmethod
-    def _tag(cls, value):
-        return clean_asset_tag(value)
-
-    @field_validator("license_number", mode="before")
-    @classmethod
-    def _license_number(cls, value):
-        return clean_license_number(value)
-
 
 class AssetResponse(AssetBase):
     id: str
-    asset_code: str
     company_id: str
     status: AssetStatusEnum
-    receipt_id: Optional[str] = None
-
-    # Return stored values as they are (older records may predate the format rules).
-    @field_validator("asset_tag", "serial_number", mode="before")
-    @classmethod
-    def _tag(cls, value):
-        return value
-
-    @field_validator("license_number", mode="before")
-    @classmethod
-    def _license_number(cls, value):
-        return value
-
-    # Stored as JSON text on the asset.
-    @field_validator("extra_licenses", mode="before")
-    @classmethod
-    def _extra_licenses(cls, value):
-        if not value:
-            return []
-        if isinstance(value, str):
-            try:
-                return json.loads(value)
-            except ValueError:
-                return []
-        return value
-
-    @field_validator("category", mode="before")
-    @classmethod
-    def _category(cls, value):
-        return value or "Uncategorised"
     # Derived from the active AssetAssignment row, not stored on the asset.
     assigned_to_id: Optional[str] = None
     assigned_to_name: Optional[str] = None
     assigned_to_email: Optional[str] = None
-    assigned_by_name: Optional[str] = None
-    assigned_at: Optional[datetime] = None
     created_by: Optional[str] = None
     created_at: datetime
     updated_at: datetime
@@ -394,150 +239,27 @@ class AssetAssignRequest(BaseModel):
 
 # --- Request & Return Schemas ---
 
-TicketPriority = Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
-
-
 class AssetRequestCreate(BaseModel):
-    # REQUEST asks for an asset of a category; ISSUE reports a problem with an
-    # asset the requester holds (asset_id); SOFTWARE asks for a seat of a
-    # product (software_id); RETURN hands back an asset the requester holds;
-    # ACCESS asks for a level of access to a resource (access_resource_id).
-    ticket_type: Literal["REQUEST", "ISSUE", "SOFTWARE", "RETURN", "ACCESS"] = "REQUEST"
-    priority: TicketPriority = "MEDIUM"
-    # When the requester needs it by (today or later).
-    required_date: Optional[datetime] = None
-    additional_comments: Optional[str] = Field(None, max_length=2000)
-    access_resource_id: Optional[str] = None
-    access_level: Optional[str] = Field(None, max_length=50)
-    # ACCESS: how long it is needed for (blank = no end date, within the resource's limit).
-    access_until: Optional[datetime] = None
-    asset_category_id: Optional[str] = None
-    asset_id: Optional[str] = None
-    software_id: Optional[str] = None
-    # SOFTWARE tickets for software that is not registered yet: its name.
-    requested_software_name: Optional[str] = Field(None, max_length=150)
+    asset_category_id: str
     requested_for: Optional[str] = None
     # Raise the ticket on behalf of this user (same organization); the asset
     # is assigned to them on approval. Defaults to the caller.
     requested_for_user_id: Optional[str] = None
     department_id: Optional[str] = None
-    reason: str = Field(..., min_length=1, max_length=2000)
+    reason: str
 
 
 class AssetRequestUpdate(BaseModel):
     status: RequestStatusEnum
     assigned_asset_id: Optional[str] = None
     rejection_reason: Optional[str] = None
-    # Required when resolving an ISSUE ticket: what was done.
-    resolution_note: Optional[str] = Field(None, max_length=1000)
-    # SOFTWARE fulfilment: which license to take the seat from (default: any with a free seat).
-    license_id: Optional[str] = None
-    # SOFTWARE fulfilment of a request made by name: the registered software to give.
-    software_id: Optional[str] = None
-    # RETURN fulfilment: the condition the device came back in.
-    return_condition: Optional[Literal["EXCELLENT", "GOOD", "FAIR", "POOR", "DAMAGED"]] = None
-    # REQUEST approval: hold this in-stock device for the requester until handover.
-    reserve_asset_id: Optional[str] = None
-    # WAITING_INVENTORY / WAITING_LICENSE: when it is expected and what is being bought.
-    expected_date: Optional[datetime] = None
-    procurement_note: Optional[str] = Field(None, max_length=2000)
-    # A note with the change: what is needed (WAITING_USER), why (approval), or for the history.
-    note: Optional[str] = Field(None, max_length=2000)
-    # SOFTWARE fulfilment: installation status as known now (no deployment system is connected).
-    deployment_status: Optional[Literal["NOT_REQUIRED", "PENDING", "INSTALLED", "FAILED"]] = None
-    # ACCESS fulfilment: when the access ends (overrides what was asked, within the resource's limit).
-    access_until: Optional[datetime] = None
-
-
-class TicketAssign(BaseModel):
-    # The IT team member to work the ticket; null unassigns it.
-    assignee_id: Optional[str] = None
-
-
-class TicketReopen(BaseModel):
-    reason: str = Field(..., min_length=3, max_length=2000)
-
-
-class TicketCommentCreate(BaseModel):
-    body: str = Field(..., min_length=1, max_length=4000)
-    # Internal notes are seen by the IT team only.
-    internal: bool = False
-
-
-class TicketCommentResponse(BaseModel):
-    id: str
-    ticket_id: str
-    author_id: str
-    author_name: Optional[str] = None
-    author_is_staff: bool = False
-    body: str
-    internal: bool
-    created_at: datetime
-
-
-class TicketAttachmentCreate(BaseModel):
-    filename: str = Field(..., min_length=1, max_length=255)
-    content_type: str = Field(..., max_length=100)
-    # Base64 file content (the data: prefix is optional).
-    data: str
-
-
-class TicketAttachmentResponse(BaseModel):
-    id: str
-    ticket_id: str
-    filename: str
-    content_type: str
-    size: int
-    uploaded_by: str
-    uploaded_by_name: Optional[str] = None
-    created_at: datetime
-
-
-class TicketEventResponse(BaseModel):
-    id: str
-    action: str
-    from_status: Optional[str] = None
-    to_status: Optional[str] = None
-    note: Optional[str] = None
-    actor_name: Optional[str] = None
-    internal: bool = False
-    created_at: datetime
-
-
-class TicketApprovalResponse(BaseModel):
-    id: str
-    approver_id: str
-    approver_name: Optional[str] = None
-    kind: str
-    decision: str
-    note: Optional[str] = None
-    created_at: datetime
-
-
-class OwnerDecision(BaseModel):
-    decision: Literal["APPROVED", "REJECTED"]
-    note: Optional[str] = Field(None, max_length=2000)
-
-
-class TicketAsset(BaseModel):
-    """The asset an ISSUE ticket is about, as the admin needs to see it."""
-    id: str
-    asset_tag: Optional[str] = None
-    name: str
-    category: str
-    brand: Optional[str] = None
-    model: Optional[str] = None
-    serial_number: Optional[str] = None
-    status: str
-    condition: Optional[str] = None
-    warranty_end: Optional[datetime] = None
 
 
 class AssetRequestResponse(BaseModel):
     id: str
     company_id: str
     requested_by: str
-    asset_category_id: Optional[str] = None
+    asset_category_id: str
     department_id: Optional[str] = None
     requested_for: Optional[str] = None
     reason: str
@@ -555,47 +277,8 @@ class AssetRequestResponse(BaseModel):
     processed_by: Optional[str] = None
     processed_by_name: Optional[str] = None
     processed_at: Optional[datetime] = None
-    ticket_type: str = "REQUEST"
-    asset_id: Optional[str] = None
-    asset: Optional[TicketAsset] = None
-    resolution_note: Optional[str] = None
-    software_id: Optional[str] = None
-    software_name: Optional[str] = None
-    requested_software_name: Optional[str] = None
-    license_assignment_id: Optional[str] = None
-    return_condition: Optional[str] = None
-    ticket_no: Optional[int] = None
-    priority: str = "MEDIUM"
-    required_date: Optional[datetime] = None
-    additional_comments: Optional[str] = None
-    assignee_id: Optional[str] = None
-    assignee_name: Optional[str] = None
-    expected_date: Optional[datetime] = None
-    procurement_note: Optional[str] = None
-    resolved_at: Optional[datetime] = None
-    closed_at: Optional[datetime] = None
-    reopen_count: int = 0
-    access_resource_id: Optional[str] = None
-    access_resource_name: Optional[str] = None
-    access_level: Optional[str] = None
-    access_until: Optional[datetime] = None
-    access_grant_id: Optional[str] = None
-    # The requester's employee ID (their profile employee code, else their user ID).
-    requester_employee_id: Optional[str] = None
-    # ACCESS tickets: the resource owner who must also approve, and whether they still have to.
-    owner_id: Optional[str] = None
-    owner_name: Optional[str] = None
-    needs_owner_approval: bool = False
-    approvals: List[TicketApprovalResponse] = []
-    attachment_count: int = 0
-    comment_count: int = 0
 
     model_config = ConfigDict(from_attributes=True)
-
-
-class TicketPage(BaseModel):
-    items: List[AssetRequestResponse]
-    total: int
 
 
 class AssetReturnCreate(BaseModel):
@@ -619,7 +302,7 @@ class AssetLifecycleResponse(BaseModel):
 
 class AssetEventResponse(AssetLifecycleResponse):
     """A lifecycle entry joined with the asset and the user who performed it."""
-    asset_tag: Optional[str] = None
+    asset_tag: str
     asset_name: str
     performed_by_name: Optional[str] = None
 
@@ -664,7 +347,27 @@ class InventoryItemResponse(InventoryItemBase):
 
 # --- Software & Licensing Schemas ---
 
-# Software products, licenses and seats: see app/routers/software.py.
+class SoftwareCreate(BaseModel):
+    name: str = Field(..., max_length=150)
+    vendor: Optional[str] = None
+    version: Optional[str] = None
+    license_type: str = "PERPETUAL"
+    total_licenses: int = 1
+    cost: Decimal = Decimal("0.00")
+    expiry_date: Optional[datetime] = None
+
+
+class SoftwareResponse(SoftwareCreate):
+    id: str
+    company_id: str
+    used_licenses: int
+    status: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class LicenseAssignRequest(BaseModel):
+    user_id: str
 
 
 # --- Vendors, PO & Maintenance Schemas ---
@@ -709,7 +412,6 @@ class PurchaseOrderResponse(PurchaseOrderCreate):
     id: str
     company_id: str
     status: str
-    created_by: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 

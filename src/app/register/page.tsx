@@ -11,40 +11,34 @@ type RegistrationRole = "IT_ADMIN" | "IT_AGENT" | "SUPER_ADMIN";
 
 export default function RegisterPage() {
   const router = useRouter();
+  // Which account types the server currently lets people sign up for.
+  const [open, setOpen] = useState<{ admin: boolean; agent: boolean } | null>(null);
   const [role, setRole] = useState<RegistrationRole>("IT_ADMIN");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [registrationKey, setRegistrationKey] = useState("");
   const [registrationKeyConfirm, setRegistrationKeyConfirm] = useState("");
-  // The platform has exactly one Super Admin. Until they register, the
-  // Super Admin option is offered and they create the Super Admin key.
+  // Whether the platform already has a Super Admin key. If not, this Super
+  // Admin creates it; afterwards every new Super Admin must enter it.
   const [superKeyExists, setSuperKeyExists] = useState<boolean | null>(null);
-  const [superRegistrationOpen, setSuperRegistrationOpen] = useState(false);
-  // The server decides which account types may sign up on their own.
-  const [itAdminSignupOpen, setItAdminSignupOpen] = useState(true);
 
   useEffect(() => {
-    Promise.allSettled([
-      apiFetch<{ exists: boolean; registration_open?: boolean }>("/api/auth/super-admin-key"),
-      apiFetch<{ it_admin?: boolean; super_admin?: boolean }>("/api/auth/registration-options"),
-    ]).then(([keyStatus, options]) => {
-      if (keyStatus.status === "fulfilled") {
-        setSuperKeyExists(keyStatus.value.exists);
-        setSuperRegistrationOpen(
-          Boolean(keyStatus.value.registration_open) &&
-            !(options.status === "fulfilled" && options.value.super_admin === false),
-        );
-      } else {
-        setSuperKeyExists(true);
-        setSuperRegistrationOpen(false);
-      }
-      if (options.status === "fulfilled" && options.value.it_admin === false) {
-        setItAdminSignupOpen(false);
-        setRole((current) => (current === "IT_ADMIN" ? "IT_AGENT" : current));
-      }
-    });
+    apiFetch<{ admin: boolean; agent: boolean }>("/api/auth/registration-options")
+      .then((options) => {
+        setOpen(options);
+        // Start on a type that is actually open.
+        setRole(options.admin ? "IT_ADMIN" : "IT_AGENT");
+      })
+      .catch(() => setOpen({ admin: true, agent: true })); // the server still enforces it
   }, []);
+
+  useEffect(() => {
+    if (role !== "SUPER_ADMIN" || superKeyExists !== null) return;
+    apiFetch<{ exists: boolean }>("/api/auth/super-admin-key")
+      .then((data) => setSuperKeyExists(data.exists))
+      .catch(() => setSuperKeyExists(true));
+  }, [role, superKeyExists]);
 
   const creatingSuperKey = role === "SUPER_ADMIN" && superKeyExists === false;
   const [error, setError] = useState("");
@@ -60,7 +54,7 @@ export default function RegisterPage() {
         if (registrationKey.length < 8) return setError("Create a Super Admin key of at least 8 characters.");
         if (registrationKey !== registrationKeyConfirm) return setError("The two keys do not match.");
       } else if (!registrationKey) {
-        return setError("Enter the Super Admin key.");
+        return setError("Enter the Super Admin key. An existing Super Admin can give it to you.");
       }
     }
 
@@ -68,7 +62,7 @@ export default function RegisterPage() {
     setSubmitting(true);
     try {
       // One sign-up flow for every role. IT Agents start with no organization
-      // until an IT Admin adds them from the Users page.
+      // until a Super Admin places them in one.
       await apiFetch("/api/auth/register", {
         method: "POST",
         body: JSON.stringify({
@@ -98,11 +92,11 @@ export default function RegisterPage() {
       <h2 className="text-3xl font-extrabold tracking-tight text-slate-950">Create Account</h2>
       <p className="mt-2 text-slate-500">
         {role === "IT_AGENT"
-          ? "Sign up with your work email. An IT Admin will add you to their organization."
+          ? "Sign up with your work email. A platform administrator will place you in an organization."
           : role === "SUPER_ADMIN"
             ? creatingSuperKey
-              ? "You are setting up the platform's only Super Admin: create the key you will enter at every sign-in."
-              : "Enter the Super Admin key."
+              ? "You are the first Super Admin: create the key that future Super Admins will need."
+              : "Super Admins need the key set by the first Super Admin."
             : "IT Admins get a new organization."}
       </p>
 
@@ -117,9 +111,9 @@ export default function RegisterPage() {
             }}
             className="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3.5 py-3 text-base font-normal text-slate-900 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
           >
-            {itAdminSignupOpen && <option value="IT_ADMIN">IT Admin</option>}
-            <option value="IT_AGENT">User</option>
-            {superRegistrationOpen && <option value="SUPER_ADMIN">Super Admin (platform setup)</option>}
+            {(open?.admin ?? true) && <option value="IT_ADMIN">IT Admin</option>}
+            {(open?.agent ?? true) && <option value="IT_AGENT">IT Agent</option>}
+            {(open?.admin ?? true) && <option value="SUPER_ADMIN">Super Admin (key required)</option>}
           </select>
         </label>
         <IconField
@@ -156,7 +150,7 @@ export default function RegisterPage() {
               value={registrationKey}
               onChange={(event) => setRegistrationKey(event.target.value)}
               autoComplete="off"
-              placeholder={creatingSuperKey ? "At least 8 characters" : "Your Super Admin key"}
+              placeholder={creatingSuperKey ? "At least 8 characters" : "Key from an existing Super Admin"}
             />
             {creatingSuperKey && (
               <>
@@ -169,16 +163,21 @@ export default function RegisterPage() {
                   autoComplete="off"
                 />
                 <p className="text-xs text-slate-500">
-                  Keep this key safe. You will enter it every time you sign in as Super Admin, and it cannot be shown
+                  Keep this key safe. Anyone who registers as a Super Admin later must enter it, and it cannot be shown
                   again.
                 </p>
               </>
             )}
           </>
         )}
+        {open && !open.admin && !open.agent && (
+          <p role="status" className="rounded-lg bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800">
+            Sign-up is closed. Ask your IT Admin (or the platform administrator) to create your account.
+          </p>
+        )}
         {errorBox}
         <button
-          disabled={submitting}
+          disabled={submitting || (open !== null && !open.admin && !open.agent)}
           className="w-full rounded-xl bg-brand-500 px-4 py-3.5 text-base font-bold text-white shadow-sm transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {submitting ? "Creating account…" : "Create Account"}

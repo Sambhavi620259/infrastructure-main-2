@@ -5,13 +5,11 @@ from app.core.config import settings
 
 # Initialize Database Engine
 engine = create_engine(
-    settings.DATABASE_URL,
-    pool_pre_ping=True,
-    # Connections are recycled so a database or proxy that drops idle ones never hands out a dead one.
-    pool_recycle=1800,
-    pool_size=settings.DB_POOL_SIZE,
-    max_overflow=settings.DB_MAX_OVERFLOW,
-    pool_timeout=30,
+    settings.DATABASE_URL, 
+    pool_pre_ping=True, 
+    pool_recycle=1800,  # drop connections the database or a proxy may have closed
+    pool_size=15, 
+    max_overflow=25
 )
 
 # Session Factory
