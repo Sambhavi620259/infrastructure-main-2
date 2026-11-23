@@ -577,6 +577,9 @@ rate_limit.reset_for_tests()
 print("Registration")
 # The defaults, before any switch is touched: public sign-up of IT Admins and users is closed.
 check("IT Admin sign-up is off by default", settings.ALLOW_PUBLIC_IT_ADMIN_SIGNUP is False, settings.ALLOW_PUBLIC_IT_ADMIN_SIGNUP)
+check("Super Admin sign-up is off by default", settings.ALLOW_PUBLIC_SUPER_ADMIN_SIGNUP is False, settings.ALLOW_PUBLIC_SUPER_ADMIN_SIGNUP)
+code, data, _ = raw("POST", "/auth/register", {"name": "Closed Boss", "email": "closed.boss@example.com", "password": PW, "role": "SUPER_ADMIN"})
+check("Super Admin registration is refused by default (403)", code == 403, (code, data))
 check("user (IT Agent) sign-up is off by default", settings.ALLOW_PUBLIC_AGENT_SIGNUP is False, settings.ALLOW_PUBLIC_AGENT_SIGNUP)
 code, data, _ = raw("GET", "/auth/registration-options")
 check("the register page is told IT Admin and user sign-up are closed",
@@ -606,11 +609,13 @@ code, data, _ = raw("POST", "/auth/register", {"name": "Regular User", "email": 
 check("ordinary user sign-up still works", code == 200, data)
 settings.ALLOW_PUBLIC_IT_ADMIN_SIGNUP = True
 code, data, _ = raw("POST", "/auth/register", {"name": "Second Boss", "email": "boss2@example.com", "password": PW, "role": "SUPER_ADMIN"})
-check("a second Super Admin cannot register", code == 403, data)
+check("with Super Admin sign-up closed, a second Super Admin cannot register", code == 403, data)
+settings.ALLOW_PUBLIC_SUPER_ADMIN_SIGNUP = True
+code, data, _ = raw("POST", "/auth/register", {"name": "Second Boss", "email": "boss2@example.com", "password": PW, "role": "SUPER_ADMIN"})
+check("even when Super Admin sign-up is switched on, a second Super Admin cannot register", code == 403, data)
 settings.ALLOW_PUBLIC_SUPER_ADMIN_SIGNUP = False
 code, data, _ = raw("POST", "/auth/register", {"name": "Boss", "email": "boss3@example.com", "password": PW, "role": "SUPER_ADMIN"})
 check("Super Admin sign-up can be closed", code == 403, data)
-settings.ALLOW_PUBLIC_SUPER_ADMIN_SIGNUP = True
 
 print("Who can manage whom")
 code, data, _ = raw("POST", "/auth/register", {"name": "Floating Agent", "email": "floating@example.com", "password": PW, "role": "IT_AGENT"})

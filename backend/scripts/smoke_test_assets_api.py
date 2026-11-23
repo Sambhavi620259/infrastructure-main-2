@@ -38,6 +38,7 @@ from app.core.config import settings as _settings
 # (security_test.py checks the closed defaults themselves.)
 _settings.ALLOW_PUBLIC_IT_ADMIN_SIGNUP = True
 _settings.ALLOW_PUBLIC_AGENT_SIGNUP = True
+_settings.ALLOW_PUBLIC_SUPER_ADMIN_SIGNUP = True  # the smoke test registers the first Super Admin through the form
 from app.core.database import Base, get_db
 from app.core.deps import get_current_user
 from app.core.security import issue_token
