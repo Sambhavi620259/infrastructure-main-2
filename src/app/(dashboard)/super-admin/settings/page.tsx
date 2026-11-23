@@ -5,7 +5,6 @@ import { apiFetch } from "@/lib/api";
 import { ContactCard, type CompanyContact } from "@/components/settings/contact-card";
 import {
   PLANS,
-  changeSuperAdminKey,
   getPlanFeatures,
   getProvisioningDefaults,
   planLabel,
@@ -51,7 +50,7 @@ export default function PlatformSettingsPage() {
       <header>
         <p className="text-[11px] font-bold uppercase tracking-wider text-violet-600">Super Admin · Settings</p>
         <h1 className="mt-1 text-2xl font-extrabold text-slate-950">Settings</h1>
-        <p className="mt-1 text-sm text-slate-500">Company contact details and office location, features per plan and the Super Admin key.</p>
+        <p className="mt-1 text-sm text-slate-500">Company contact details and office location, and features per plan.</p>
       </header>
 
       {error && (
@@ -129,72 +128,8 @@ export default function PlatformSettingsPage() {
           </button>
         </form>
 
-        <SuperKeyForm
-          onChanged={() => {
-            setNotice("Super Admin key changed. You will need the new key the next time you sign in.");
-            setError("");
-          }}
-          onError={setError}
-        />
       </section>
     </main>
-  );
-}
-
-function SuperKeyForm({ onChanged, onError }: { onChanged: () => void; onError: (message: string) => void }) {
-  const [current, setCurrent] = useState("");
-  const [next, setNext] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (next.length < 8) return onError("The new key needs at least 8 characters.");
-    if (next !== confirm) return onError("The new keys do not match.");
-    setBusy(true);
-    try {
-      await changeSuperAdminKey(current, next);
-      setCurrent("");
-      setNext("");
-      setConfirm("");
-      onChanged();
-    } catch (caught) {
-      onError(caught instanceof Error ? caught.message : "Could not change the key.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const inputClass = "mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-normal";
-
-  return (
-    <form onSubmit={submit} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-      <h2 className="text-sm font-bold text-slate-900">Super Admin key</h2>
-      <p className="mt-1 text-xs text-slate-500">
-        Entered, with your password, every time you sign in as Super Admin. Changing it takes effect at your next sign-in.
-      </p>
-      <div className="mt-4 space-y-3">
-        <label className="block text-xs font-semibold text-slate-700">
-          Current key
-          <input type="password" autoComplete="off" value={current} onChange={(e) => setCurrent(e.target.value)} className={inputClass} />
-        </label>
-        <label className="block text-xs font-semibold text-slate-700">
-          New key
-          <input type="password" autoComplete="off" value={next} onChange={(e) => setNext(e.target.value)} className={inputClass} />
-        </label>
-        <label className="block text-xs font-semibold text-slate-700">
-          Confirm new key
-          <input type="password" autoComplete="off" value={confirm} onChange={(e) => setConfirm(e.target.value)} className={inputClass} />
-        </label>
-      </div>
-      <button
-        type="submit"
-        disabled={busy || !current}
-        className="mt-5 rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-brand-700 disabled:opacity-50"
-      >
-        {busy ? "Saving…" : "Change key"}
-      </button>
-    </form>
   );
 }
 

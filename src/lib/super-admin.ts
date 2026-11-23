@@ -216,13 +216,6 @@ export function updateProvisioningDefaults(input: ProvisioningDefaults): Promise
   return apiFetch<ProvisioningDefaults>("/api/super-admin/settings", { method: "PUT", body: JSON.stringify(input) });
 }
 
-export function changeSuperAdminKey(currentKey: string, newKey: string): Promise<{ message: string }> {
-  return apiFetch("/api/auth/super-admin-key", {
-    method: "PUT",
-    body: JSON.stringify({ current_key: currentKey, new_key: newKey }),
-  });
-}
-
 /** "ADD_COMPANY_TENANT" -> "Add company tenant". */
 export function actionLabel(action: string): string {
   if (action === "USER_LOGIN") return "Signed in";

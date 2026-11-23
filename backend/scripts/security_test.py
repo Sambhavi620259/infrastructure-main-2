@@ -378,11 +378,9 @@ check("an IT Admin cannot remove an admin of another company", code == 404, data
 
 # --- Privilege escalation ---------------------------------------------------
 print("Privilege escalation")
-code, data = call("adminA", "POST", "/users", {"email": "boss@example.com", "full_name": "Boss", "password": "password123", "role": "SUPER_ADMIN",
-                                              "registrationKey": "whatever-key-1234", "registrationKeyConfirm": "whatever-key-1234"})
+code, data = call("adminA", "POST", "/users", {"email": "boss@example.com", "full_name": "Boss", "password": "password123", "role": "SUPER_ADMIN"})
 check("IT Admin cannot create a Super Admin", code == 403, data)
-code, data = call("adminA", "PUT", f"/users/{A['user']}", {"role": "SUPER_ADMIN",
-                                              "registrationKey": "whatever-key-1234", "registrationKeyConfirm": "whatever-key-1234"})
+code, data = call("adminA", "PUT", f"/users/{A['user']}", {"role": "SUPER_ADMIN"})
 check("IT Admin cannot promote a user to Super Admin", code == 403, data)
 code, data = call("adminA", "PUT", f"/users/{IDS['adminA']}", {"role": "EMPLOYEE"})
 check("IT Admin cannot change their own role", code == 400, data)
@@ -578,12 +576,10 @@ check("public IT Admin registration is refused when switched off", code == 403, 
 code, data, _ = raw("POST", "/auth/register", {"name": "Regular User", "email": "regular@example.com", "password": PW, "role": "IT_AGENT"})
 check("ordinary user sign-up still works", code == 200, data)
 settings.ALLOW_PUBLIC_IT_ADMIN_SIGNUP = True
-code, data, _ = raw("POST", "/auth/register", {"name": "Second Boss", "email": "boss2@example.com", "password": PW, "role": "SUPER_ADMIN",
-                                              "registrationKey": "whatever-key-1234", "registrationKeyConfirm": "whatever-key-1234"})
+code, data, _ = raw("POST", "/auth/register", {"name": "Second Boss", "email": "boss2@example.com", "password": PW, "role": "SUPER_ADMIN"})
 check("a second Super Admin cannot register", code == 403, data)
 settings.ALLOW_PUBLIC_SUPER_ADMIN_SIGNUP = False
-code, data, _ = raw("POST", "/auth/register", {"name": "Boss", "email": "boss3@example.com", "password": PW, "role": "SUPER_ADMIN",
-                                              "registrationKey": "whatever-key-1234", "registrationKeyConfirm": "whatever-key-1234"})
+code, data, _ = raw("POST", "/auth/register", {"name": "Boss", "email": "boss3@example.com", "password": PW, "role": "SUPER_ADMIN"})
 check("Super Admin sign-up can be closed", code == 403, data)
 settings.ALLOW_PUBLIC_SUPER_ADMIN_SIGNUP = True
 

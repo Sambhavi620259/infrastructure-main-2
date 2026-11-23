@@ -972,37 +972,22 @@ async def run_checks():
     ACTING["user_id"] = None
     check("IT Agents cannot open organization settings (403)", code == 403, body)
 
-    print("Super Admin key")
+    print("Super Admin sign-in (email and password only)")
     code, body = call("GET", "/auth/super-admin-key")
-    check("no Super Admin key exists yet; registration is open",
-          code == 200 and body == {"exists": False, "registration_open": True}, body)
-    def register_super(email, key, confirm=None):
+    check("Super Admin registration is open until one exists", code == 200 and body == {"registration_open": True}, body)
+    def register_super(email):
         return call("POST", "/auth/register", {"name": "Super Person", "email": email, "password": "password123",
-                                               "role": "SUPER_ADMIN", "registrationKey": key,
-                                               "registrationKeyConfirm": confirm})
-    code, body = register_super("sa1@example.com", "short", "short")
-    check("first Super Admin must create a key of 8+ characters", code == 400, body)
-    code, body = register_super("sa1@example.com", "my-platform-key", "different-key")
-    check("mismatched key confirmation is refused", code == 400 and "match" in str(body), body)
-    code, body = register_super("sa1@example.com", "my-platform-key", "my-platform-key")
-    check("first Super Admin registers and creates the key", code == 200 and body.get("role") == "SUPER_ADMIN", body)
+                                               "role": "SUPER_ADMIN"})
+    code, body = register_super("sa1@example.com")
+    check("first Super Admin registers with email and password", code == 200 and body.get("role") == "SUPER_ADMIN", body)
     code, body = call("GET", "/auth/super-admin-key")
-    check("key now exists (value never returned); registration is closed",
-          code == 200 and body == {"exists": True, "registration_open": False}, body)
-    with TestSession() as db:
-        from app.models.models import PlatformSetting
-        stored = db.get(PlatformSetting, "super_admin_key_hash").value
-    check("only a hash of the key is stored", "my-platform-key" not in stored and stored.startswith("$2"), stored[:10])
-    code, body = register_super("sa2@example.com", "my-platform-key")
-    check("only one Super Admin: a second cannot register, even with the key", code == 403 and "one Super Admin" in str(body), body)
-    code, body = call("PUT", "/auth/super-admin-key", {"current_key": "my-platform-key", "new_key": "another-key-99"})
-    check("an IT Admin cannot change the Super Admin key (403)", code == 403, body)
+    check("registration is closed after the first Super Admin", code == 200 and body == {"registration_open": False}, body)
+    code, body = register_super("sa2@example.com")
+    check("only one Super Admin: a second cannot register", code == 403 and "one Super Admin" in str(body), body)
+    code, body = call("POST", "/auth/login", {"email": "sa1@example.com", "password": "wrong-password-1", "role": "SUPER_ADMIN"})
+    check("Super Admin sign-in with a wrong password is refused (401)", code == 401, body)
     code, body = call("POST", "/auth/login", {"email": "sa1@example.com", "password": "password123", "role": "SUPER_ADMIN"})
-    check("Super Admin sign-in without the key is refused (401)", code == 401 and "key" in str(body), body)
-    code, body = call("POST", "/auth/login", {"email": "sa1@example.com", "password": "password123", "super_admin_key": "wrong-key-123"})
-    check("Super Admin sign-in with the wrong key is refused (401)", code == 401, body)
-    code, body = call("POST", "/auth/login", {"email": "sa1@example.com", "password": "password123", "super_admin_key": "my-platform-key"})
-    check("Super Admin signs in with password and key", code == 200 and body.get("role") == "SUPER_ADMIN", body)
+    check("Super Admin signs in with email and password", code == 200 and body.get("role") == "SUPER_ADMIN", body)
     code, body = call("POST", "/auth/login", {"email": "sa1@example.com", "password": "wrongpass1", "super_admin_key": "my-platform-key"})
     check("the key does not replace the password (401)", code == 401, body)
 

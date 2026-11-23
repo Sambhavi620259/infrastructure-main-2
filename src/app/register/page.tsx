@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { EnvelopeIcon, KeyIcon, LockClosedIcon, UserIcon } from "@heroicons/react/24/outline";
+import { EnvelopeIcon, LockClosedIcon, UserIcon } from "@heroicons/react/24/outline";
 import { apiFetch } from "@/lib/api";
 import { AuthLayout, IconField } from "@/components/auth/auth-layout";
 
@@ -15,28 +15,22 @@ export default function RegisterPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [registrationKey, setRegistrationKey] = useState("");
-  const [registrationKeyConfirm, setRegistrationKeyConfirm] = useState("");
-  // The platform has exactly one Super Admin. Until they register, the
-  // Super Admin option is offered and they create the Super Admin key.
-  const [superKeyExists, setSuperKeyExists] = useState<boolean | null>(null);
+  // The platform has exactly one Super Admin: the Super Admin option is offered until they register.
   const [superRegistrationOpen, setSuperRegistrationOpen] = useState(false);
   // The server decides which account types may sign up on their own.
   const [itAdminSignupOpen, setItAdminSignupOpen] = useState(true);
 
   useEffect(() => {
     Promise.allSettled([
-      apiFetch<{ exists: boolean; registration_open?: boolean }>("/api/auth/super-admin-key"),
+      apiFetch<{ registration_open?: boolean }>("/api/auth/super-admin-key"),
       apiFetch<{ it_admin?: boolean; super_admin?: boolean }>("/api/auth/registration-options"),
     ]).then(([keyStatus, options]) => {
       if (keyStatus.status === "fulfilled") {
-        setSuperKeyExists(keyStatus.value.exists);
         setSuperRegistrationOpen(
           Boolean(keyStatus.value.registration_open) &&
             !(options.status === "fulfilled" && options.value.super_admin === false),
         );
       } else {
-        setSuperKeyExists(true);
         setSuperRegistrationOpen(false);
       }
       if (options.status === "fulfilled" && options.value.it_admin === false) {
@@ -46,7 +40,6 @@ export default function RegisterPage() {
     });
   }, []);
 
-  const creatingSuperKey = role === "SUPER_ADMIN" && superKeyExists === false;
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -55,14 +48,6 @@ export default function RegisterPage() {
     if (name.trim().length < 2) return setError("Enter your full name.");
     if (!/^\S+@\S+\.\S+$/.test(email)) return setError("Enter a valid email address.");
     if (password.length < 8) return setError("Password must be at least 8 characters.");
-    if (role === "SUPER_ADMIN") {
-      if (creatingSuperKey) {
-        if (registrationKey.length < 8) return setError("Create a Super Admin key of at least 8 characters.");
-        if (registrationKey !== registrationKeyConfirm) return setError("The two keys do not match.");
-      } else if (!registrationKey) {
-        return setError("Enter the Super Admin key.");
-      }
-    }
 
     setError("");
     setSubmitting(true);
@@ -76,8 +61,6 @@ export default function RegisterPage() {
           email: email.trim(),
           password,
           role,
-          registrationKey: role === "SUPER_ADMIN" ? registrationKey : undefined,
-          registrationKeyConfirm: creatingSuperKey ? registrationKeyConfirm : undefined,
         }),
       });
       router.replace(`/login?role=${role}&email=${encodeURIComponent(email.trim())}`);
@@ -100,9 +83,7 @@ export default function RegisterPage() {
         {role === "IT_AGENT"
           ? "Sign up with your work email. An IT Admin will add you to their organization."
           : role === "SUPER_ADMIN"
-            ? creatingSuperKey
-              ? "You are setting up the platform's only Super Admin: create the key you will enter at every sign-in."
-              : "Enter the Super Admin key."
+            ? "You are setting up the platform's only Super Admin."
             : "IT Admins get a new organization."}
       </p>
 
@@ -147,35 +128,6 @@ export default function RegisterPage() {
           autoComplete="new-password"
           placeholder="At least 8 characters"
         />
-        {role === "SUPER_ADMIN" && superKeyExists !== null && (
-          <>
-            <IconField
-              label={creatingSuperKey ? "Create Super Admin key" : "Super Admin key"}
-              icon={KeyIcon}
-              type="password"
-              value={registrationKey}
-              onChange={(event) => setRegistrationKey(event.target.value)}
-              autoComplete="off"
-              placeholder={creatingSuperKey ? "At least 8 characters" : "Your Super Admin key"}
-            />
-            {creatingSuperKey && (
-              <>
-                <IconField
-                  label="Confirm Super Admin key"
-                  icon={KeyIcon}
-                  type="password"
-                  value={registrationKeyConfirm}
-                  onChange={(event) => setRegistrationKeyConfirm(event.target.value)}
-                  autoComplete="off"
-                />
-                <p className="text-xs text-slate-500">
-                  Keep this key safe. You will enter it every time you sign in as Super Admin, and it cannot be shown
-                  again.
-                </p>
-              </>
-            )}
-          </>
-        )}
         {errorBox}
         <button
           disabled={submitting}

@@ -4,7 +4,6 @@ from datetime import timedelta
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import func
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -19,7 +18,6 @@ from app.services.notification_service import notify, notify_company, notify_sup
 from app.services.agent_id_service import new_agent_id
 from app.services.catalog_service import ensure_default_catalog
 from app.services.platform_settings_service import get_provisioning_defaults
-from app.services.super_key_service import MIN_KEY_LENGTH, set_super_key, super_key_exists, verify_super_key
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -59,16 +57,6 @@ def login(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Your organization is suspended. Contact the platform administrator."
         )
-    # A Super Admin signs in with password and the Super Admin key.
-    if user.role == PlatformRole.SUPER_ADMIN and super_key_exists(db) and not verify_super_key(db, login_data.super_admin_key):
-        record_login_failure(email)
-        log_audit_event(db=db, action="SUPER_ADMIN_KEY_FAILED", entity="User", user_id=user.id, entity_id=user.id)
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Enter the correct Super Admin key." if login_data.super_admin_key else "Super Admins must enter the Super Admin key.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
     clear_login_failures(email)
     access_token = issue_token(user, timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
 
@@ -130,7 +118,6 @@ def register(
     }
     backend_role = role_map.get(register_data.role, PlatformRole.IT_ADMIN)
 
-    creating_super_key = False
     if register_data.role == "IT_AGENT":
         # Agents sign up on their own, without an organization. An IT Admin
         # adds them to one from the Users page (POST /users/{id}/add-to-organization).
@@ -144,23 +131,6 @@ def register(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="This platform already has its Super Admin. Only one Super Admin is allowed."
                 )
-            key = register_data.registrationKey or ""
-            if super_key_exists(db):
-                if not verify_super_key(db, key):
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Incorrect Super Admin key."
-                    )
-            else:
-                # No key yet: this Super Admin creates it.
-                if len(key) < MIN_KEY_LENGTH:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Create a Super Admin key of at least {MIN_KEY_LENGTH} characters."
-                    )
-                if key != (register_data.registrationKeyConfirm or ""):
-                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The two keys do not match.")
-                creating_super_key = True
         
         # Create new company
         unique_suffix = uuid.uuid4().hex[:8]
@@ -213,15 +183,7 @@ def register(
             db, f"New organization: {company.name}", f"Created by {register_data.name} ({email}).",
             "/super-admin/companies",
         )
-    if creating_super_key:
-        db.flush()  # user.id, recorded as who set the key
-        set_super_key(db, register_data.registrationKey, user.id)
-    try:
-        db.commit()
-    except IntegrityError:
-        # Someone else created the first key at the same moment.
-        db.rollback()
-        raise HTTPException(status_code=409, detail="A Super Admin key was just created. Register again with that key.")
+    db.commit()
     db.refresh(user)
 
     access_token = issue_token(user, timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
@@ -379,32 +341,9 @@ def registration_options(db: Session = Depends(get_db)):
 
 @router.get("/super-admin-key")
 def super_admin_key_status(db: Session = Depends(get_db)):
-    """Public: whether a Super Admin key exists and whether Super Admin
-    registration is still open (only one Super Admin is allowed). Never reveals the key."""
+    """Public: whether Super Admin registration is still open (only one Super Admin is allowed)."""
     return {
-        "exists": super_key_exists(db),
         "registration_open": db.query(User.id).filter(User.role == PlatformRole.SUPER_ADMIN).first() is None,
     }
 
 
-class SuperKeyChange(BaseModel):
-    current_key: str
-    new_key: str = Field(..., min_length=MIN_KEY_LENGTH, max_length=128)
-
-
-@router.put("/super-admin-key")
-def change_super_admin_key(
-    body: SuperKeyChange,
-    db: Session = Depends(get_db),
-    _limited: None = Depends(auth_rate_limit),
-    current_user: User = Depends(get_current_user)
-):
-    """A Super Admin replaces the key; the current key is required."""
-    if current_user.role != PlatformRole.SUPER_ADMIN:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only a Super Admin can change this key.")
-    if super_key_exists(db) and not verify_super_key(db, body.current_key):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current Super Admin key is incorrect.")
-    set_super_key(db, body.new_key, current_user.id)
-    db.commit()
-    log_audit_event(db=db, action="CHANGE_SUPER_ADMIN_KEY", entity="PlatformSetting", user_id=current_user.id)
-    return {"message": "Super Admin key changed."}
