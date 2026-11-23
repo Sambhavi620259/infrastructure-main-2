@@ -30,11 +30,18 @@ from app.main import app  # noqa: E402
 from app.models.models import Company, PlatformRole, Subscription, User  # noqa: E402
 
 PORT = 8769
-engine = create_engine(
-    f"sqlite:///{os.path.join(tempfile.mkdtemp(), 'security.db')}", connect_args={"check_same_thread": False}
-)
+# SECURITY_TEST_DATABASE_URL runs the checks on an empty, already migrated, disposable PostgreSQL database
+# (its name must contain "test"); by default a throw-away SQLite file is used.
+if os.environ.get("SECURITY_TEST_DATABASE_URL"):
+    from _dbguard import require_disposable  # noqa: E402
+
+    engine = create_engine(require_disposable(os.environ["SECURITY_TEST_DATABASE_URL"], "SECURITY_TEST_DATABASE_URL"))
+else:
+    engine = create_engine(
+        f"sqlite:///{os.path.join(tempfile.mkdtemp(), 'security.db')}", connect_args={"check_same_thread": False}
+    )
+    Base.metadata.create_all(engine)
 Session = sessionmaker(bind=engine)
-Base.metadata.create_all(engine)
 
 TOKENS: dict = {}
 IDS: dict = {}

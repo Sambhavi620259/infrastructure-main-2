@@ -33,7 +33,8 @@ from app.models.models import AssetAssignment, AuditLog, Company, PlatformRole, 
 PORT = 8771
 # WORKFLOW_DATABASE_URL runs against a real, empty, already-migrated database (e.g. PostgreSQL).
 if os.environ.get("WORKFLOW_DATABASE_URL"):
-    engine = create_engine(os.environ["WORKFLOW_DATABASE_URL"])
+    from _dbguard import require_disposable
+    engine = create_engine(require_disposable(os.environ["WORKFLOW_DATABASE_URL"], "WORKFLOW_DATABASE_URL"))
 else:
     engine = create_engine(f"sqlite:///{os.path.join(tempfile.mkdtemp(), 'workflow.db')}",
                            connect_args={"check_same_thread": False})

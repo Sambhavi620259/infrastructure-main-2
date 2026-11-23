@@ -39,7 +39,8 @@ from app.services.access_service import expire_access_grants  # noqa: E402
 PORT = 8772
 ON_POSTGRES = bool(os.environ.get("TICKET_DATABASE_URL"))
 if ON_POSTGRES:
-    engine = create_engine(os.environ["TICKET_DATABASE_URL"], pool_size=20)
+    from _dbguard import require_disposable
+    engine = create_engine(require_disposable(os.environ["TICKET_DATABASE_URL"], "TICKET_DATABASE_URL"), pool_size=20)
 else:
     engine = create_engine(f"sqlite:///{os.path.join(tempfile.mkdtemp(), 'tickets.db')}",
                            connect_args={"check_same_thread": False})

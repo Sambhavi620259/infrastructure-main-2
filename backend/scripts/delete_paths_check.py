@@ -30,7 +30,8 @@ from app.main import app  # noqa: E402
 from app.models.models import Company, PlatformRole, Subscription, User  # noqa: E402
 
 PORT = 8774
-engine = create_engine(os.environ["DELETE_CHECK_DATABASE_URL"], pool_size=10)
+from _dbguard import require_disposable
+engine = create_engine(require_disposable(os.environ["DELETE_CHECK_DATABASE_URL"], "DELETE_CHECK_DATABASE_URL"), pool_size=10)
 Session = sessionmaker(bind=engine)
 
 TOKENS = {}

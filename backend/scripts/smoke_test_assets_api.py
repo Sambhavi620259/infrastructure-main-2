@@ -57,7 +57,8 @@ WS_BASE = f"ws://127.0.0.1:{PORT}/api"
 # database such as PostgreSQL; by default a throwaway SQLite file is used.
 DATABASE_URL = os.environ.get("SMOKE_DATABASE_URL")
 if DATABASE_URL:
-    engine = create_engine(DATABASE_URL)
+    from _dbguard import require_disposable
+    engine = create_engine(require_disposable(DATABASE_URL, "SMOKE_DATABASE_URL"))
 else:
     db_path = os.path.join(tempfile.mkdtemp(), "smoke.db")
     engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
