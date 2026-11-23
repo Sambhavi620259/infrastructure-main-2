@@ -85,6 +85,8 @@ class Settings(BaseSettings):
         problems = []
         if self.SECRET_KEY == _DEFAULT_SECRET or len(self.SECRET_KEY) < 32:
             problems.append("JWT_SECRET must be set to a random value of at least 32 characters")
+        if "CHANGE_ME" in self.SECRET_KEY or "CHANGE_ME" in self.DATABASE_URL:
+            problems.append("a CHANGE_ME placeholder from the example environment file is still in JWT_SECRET or DATABASE_URL")
         if self.DATABASE_URL == _DEFAULT_DATABASE_URL:
             problems.append("DATABASE_URL is not set (the development default must never run in production)")
         elif "itam_password" in self.DATABASE_URL:

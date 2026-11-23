@@ -668,6 +668,52 @@ check("an IT Admin's request reaches the Super Admin, with a link that exists",
 code, data, _ = raw("POST", "/auth/forgot-password", {"email": "nobody.here@example.com"})
 check("an unknown address gets the same answer", code == 200 and "If that account exists" in data.get("message", ""), data)
 
+print("Tokens and CORS")
+import base64 as _b64  # noqa: E402
+from datetime import datetime as _dt, timedelta as _td  # noqa: E402
+from jose import jwt as _jwt  # noqa: E402
+
+with Session() as db:
+    _admin_row = db.query(User).filter(User.id == IDS["adminA"]).first()
+    _good = issue_token(_admin_row)
+    _expired = issue_token(_admin_row, expires_delta=_td(seconds=-30))
+_claims = _jwt.get_unverified_claims(_good)
+code, data, _ = raw("GET", "/profile", token=_good)
+check("a fresh token is accepted", code == 200, (code, data))
+code, data, _ = raw("GET", "/profile", token=_expired)
+check("an expired token is refused (401)", code == 401, (code, data))
+_forged = _jwt.encode(_claims, "not-the-server-secret-" + "x" * 32, algorithm="HS256")
+code, data, _ = raw("GET", "/profile", token=_forged)
+check("a token signed with another secret is refused (401)", code == 401, (code, data))
+_head = _b64.urlsafe_b64encode(b'{"alg":"none","typ":"JWT"}').rstrip(b"=").decode()
+_body = _b64.urlsafe_b64encode(json.dumps({**_claims, "sub": IDS["super"]}).encode()).rstrip(b"=").decode()
+code, data, _ = raw("GET", "/profile", token=f"{_head}.{_body}.")
+check("an unsigned token (alg none) naming the Super Admin is refused (401)", code == 401, (code, data))
+_parts = _good.split(".")
+_swapped = _b64.urlsafe_b64encode(json.dumps({**_claims, "sub": IDS["super"]}).encode()).rstrip(b"=").decode()
+code, data, _ = raw("GET", "/profile", token=f"{_parts[0]}.{_swapped}.{_parts[2]}")
+check("a token whose payload was edited to the Super Admin is refused (401)", code == 401, (code, data))
+_no_exp = {k: v for k, v in _claims.items() if k != "exp"}
+code, data, _ = raw("GET", "/profile", token=_jwt.encode(_no_exp, settings.SECRET_KEY, algorithm="HS256"))
+check("a correctly signed token with no expiry is refused (401)", code == 401, (code, data))
+_ghost = {**_claims, "sub": "00000000-0000-0000-0000-000000000000"}
+code, data, _ = raw("GET", "/profile", token=_jwt.encode(_ghost, settings.SECRET_KEY, algorithm="HS256"))
+check("a correctly signed token for a user that does not exist is refused (401)", code == 401, (code, data))
+code, data, _ = raw("GET", "/profile", token=_jwt.encode({**_claims, "pv": "old-password-fingerprint"}, settings.SECRET_KEY, algorithm="HS256"))
+check("a token issued under a different password is refused (401)", code == 401, (code, data))
+code, data, _ = raw("GET", "/users")
+check("a request with no token is refused (401)", code == 401, (code, data))
+_allowed = settings.CORS_ORIGINS[0]
+code, data, hdrs = raw("GET", "/health/live", headers={"Origin": _allowed})
+hdrs = {k.lower(): v for k, v in hdrs.items()}
+check("a configured origin is allowed by CORS", hdrs.get("access-control-allow-origin") == _allowed, hdrs)
+code, data, hdrs = raw("GET", "/health/live", headers={"Origin": "https://evil.example.com"})
+hdrs = {k.lower(): v for k, v in hdrs.items()}
+check("another website's origin gets no CORS permission", "access-control-allow-origin" not in hdrs, hdrs)
+code, data, hdrs = raw("OPTIONS", "/users", headers={"Origin": "https://evil.example.com", "Access-Control-Request-Method": "GET"})
+hdrs = {k.lower(): v for k, v in hdrs.items()}
+check("a preflight from another website is not approved", "access-control-allow-origin" not in hdrs, (code, hdrs))
+
 print("Limits and headers")
 code, data, hdrs = raw("GET", "/health")
 hdrs = {k.lower(): v for k, v in hdrs.items()}

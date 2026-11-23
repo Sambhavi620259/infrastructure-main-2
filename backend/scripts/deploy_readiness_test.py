@@ -303,5 +303,54 @@ check("start-up fails (non-zero exit) when production configuration is missing",
 check("and the log says what is unsafe", "Unsafe production configuration" in text and "JWT_SECRET" in text, text[-300:])
 check("and the log does not contain the database password", DB_PASSWORD_MARKER not in text, text[-300:])
 
+print("Configuration files and committed secrets")
+import re  # noqa: E402
+
+REPO = os.path.join(BACKEND, "..")
+template = os.path.join(REPO, "deploy", "ec2", "itam.env.example")
+values = {}
+for line in open(template):
+    line = line.strip()
+    if line and not line.startswith("#") and "=" in line:
+        key, _, value = line.partition("=")
+        values[key] = value
+check("the staging environment template exists and names the required variables",
+      all(k in values for k in ("ENVIRONMENT", "DATABASE_URL", "JWT_SECRET", "CORS_ORIGINS", "TRUSTED_PROXY_COUNT")), sorted(values))
+msg = None
+try:
+    Settings(ENVIRONMENT=values["ENVIRONMENT"], SECRET_KEY=values["JWT_SECRET"], DATABASE_URL=values["DATABASE_URL"],
+             CORS_ORIGINS=values["CORS_ORIGINS"]).check_production_safety()
+except RuntimeError as error:
+    msg = str(error)
+check("the template cannot be started as it is: its CHANGE_ME placeholders are refused", msg is not None and "CHANGE_ME" in msg, msg)
+check("the template defaults keep public sign-up closed",
+      all(values.get(k) == "false" for k in ("ALLOW_PUBLIC_IT_ADMIN_SIGNUP", "ALLOW_PUBLIC_AGENT_SIGNUP", "ALLOW_PUBLIC_SUPER_ADMIN_SIGNUP")), values)
+tracked = subprocess.run(["git", "ls-files"], cwd=REPO, capture_output=True, text=True)
+if tracked.returncode == 0 and tracked.stdout.strip():
+    files = [f for f in tracked.stdout.splitlines() if not f.endswith((".png", ".jpg", ".ico", ".svg", ".woff2", ".lock"))
+             and "package-lock" not in f and "node_modules" not in f]
+    check("no .env file is committed", not [f for f in files if os.path.basename(f) in (".env", ".env.local", ".env.production")],
+          [f for f in files if os.path.basename(f).startswith(".env") and f.endswith(("env", "local", "production"))])
+    patterns = {"AWS access key": re.compile(r"AKIA[0-9A-Z]{16}"), "private key": re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+                "AWS secret key": re.compile(r"aws_secret_access_key\s*[=:]\s*['\"]?[A-Za-z0-9/+=]{40}")}
+    hits = []
+    for name in files:
+        try:
+            body = open(os.path.join(REPO, name), errors="ignore").read()
+        except OSError:
+            continue
+        hits += [f"{name}: {label}" for label, pattern in patterns.items() if pattern.search(body)]
+    check("no AWS keys or private keys are committed", hits == [], hits)
+    # Environment variables that hold real values must come from the environment, not from code.
+    code_hits = []
+    for name in files:
+        if name.startswith("backend/app/") and name.endswith(".py"):
+            body = open(os.path.join(REPO, name), errors="ignore").read()
+            if re.search(r"(password|secret)\s*=\s*['\"][^'\"]{8,}['\"]", body, re.I) and "config.py" not in name:
+                code_hits.append(name)
+    check("no password or secret is assigned from a string literal in application code", code_hits == [], code_hits)
+else:
+    print("  (skipped: not a git checkout)")
+
 print(f"\n{sum(RESULTS)}/{len(RESULTS)} passed")
 sys.exit(0 if all(RESULTS) else 1)
