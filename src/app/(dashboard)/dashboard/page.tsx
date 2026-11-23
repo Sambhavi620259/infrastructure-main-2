@@ -21,9 +21,7 @@ import { listInventoryRequests, listMovements, type InventoryRequest, type Stock
 import { listVendors, type Vendor } from "@/lib/procurement";
 import { getProfile, type Profile } from "@/lib/profile";
 import { getAssetRequestCounts, isOpenTicket, listAssetRequests, type AssetRequest, type AssetRequestCounts } from "@/lib/tickets";
-import { listUnassignedAgents } from "@/lib/users";
 import { assetLabel, type DashboardMetrics } from "@/types/asset";
-import type { AppUser } from "@/types/user";
 import { TicketStatusBadge, TicketTypeChip, ticketNumber } from "@/components/tickets/ticket-actions";
 
 const MOVEMENT_LABEL: Record<string, string> = {
@@ -69,7 +67,6 @@ export default function DashboardPage() {
   const [ticketCounts, setTicketCounts] = useState<AssetRequestCounts | null>(null);
   const [openTickets, setOpenTickets] = useState<AssetRequest[] | null>(null);
   const [stockRequests, setStockRequests] = useState<InventoryRequest[] | null>(null);
-  const [signups, setSignups] = useState<AppUser[] | null>(null);
   const [movements, setMovements] = useState<StockMovement[] | null>(null);
   const [vendors, setVendors] = useState<Vendor[] | null>(null);
 
@@ -99,8 +96,7 @@ export default function DashboardPage() {
       listInventoryRequests("PENDING").then(setStockRequests).catch(() => setStockRequests([]));
       listVendors().then(setVendors).catch(() => setVendors([]));
     }
-    if (isAdmin) listUnassignedAgents().then(setSignups).catch(() => setSignups([]));
-  }, [profile, sections, isAdmin]);
+  }, [profile, sections]);
 
   const problems = openTickets?.filter((ticket) => ticket.ticket_type === "ISSUE").length;
   const firstName = profile?.name.split(" ")[0] ?? "";
@@ -123,7 +119,6 @@ export default function DashboardPage() {
     ["Pending approvals", metrics?.pending_approvals ?? ticketCounts?.pending, "Tickets, stock and POs", TicketIcon, "/requests", sections.has("tickets")],
     ["Problems to resolve", problems, "Reported on users' assets", WrenchScrewdriverIcon, "/requests", sections.has("tickets")],
     ["Stock requests", stockRequests?.length, "Waiting for approval", InboxStackIcon, "/requests?tab=stock", sections.has("inventory")],
-    ["New sign-ups", signups?.length, "Users to add", UserPlusIcon, "/users", isAdmin],
   ];
 
   const quickActions: [string, string, string, typeof CubeIcon, boolean][] = [
@@ -290,21 +285,6 @@ export default function DashboardPage() {
             </Panel>
           )}
 
-          {isAdmin && signups !== null && signups.length > 0 && (
-            <Panel title="New sign-ups" href="/users" linkLabel="Add to organization" count={signups.length}>
-              <ul className="divide-y divide-slate-100">
-                {signups.slice(0, 4).map((user) => (
-                  <li key={user.id} className="flex items-center justify-between gap-3 px-4 py-2.5 text-xs">
-                    <span className="min-w-0">
-                      <span className="block font-semibold text-slate-800">{user.full_name}</span>
-                      <span className="block truncate text-slate-500">{user.email}</span>
-                    </span>
-                    <span className="shrink-0 text-[11px] text-slate-400">{timeAgo(user.created_at)}</span>
-                  </li>
-                ))}
-              </ul>
-            </Panel>
-          )}
         </div>
       </section>
 

@@ -79,14 +79,17 @@ export async function deleteDepartment(departmentId: string): Promise<void> {
   }
 }
 
-/** GET /api/users/unassigned — IT Agents who signed up and are not in any organization yet. */
+/** GET /api/users/unassigned — IT Agents who signed up and are not in any organization yet. Super Admin only. */
 export function listUnassignedAgents(): Promise<AppUser[]> {
   return apiFetch<AppUser[]>("/api/users/unassigned");
 }
 
-/** POST /api/users/{id}/add-to-organization — move a self-registered agent into the admin's organization. */
-export function addToOrganization(userId: string): Promise<AppUser> {
-  return apiFetch<AppUser>(`/api/users/${encodeURIComponent(userId)}/add-to-organization`, { method: "POST" });
+/** POST /api/users/{id}/add-to-organization — the Super Admin places a self-registered agent in an organization. */
+export function addToOrganization(userId: string, companyId?: string): Promise<AppUser> {
+  return apiFetch<AppUser>(`/api/users/${encodeURIComponent(userId)}/add-to-organization`, {
+    method: "POST",
+    body: JSON.stringify(companyId ? { company_id: companyId } : {}),
+  });
 }
 
 /** DELETE /api/users/{id} — deactivates the account (it can no longer sign in). Reversible. */

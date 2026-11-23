@@ -85,8 +85,8 @@ def register(
 ):
     """
     Register a new user. IT_ADMIN and SUPER_ADMIN create a new company.
-    IT_AGENT (stored as EMPLOYEE) signs up with no organization until an IT
-    Admin adds them.
+    IT_AGENT (stored as EMPLOYEE) signs up with no organization until the
+    Super Admin places them.
     """
     email = register_data.email.strip().lower()
     # Public sign-up of administrators can be switched off (a Super Admin then adds them).
@@ -119,8 +119,8 @@ def register(
     backend_role = role_map.get(register_data.role, PlatformRole.IT_ADMIN)
 
     if register_data.role == "IT_AGENT":
-        # Agents sign up on their own, without an organization. An IT Admin
-        # adds them to one from the Users page (POST /users/{id}/add-to-organization).
+        # Agents sign up on their own, without an organization. The Super Admin
+        # places them (POST /users/{id}/add-to-organization).
         pass
     else:
         # IT_ADMIN or SUPER_ADMIN - create new company
@@ -175,9 +175,6 @@ def register(
             db, f"New user sign-up: {user.full_name}",
             f"{user.email} is waiting to be added to an organization.", "/super-admin",
         )
-        for admin in db.query(User).filter(User.role == PlatformRole.IT_ADMIN, User.status == "ACTIVE").all():
-            notify(db, admin, f"New user sign-up: {user.full_name}",
-                   f"{user.email} is waiting to be added to an organization.", "/users")
     elif company is not None and backend_role == PlatformRole.IT_ADMIN:
         notify_super_admins(
             db, f"New organization: {company.name}", f"Created by {register_data.name} ({email}).",

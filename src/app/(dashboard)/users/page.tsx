@@ -4,9 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import {
-  addToOrganization,
   listDepartments,
-  listUnassignedAgents,
   listUsers,
   reactivateUser,
   removeUser,
@@ -21,15 +19,8 @@ import {
   type Department,
 } from "@/types/user";
 
-function formatDay(value: string): string {
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "—";
-  return parsed.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
-}
-
 export default function UsersPage() {
   const [users, setUsers] = useState<AppUser[]>([]);
-  const [signups, setSignups] = useState<AppUser[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [currentUserId, setCurrentUserId] = useState("");
   const [query, setQuery] = useState("");
@@ -41,11 +32,10 @@ export default function UsersPage() {
 
   const load = useCallback(() => {
     setLoading(true);
-    Promise.all([listUsers({ limit: 200 }), listUnassignedAgents()])
-      .then(([userData, signupData]) => {
+    listUsers({ limit: 200 })
+      .then((userData) => {
         // This page is for ordinary users only; IT Admins and the Super Admin are managed elsewhere.
         setUsers(userData.filter((user) => user.role === "EMPLOYEE"));
-        setSignups(signupData);
         setError("");
       })
       .catch((caught) => {
@@ -165,68 +155,6 @@ export default function UsersPage() {
             ×
           </button>
         </div>
-      )}
-
-      {signups.length > 0 && (
-        <section className="overflow-hidden rounded-xl border border-amber-200 bg-white shadow-sm">
-          <div className="border-b border-amber-100 bg-amber-50/60 px-5 py-4">
-            <h2 className="font-semibold text-slate-900">New user sign-ups ({signups.length})</h2>
-            <p className="mt-1 text-sm text-slate-600">
-              These users registered on their own and are not in any organization yet. Add them to yours to give
-              them access, or remove them.
-            </p>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="min-w-[760px] w-full text-left">
-              <thead className="bg-slate-50 text-[11px] font-bold text-slate-600">
-                <tr>
-                  <th className="px-4 py-3">Name</th>
-                  <th className="px-4 py-3">Email</th>
-                  <th className="px-4 py-3">User ID</th>
-                  <th className="px-4 py-3">Signed up</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {signups.map((agent) => (
-                  <tr key={agent.id} className="text-sm hover:bg-slate-50">
-                    <td className="px-4 py-3 font-semibold text-slate-900">{agent.full_name}</td>
-                    <td className="px-4 py-3 text-slate-600">{agent.email}</td>
-                    <td className="px-4 py-3 font-mono text-xs text-slate-600">{agent.agent_id ?? "—"}</td>
-                    <td className="px-4 py-3 text-slate-600">{formatDay(agent.created_at)}</td>
-                    <td className="px-4 py-3">
-                      <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${statusBadgeClass(agent.status)}`}>
-                        {agent.status}
-                      </span>
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-right">
-                      <span className="inline-flex items-center gap-4">
-                        {agent.status === "ACTIVE" && confirmRemove !== agent.id && (
-                          <button
-                            type="button"
-                            disabled={busyId === agent.id}
-                            onClick={() =>
-                              act(
-                                agent.id,
-                                () => addToOrganization(agent.id),
-                                `${agent.full_name} added to your organization. They can now use their dashboard.`,
-                              )
-                            }
-                            className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-brand-700 disabled:opacity-50"
-                          >
-                            Add to organization
-                          </button>
-                        )}
-                        {removeControls(agent)}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
       )}
 
       <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">

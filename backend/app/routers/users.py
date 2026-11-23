@@ -21,7 +21,13 @@ from app.services.notification_service import notify
 
 router = APIRouter(prefix="/users", tags=["Users Management"])
 
+
+class AddToOrganization(BaseModel):
+    company_id: Optional[str] = None
+
 _admins = require_roles([PlatformRole.SUPER_ADMIN, PlatformRole.IT_ADMIN])
+# People who signed up on their own belong to nobody yet. Only the Super Admin sees them and places them.
+_super_only = require_roles([PlatformRole.SUPER_ADMIN])
 # Full user records (emails, roles, status). IT Agents (EMPLOYEE) are not
 # included: they get names only, from GET /users/directory.
 _directory_readers = require_roles([
@@ -115,19 +121,17 @@ def _is_unassigned_agent(user: User) -> bool:
 _IT_ADMIN_MANAGES = {PlatformRole.EMPLOYEE, PlatformRole.SUB_ADMIN, PlatformRole.REPORTING_USER}
 
 
-def _manageable_user(db: Session, user_id: str, current_user: User, tenant_company_id: Optional[str],
-                     allow_unassigned: bool = False) -> User:
+def _manageable_user(db: Session, user_id: str, current_user: User, tenant_company_id: Optional[str]) -> User:
     """
-    A user this admin may act on: anyone in their own company, and (only when
-    allow_unassigned is set, to add them to the company) an IT Agent who is not in any
-    organization yet. An IT Admin cannot act on another IT Admin or on the Super Admin.
-    The Super Admin may act on anyone.
+    A user this admin may act on: anyone in their own company. A person who is not in any
+    organization yet, or who is in another company, is "not found" to an IT Admin. An IT
+    Admin cannot act on another IT Admin or on the Super Admin. The Super Admin may act on anyone.
     """
     user = db.query(User).filter(User.id == user_id).first()
     if user and current_user.role != PlatformRole.SUPER_ADMIN:
         company_id = tenant_company_id or current_user.company_id
         in_company = user.company_id is not None and user.company_id == company_id
-        if not in_company and not (allow_unassigned and _is_unassigned_agent(user)):
+        if not in_company:
             user = None
         elif user.role not in _IT_ADMIN_MANAGES and user.id != current_user.id:
             raise HTTPException(status_code=403, detail="Only the Super Admin can manage IT Admin and Super Admin accounts.")
@@ -279,9 +283,9 @@ def list_unassigned_agents(
     skip: int = Query(0, ge=0),
     limit: int = Query(200, ge=1, le=500),
     db: Session = Depends(get_db),
-    current_user: User = Depends(_admins),
+    current_user: User = Depends(_super_only),
 ):
-    """IT Agents who signed up on their own and are not in any organization yet, newest first."""
+    """IT Agents who signed up on their own and are not in any organization yet, newest first. Super Admin only."""
     return (
         db.query(User)
         .filter(User.company_id.is_(None), User.role == PlatformRole.EMPLOYEE)
@@ -295,22 +299,34 @@ def list_unassigned_agents(
 @router.post("/{user_id}/add-to-organization", response_model=UserResponse)
 def add_agent_to_organization(
     user_id: str,
+    body: Optional[AddToOrganization] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(_admins),
-    tenant_company_id: Optional[str] = Depends(get_tenant_company_id)
+    current_user: User = Depends(_super_only),
 ):
-    """Move a self-registered IT Agent into this admin's organization."""
-    company_id = tenant_company_id or current_user.company_id
-    if not company_id:
-        raise HTTPException(status_code=400, detail="Your account is not in an organization.")
-    user = _manageable_user(db, user_id, current_user, tenant_company_id, allow_unassigned=True)
+    """
+    Place a self-registered IT Agent in an organization. Super Admin only.
+    Send {"company_id": ...}; it may be left out while the platform has a single active company.
+    """
+    company = None
+    if body and body.company_id:
+        company = db.query(Company).filter(Company.id == body.company_id, Company.status == "ACTIVE").first()
+        if not company:
+            raise HTTPException(status_code=404, detail="Organization not found.")
+    else:
+        active = db.query(Company).filter(Company.status == "ACTIVE").limit(2).all()
+        if len(active) != 1:
+            raise HTTPException(status_code=400, detail="Choose the organization to add this user to.")
+        company = active[0]
+    company_id = company.id
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
     if not _is_unassigned_agent(user):
         raise HTTPException(status_code=400, detail="This user is already in an organization.")
     if user.status == "ACTIVE":
         _check_user_limit(db, company_id)
 
     user.company_id = company_id
-    company = db.query(Company).filter(Company.id == company_id).first()
     notify(
         db, user,
         title=f"You've been added to {company.name if company else 'an organization'}",

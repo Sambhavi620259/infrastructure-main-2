@@ -6,12 +6,16 @@ import {
   ArrowRightIcon,
 } from "@heroicons/react/24/outline";
 import { getProfile } from "@/lib/profile";
+import { addToOrganization, listUnassignedAgents } from "@/lib/users";
+import type { AppUser } from "@/types/user";
 import {
   actionLabel,
   formatDateTime,
   getPlatformOverview,
+  listCompanies,
   listPlatformAudit,
   type PlatformAuditEntry,
+  type Company,
   type PlatformOverview,
 } from "@/lib/super-admin";
 
@@ -21,8 +25,41 @@ export default function SuperAdminDashboardPage() {
   const [overview, setOverview] = useState<PlatformOverview | null>(null);
   const [activity, setActivity] = useState<PlatformAuditEntry[] | null>(null);
   const [error, setError] = useState("");
+  // People who signed up on their own. Only the Super Admin sees and places them.
+  const [signups, setSignups] = useState<AppUser[]>([]);
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [companyChoice, setCompanyChoice] = useState("");
+  const [placingId, setPlacingId] = useState("");
+  const [notice, setNotice] = useState("");
+
+  const loadSignups = () => {
+    listUnassignedAgents().then(setSignups).catch(() => setSignups([]));
+  };
+
+  const place = async (user: AppUser) => {
+    setPlacingId(user.id);
+    setError("");
+    try {
+      await addToOrganization(user.id, companyChoice || undefined);
+      setNotice(`${user.full_name} was added to the organization. They can now use their dashboard.`);
+      loadSignups();
+      getPlatformOverview().then(setOverview).catch(() => undefined);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not add this user.");
+    } finally {
+      setPlacingId("");
+    }
+  };
 
   useEffect(() => {
+    loadSignups();
+    listCompanies()
+      .then((rows) => {
+        const active = rows.filter((company) => company.status === "ACTIVE");
+        setCompanies(active);
+        setCompanyChoice(active.length === 1 ? active[0].id : "");
+      })
+      .catch(() => setCompanies([]));
     getProfile().then((profile) => setCompany(profile.companyName ?? "")).catch(() => undefined);
     getPlatformOverview()
       .then(setOverview)
@@ -73,6 +110,52 @@ export default function SuperAdminDashboardPage() {
           );
         })}
       </section>
+
+      {notice && <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{notice}</div>}
+
+      {signups.length > 0 && (
+        <section className="overflow-hidden rounded-xl border border-amber-200 bg-white shadow-sm" aria-label="New sign-ups">
+          <div className="flex flex-col gap-2 border-b border-amber-100 bg-amber-50/60 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900">New sign-ups ({signups.length})</h2>
+              <p className="text-xs text-slate-600">These people registered on their own and are not in an organization yet.</p>
+            </div>
+            {companies.length > 1 && (
+              <label className="text-xs font-semibold text-slate-700">
+                Organization
+                <select
+                  value={companyChoice}
+                  onChange={(event) => setCompanyChoice(event.target.value)}
+                  className="ml-2 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-normal"
+                >
+                  <option value="">Choose…</option>
+                  {companies.map((company) => (
+                    <option key={company.id} value={company.id}>{company.name}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </div>
+          <ul className="divide-y divide-slate-100">
+            {signups.map((user) => (
+              <li key={user.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 text-xs">
+                <span className="min-w-0">
+                  <span className="block font-semibold text-slate-800">{user.full_name}</span>
+                  <span className="block truncate text-slate-500">{user.email}</span>
+                </span>
+                <button
+                  type="button"
+                  disabled={placingId === user.id || (companies.length > 1 && !companyChoice)}
+                  onClick={() => place(user)}
+                  className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-violet-700 disabled:opacity-50"
+                >
+                  {placingId === user.id ? "Adding…" : "Add to organization"}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3.5">

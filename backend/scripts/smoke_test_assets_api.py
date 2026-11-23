@@ -358,16 +358,17 @@ async def run_checks():
     check("same email in another case is refused", code == 400, body)
 
     code, body = call("GET", "/users/unassigned")
-    check("admin sees the new sign-up under unassigned agents",
-          code == 200 and any(u["id"] == rahul_id for u in body), body)
+    check("an IT Admin cannot list unassigned sign-ups (Super Admin only, 403)", code == 403, body)
     code, body = call("GET", "/users")
     check("unassigned agent is not in the organization list yet",
           code == 200 and all(u["id"] != rahul_id for u in body), body)
 
-    code, body = call("POST", f"/users/{rahul_id}/add-to-organization")
-    check("admin adds the agent to the organization", code == 200 and body.get("company_id") == COMPANY_ID, body)
-    code, body = call("POST", f"/users/{rahul_id}/add-to-organization")
-    check("adding twice is refused", code == 400, body)
+    code, body = call("POST", f"/users/{rahul_id}/add-to-organization", {"company_id": COMPANY_ID})
+    check("an IT Admin cannot place a sign-up in an organization (403)", code == 403, body)
+    # Setup only: the Super Admin does this through the API in the Super Admin section below.
+    with TestSession() as db:
+        db.query(User).filter(User.id == rahul_id).update({"company_id": COMPANY_ID})
+        db.commit()
     code, body = call("GET", "/users")
     check("agent now listed in the organization with Agent ID",
           code == 200 and any(u["id"] == rahul_id and u["agent_id"] == "RAHULSHARMA01" for u in body), body)
@@ -854,11 +855,6 @@ async def run_checks():
           "Your ticket is fulfilled" in neha_titles and "Your ticket is being worked on" in neha_titles
           and any("was assigned to you" in t for t in neha_titles)
           and body[0]["link"] in ("/agent/assets", "/agent/tickets"), body[:3])
-    ACTING["user_id"] = rahul_id
-    code, body = call("GET", "/notifications?limit=100")
-    ACTING["user_id"] = None
-    check("agent is told they were added to the organization",
-          code == 200 and any(n["title"].startswith("You've been added to") for n in body), [n["title"] for n in body])
     code, body = call("PUT", "/notifications/does-not-exist/read")
     check("cannot touch another user's / unknown notification (404)", code == 404, body)
 
@@ -997,7 +993,25 @@ async def run_checks():
         boss_id = boss.id
     code, body = call("GET", "/super-admin/overview")
     check("IT Admin cannot open the Super Admin overview (403)", code == 403, body)
+    code, body = call("POST", "/auth/register",
+                      {"name": "Waiting Agent", "email": "waiting@example.com", "password": "password123", "role": "IT_AGENT"})
+    waiting_id = body.get("id") or ""
+    with TestSession() as db:
+        waiting_id = db.query(User).filter(User.email == "waiting@example.com").first().id
     ACTING["user_id"] = boss_id
+    code, body = call("GET", "/users/unassigned")
+    check("the Super Admin sees the new sign-up under unassigned agents",
+          code == 200 and any(u["id"] == waiting_id for u in body), body)
+    code, body = call("POST", f"/users/{waiting_id}/add-to-organization", {"company_id": COMPANY_ID})
+    check("the Super Admin places the agent in the organization",
+          code == 200 and body.get("company_id") == COMPANY_ID and body.get("agent_id"), body)
+    code, body = call("POST", f"/users/{waiting_id}/add-to-organization", {"company_id": COMPANY_ID})
+    check("placing the same agent twice is refused", code == 400, body)
+    ACTING["user_id"] = waiting_id
+    code, body = call("GET", "/notifications?limit=100")
+    ACTING["user_id"] = boss_id
+    check("the agent is told they were added to the organization",
+          code == 200 and any(n["title"].startswith("You've been added to") for n in body), [n["title"] for n in body])
     try:
         code, body = call("GET", "/super-admin/overview")
         check("overview has real counts",
@@ -1092,8 +1106,8 @@ async def run_checks():
         return [n["title"] for n in body] if code == 200 else []
 
     admin_titles = titles_for()
-    check("IT Admin was told about the new user sign-up",
-          "New user sign-up: Rahul Sharma" in admin_titles, admin_titles[:15])
+    check("IT Admin is not told about sign-ups (only the Super Admin places them)",
+          not any(t.startswith("New user sign-up") for t in admin_titles), admin_titles[:15])
     call("POST", "/auth/register", {"name": "Late Agent", "email": "late.agent@example.com",
                                     "password": "password123", "role": "IT_AGENT"})
     check("Super Admin was told about the sign-up and the new organizations",

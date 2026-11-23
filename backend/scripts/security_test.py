@@ -585,7 +585,13 @@ settings.ALLOW_PUBLIC_SUPER_ADMIN_SIGNUP = True
 
 print("Who can manage whom")
 code, data, _ = raw("POST", "/auth/register", {"name": "Floating Agent", "email": "floating@example.com", "password": PW, "role": "IT_AGENT"})
-floating_id = raw("GET", "/users/unassigned", token=TOKENS["adminA"])[1][0]["id"] if code == 200 else None
+floating_id = raw("GET", "/users/unassigned", token=TOKENS["super"])[1][0]["id"] if code == 200 else None
+check("the new sign-up exists and the Super Admin can see them", floating_id is not None, code)
+for who in ("adminA", "adminB", "samA", "reportA", "agentA"):
+    code, data, _ = raw("GET", "/users/unassigned", token=TOKENS[who])
+    check(f"{who} cannot list people who are not in an organization (403)", code == 403, (code, data))
+    code, data, _ = raw("POST", f"/users/{floating_id}/add-to-organization", {"company_id": COMPANIES["A"]}, token=TOKENS[who])
+    check(f"{who} cannot place a person in an organization (403)", code == 403, (code, data))
 for action, method, path, body in [
     ("reset the password of", "POST", f"/users/{floating_id}/reset-password", {"new_password": "Hijacked!1234"}),
     ("deactivate", "DELETE", f"/users/{floating_id}", None),
@@ -593,8 +599,19 @@ for action, method, path, body in [
 ]:
     code, data, _ = raw(method, path, body, token=TOKENS["adminA"])
     check(f"an IT Admin cannot {action} someone who is not in their organization", code == 404, (code, data))
-code, data, _ = raw("POST", f"/users/{floating_id}/add-to-organization", token=TOKENS["adminA"])
-check("an IT Admin can still add that person to their own organization", code == 200, data)
+with Session() as db:
+    check("after those attempts the person is still in no organization",
+          db.query(User).filter(User.id == floating_id).first().company_id is None)
+code, data, _ = raw("POST", f"/users/{floating_id}/add-to-organization", {"company_id": "no-such-company"}, token=TOKENS["super"])
+check("the Super Admin cannot place a person in a company that does not exist", code == 404, (code, data))
+code, data, _ = raw("POST", f"/users/{floating_id}/add-to-organization", {"company_id": COMPANIES["A"]}, token=TOKENS["super"])
+check("the Super Admin places the person in an organization", code == 200 and data.get("company_id") == COMPANIES["A"], (code, data))
+code, data, _ = raw("POST", f"/users/{floating_id}/add-to-organization", {"company_id": COMPANIES["B"]}, token=TOKENS["super"])
+check("a person who already has an organization cannot be placed again", code == 400, (code, data))
+code, data, _ = raw("POST", f"/users/{floating_id}/reset-password", {"new_password": "Hijacked!1234"}, token=TOKENS["adminB"])
+check("another company's IT Admin cannot manage the person who was just placed", code == 404, (code, data))
+code, data, _ = raw("GET", "/users/unassigned", token=TOKENS["super"])
+check("the placed person is no longer listed as waiting", code == 200 and all(u["id"] != floating_id for u in data), (code, data))
 code, data, _ = raw("POST", f"/users/{IDS['adminA']}/reset-password", {"new_password": "Hijacked!1234"}, token=TOKENS["adminB"])
 check("an IT Admin cannot reset another company's IT Admin", code == 404, data)
 code, data, _ = raw("POST", f"/users/{IDS['super']}/reset-password", {"new_password": "Hijacked!1234"}, token=TOKENS["adminA"])
