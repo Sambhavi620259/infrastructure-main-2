@@ -502,8 +502,10 @@ check("a freshly issued token works", code == 200, data)
 code, data, _ = raw("POST", "/users", {"email": "case.user@example.com", "full_name": "Dup", "password": PW, "role": "EMPLOYEE"},
                     token=TOKENS["adminA"])
 check("an email in another case counts as a duplicate", code == 400, data)
+settings.ALLOW_PUBLIC_AGENT_SIGNUP = True  # open only for this check (the default is closed)
 code, data, _ = raw("POST", "/auth/register", {"name": "Case Twin", "email": "CASE.USER@EXAMPLE.COM", "password": PW, "role": "IT_AGENT"})
 check("registration refuses an email that differs only by case", code == 400, data)
+settings.ALLOW_PUBLIC_AGENT_SIGNUP = False
 code, data, _ = raw("GET", "/users?limit=500", token=TOKENS["adminA"])
 stored = [u["email"] for u in data] if code == 200 else []
 check("emails are stored in lower case", "case.user@example.com" in stored and "Case.User@Example.com" not in stored, stored)
@@ -566,6 +568,26 @@ settings.AUTH_RATE_LIMIT_PER_MINUTE = 0
 rate_limit.reset_for_tests()
 
 print("Registration")
+# The defaults, before any switch is touched: public sign-up of IT Admins and users is closed.
+check("IT Admin sign-up is off by default", settings.ALLOW_PUBLIC_IT_ADMIN_SIGNUP is False, settings.ALLOW_PUBLIC_IT_ADMIN_SIGNUP)
+check("user (IT Agent) sign-up is off by default", settings.ALLOW_PUBLIC_AGENT_SIGNUP is False, settings.ALLOW_PUBLIC_AGENT_SIGNUP)
+code, data, _ = raw("GET", "/auth/registration-options")
+check("the register page is told IT Admin and user sign-up are closed",
+      code == 200 and data.get("it_admin") is False and data.get("user") is False and data.get("super_admin") is False, data)
+for role in ("IT_ADMIN", "IT_AGENT"):
+    code, data, _ = raw("POST", "/auth/register", {"name": "Closed Door", "email": f"closed.{role.lower()}@example.com", "password": PW, "role": role})
+    check(f"{role} registration is refused by default (403)", code == 403, (code, data))
+with Session() as db:
+    check("a refused registration creates no account",
+          db.query(User).filter(User.email.like("closed.%@example.com")).count() == 0)
+code, data, _ = raw("POST", "/auth/register", {"name": "Closed Door", "email": "closed.sneaky@example.com", "password": PW, "role": "it_admin"})
+check("a role spelled in another case is not accepted either", code in (403, 422), (code, data))
+settings.ALLOW_PUBLIC_AGENT_SIGNUP = True
+code, data, _ = raw("GET", "/auth/registration-options")
+check("user sign-up can be switched on", code == 200 and data.get("user") is True and data.get("it_admin") is False, data)
+code, data, _ = raw("POST", "/auth/register", {"name": "Closed Door", "email": "closed.admin2@example.com", "password": PW, "role": "IT_ADMIN"})
+check("switching on user sign-up does not open IT Admin sign-up", code == 403, (code, data))
+settings.ALLOW_PUBLIC_IT_ADMIN_SIGNUP = True
 code, data, _ = raw("GET", "/auth/registration-options")
 check("the register page can ask which account types are open", code == 200 and data.get("it_admin") is True and data.get("super_admin") is False, data)
 settings.ALLOW_PUBLIC_IT_ADMIN_SIGNUP = False

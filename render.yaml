@@ -27,10 +27,12 @@ services:
       # Vercel proxy can name the visitor's address for the sign-in limits.
       - key: PROXY_SHARED_SECRET
         sync: false
-      # Who may sign up without being added: set to false once your IT Admins exist
-      # (a Super Admin then adds IT Admins from Add IT Admin).
+      # Who may sign up without being added. IT Admins and users are created by the Super Admin
+      # (Add IT Admin / Add user), so IT Admin and user sign-up are closed by default.
       - key: ALLOW_PUBLIC_IT_ADMIN_SIGNUP
-        value: "true"
+        value: "false"
+      - key: ALLOW_PUBLIC_AGENT_SIGNUP
+        value: "false"
       - key: ALLOW_PUBLIC_SUPER_ADMIN_SIGNUP
         value: "true"
       - key: CORS_ORIGINS

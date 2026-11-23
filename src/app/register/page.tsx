@@ -18,25 +18,28 @@ export default function RegisterPage() {
   // The platform has exactly one Super Admin: the Super Admin option is offered until they register.
   const [superRegistrationOpen, setSuperRegistrationOpen] = useState(false);
   // The server decides which account types may sign up on their own.
-  const [itAdminSignupOpen, setItAdminSignupOpen] = useState(true);
+  const [itAdminSignupOpen, setItAdminSignupOpen] = useState(false);
+  const [userSignupOpen, setUserSignupOpen] = useState(false);
+  const [optionsLoaded, setOptionsLoaded] = useState(false);
 
   useEffect(() => {
     Promise.allSettled([
       apiFetch<{ registration_open?: boolean }>("/api/auth/super-admin-key"),
-      apiFetch<{ it_admin?: boolean; super_admin?: boolean }>("/api/auth/registration-options"),
+      apiFetch<{ it_admin?: boolean; super_admin?: boolean; user?: boolean }>("/api/auth/registration-options"),
     ]).then(([keyStatus, options]) => {
-      if (keyStatus.status === "fulfilled") {
-        setSuperRegistrationOpen(
-          Boolean(keyStatus.value.registration_open) &&
-            !(options.status === "fulfilled" && options.value.super_admin === false),
-        );
-      } else {
-        setSuperRegistrationOpen(false);
-      }
-      if (options.status === "fulfilled" && options.value.it_admin === false) {
-        setItAdminSignupOpen(false);
-        setRole((current) => (current === "IT_ADMIN" ? "IT_AGENT" : current));
-      }
+      const opts = options.status === "fulfilled" ? options.value : undefined;
+      const superOpen =
+        keyStatus.status === "fulfilled" &&
+        Boolean(keyStatus.value.registration_open) &&
+        !(opts && opts.super_admin === false);
+      // If the server cannot be asked, offer nothing rather than a form that will be refused.
+      const adminOpen = opts?.it_admin === true;
+      const userOpen = opts?.user === true;
+      setSuperRegistrationOpen(superOpen);
+      setItAdminSignupOpen(adminOpen);
+      setUserSignupOpen(userOpen);
+      setRole(adminOpen ? "IT_ADMIN" : userOpen ? "IT_AGENT" : "SUPER_ADMIN");
+      setOptionsLoaded(true);
     });
   }, []);
 
@@ -53,7 +56,7 @@ export default function RegisterPage() {
     setSubmitting(true);
     try {
       // One sign-up flow for every role. IT Agents start with no organization
-      // until an IT Admin adds them from the Users page.
+      // until the Super Admin places them.
       await apiFetch("/api/auth/register", {
         method: "POST",
         body: JSON.stringify({
@@ -76,12 +79,29 @@ export default function RegisterPage() {
       {error}
     </p>
   );
+  if (optionsLoaded && !itAdminSignupOpen && !userSignupOpen && !superRegistrationOpen) {
+    return (
+      <AuthLayout>
+        <h2 className="text-3xl font-extrabold tracking-tight text-slate-950">Sign-up is closed</h2>
+        <p className="mt-2 text-slate-500">
+          Accounts on this platform are created by your administrator. Ask them to add you, then sign in.
+        </p>
+        <Link
+          href="/login"
+          className="mt-8 inline-block rounded-xl bg-brand-500 px-5 py-3 text-base font-bold text-white hover:bg-brand-600"
+        >
+          Go to Sign In
+        </Link>
+      </AuthLayout>
+    );
+  }
+
   return (
     <AuthLayout>
       <h2 className="text-3xl font-extrabold tracking-tight text-slate-950">Create Account</h2>
       <p className="mt-2 text-slate-500">
         {role === "IT_AGENT"
-          ? "Sign up with your work email. An IT Admin will add you to their organization."
+          ? "Sign up with your work email. The Super Admin will add you to the organization."
           : role === "SUPER_ADMIN"
             ? "You are setting up the platform's only Super Admin."
             : "IT Admins get a new organization."}
@@ -99,7 +119,7 @@ export default function RegisterPage() {
             className="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3.5 py-3 text-base font-normal text-slate-900 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
           >
             {itAdminSignupOpen && <option value="IT_ADMIN">IT Admin</option>}
-            <option value="IT_AGENT">User</option>
+            {userSignupOpen && <option value="IT_AGENT">User</option>}
             {superRegistrationOpen && <option value="SUPER_ADMIN">Super Admin (platform setup)</option>}
           </select>
         </label>

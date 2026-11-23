@@ -56,9 +56,13 @@ class Settings(BaseSettings):
     # Failed sign-ins per account per 15 minutes before the account is paused.
     LOGIN_FAILURE_LIMIT: int = int(os.getenv("LOGIN_FAILURE_LIMIT", "10"))
 
-    # Public sign-up switches. The first Super Admin registers once; IT Admins may
-    # self-register unless this is turned off (then a Super Admin adds them).
-    ALLOW_PUBLIC_IT_ADMIN_SIGNUP: bool = os.getenv("ALLOW_PUBLIC_IT_ADMIN_SIGNUP", "true").lower() in ("1", "true", "yes")
+    # Public sign-up switches. All default to closed: IT Admins and users are created by the
+    # Super Admin (and IT Admins create users in their own organization). Turn one on only for
+    # a deliberate self-service setup. IT Agents who sign up on their own have no organization
+    # until the Super Admin places them. The first Super Admin comes from SEED_SUPER_ADMIN_* or
+    # registers once (only one Super Admin is ever allowed).
+    ALLOW_PUBLIC_IT_ADMIN_SIGNUP: bool = os.getenv("ALLOW_PUBLIC_IT_ADMIN_SIGNUP", "false").lower() in ("1", "true", "yes")
+    ALLOW_PUBLIC_AGENT_SIGNUP: bool = os.getenv("ALLOW_PUBLIC_AGENT_SIGNUP", "false").lower() in ("1", "true", "yes")
     ALLOW_PUBLIC_SUPER_ADMIN_SIGNUP: bool = os.getenv("ALLOW_PUBLIC_SUPER_ADMIN_SIGNUP", "true").lower() in ("1", "true", "yes")
 
     # Largest request body the API accepts, in bytes (file uploads are base64 in JSON).

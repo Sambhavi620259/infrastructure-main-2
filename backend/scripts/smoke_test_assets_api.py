@@ -32,6 +32,12 @@ from fastapi import FastAPI
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from app.core.config import settings as _settings
+
+# This test walks the public sign-up flows, so it opens the switches that are closed by default.
+# (security_test.py checks the closed defaults themselves.)
+_settings.ALLOW_PUBLIC_IT_ADMIN_SIGNUP = True
+_settings.ALLOW_PUBLIC_AGENT_SIGNUP = True
 from app.core.database import Base, get_db
 from app.core.deps import get_current_user
 from app.core.security import issue_token

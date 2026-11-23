@@ -95,6 +95,11 @@ def register(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="IT Admin accounts are created by the Super Admin. Ask your administrator to add you."
         )
+    if register_data.role == "IT_AGENT" and not settings.ALLOW_PUBLIC_AGENT_SIGNUP:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Sign-up is closed. Ask your administrator to create your account."
+        )
     if register_data.role == "SUPER_ADMIN" and not settings.ALLOW_PUBLIC_SUPER_ADMIN_SIGNUP:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -332,7 +337,7 @@ def registration_options(db: Session = Depends(get_db)):
         "it_admin": settings.ALLOW_PUBLIC_IT_ADMIN_SIGNUP,
         "super_admin": settings.ALLOW_PUBLIC_SUPER_ADMIN_SIGNUP
         and db.query(User.id).filter(User.role == PlatformRole.SUPER_ADMIN).first() is None,
-        "user": True,
+        "user": settings.ALLOW_PUBLIC_AGENT_SIGNUP,
     }
 
 
