@@ -11,3 +11,5 @@ docs
 backend
 .env*
 *.tsbuildinfo
+.static-build/
+out/

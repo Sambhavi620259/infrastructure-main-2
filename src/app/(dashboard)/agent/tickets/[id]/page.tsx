@@ -1,9 +1,11 @@
-"use client";
+import Client from "./page-client";
 
-import { useParams } from "next/navigation";
-import { TicketDetail } from "@/components/tickets/ticket-detail";
+// The static build (S3 + CloudFront) needs one pre-built page per detail route; the real id is read in the
+// browser (see src/lib/route-id.ts). On the Node server, every other id is rendered on demand.
+export function generateStaticParams() {
+  return [{ id: "_" }];
+}
 
-export default function TicketPage() {
-  const params = useParams<{ id: string }>();
-  return <TicketDetail key={params.id} ticketId={params.id} workspace="user" />;
+export default function Page() {
+  return <Client />;
 }

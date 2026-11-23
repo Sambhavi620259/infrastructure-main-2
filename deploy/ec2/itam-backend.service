@@ -12,6 +12,7 @@ Group=ec2-user
 # "current" is a symlink to the active release (see deploy.sh). Configuration and secrets live OUTSIDE the release.
 WorkingDirectory=/home/ec2-user/itam/current/backend
 EnvironmentFile=/etc/itam/itam.env
+# Listens on 127.0.0.1 only: the TLS terminator on this instance (nginx/caddy) is the sole client. See deploy/cloudfront/README.md.
 # ONE worker: sign-in limits and live-update sockets are held in process memory (see README, "Known limitations").
 ExecStart=/home/ec2-user/itam/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1 --no-proxy-headers --timeout-graceful-shutdown 20
 Restart=on-failure

@@ -52,6 +52,7 @@ See `docs/PRODUCTION_REQUIREMENTS.md` for the detailed requirement-to-route mapp
 ## Architecture
 
 - **Frontend** (`/`, Next.js 15): all browser API calls go to `/api/*` on the same origin; `src/app/api/[...path]/route.ts` forwards them to the backend (`BACKEND_API_URL`). Live updates use WebSockets straight to the backend.
+- **Static build for S3 + CloudFront** (`npm run build:static`, then `npm run check:static`): the same pages as plain files in `./out`, with no Node server. CloudFront sends `/api/*` straight to the API instead of the Next.js proxy. Docker and `next dev` are unchanged. What the AWS side must look like, the headers policy and the URL-mapping function are in `deploy/cloudfront/`; the API side is in `deploy/ec2/`.
 - **Backend** (`backend/`, FastAPI + SQLAlchemy + PostgreSQL): JWT auth, role checks and tenant isolation on every endpoint. The schema is owned by Alembic migrations in `backend/migrations`.
 
 ## Run locally

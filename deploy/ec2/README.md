@@ -1,7 +1,7 @@
 # ITAM API on EC2: deploy, verify, roll back
 
 Templates and scripts only. Nothing in this repository creates AWS resources or runs against a server by itself.
-Read `AWS_DEPLOYMENT_READINESS_REPORT.md` first (decisions, limitations, checklist).
+Read `AWS_DEPLOYMENT_READINESS_REPORT.md` first (decisions, limitations, checklist). The CloudFront / S3 / TLS-origin side is in `deploy/cloudfront/README.md`.
 
 ## One-time server setup (a person does this, once)
 1. Python 3.11+ and `curl` on the instance. Directories: `/home/ec2-user/itam`, `/home/ec2-user/itam-releases`.

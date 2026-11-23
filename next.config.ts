@@ -39,16 +39,25 @@ const securityHeaders = [
     : []),
 ];
 
+// STATIC_EXPORT=true (see scripts/build-static.mjs) builds plain files for S3 + CloudFront. Without it the app builds
+// as the Node server used by Docker and local development. Static hosting cannot send these headers itself:
+// they are set by a CloudFront response-headers policy instead (deploy/cloudfront/README.md lists them exactly).
+const staticExport = process.env.STATIC_EXPORT === "true";
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
-  output: "standalone",
+  output: staticExport ? "export" : "standalone",
   // Lets a production build run beside `next dev` without sharing .next.
   distDir: process.env.NEXT_DIST_DIR || ".next",
   outputFileTracingRoot: process.cwd(),
-  async headers() {
-    return [{ source: "/:path*", headers: securityHeaders }];
-  },
+  ...(staticExport
+    ? {}
+    : {
+        async headers() {
+          return [{ source: "/:path*", headers: securityHeaders }];
+        },
+      }),
 };
 
 export default nextConfig;

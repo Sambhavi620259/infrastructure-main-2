@@ -1,0 +1,23 @@
+{
+  "_comment": "Response headers policy for the STATIC behaviours (default * and /_next/static/*) of the ITAM distribution. Same values the Node build sets in next.config.ts. Replace SITE_DOMAIN with the distribution's public domain (the same host that serves /api/*). Do NOT attach this policy to the /api/* behaviour: the API sets its own headers (see README).",
+  "Name": "itam-static-security-headers",
+  "Comment": "ITAM single-page site security headers",
+  "SecurityHeadersConfig": {
+    "ContentSecurityPolicy": {
+      "Override": true,
+      "ContentSecurityPolicy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' wss://SITE_DOMAIN https://SITE_DOMAIN; frame-src https://www.openstreetmap.org; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+    },
+    "StrictTransportSecurity": { "Override": true, "AccessControlMaxAgeSec": 31536000, "IncludeSubdomains": true, "Preload": false },
+    "ContentTypeOptions": { "Override": true },
+    "FrameOptions": { "Override": true, "FrameOption": "DENY" },
+    "ReferrerPolicy": { "Override": true, "ReferrerPolicy": "strict-origin-when-cross-origin" }
+  },
+  "CustomHeadersConfig": {
+    "Quantity": 3,
+    "Items": [
+      { "Header": "Permissions-Policy", "Value": "camera=(), microphone=(), geolocation=(self)", "Override": true },
+      { "Header": "X-DNS-Prefetch-Control", "Value": "on", "Override": true },
+      { "Header": "Cross-Origin-Opener-Policy", "Value": "same-origin", "Override": true }
+    ]
+  }
+}

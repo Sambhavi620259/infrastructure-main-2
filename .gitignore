@@ -14,3 +14,5 @@ CHANGES-REQUESTED.md
 PRODUCTION_REQUIREMENTS.md
 backups/
 .vercel
+.static-build/
+out/
