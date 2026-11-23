@@ -7,7 +7,9 @@ Access guard for scoped roles.
   routers then limit each of those to the user's own records.
 - SUB_ADMIN: may change data only in the modules on their account
   (users.modules, e.g. ["HAM", "SAM"]).
-- REPORTING_USER: read-only, except their own profile, notifications and reports.
+- REPORTING_USER: read-only. May read reports, their own profile and notifications, and
+  only the data modules assigned on their account (users.modules). Users, finance, audit
+  logs and settings are never readable.
 - Everyone but the Super Admin: only the modules their organization's plan
   includes (inventory, software, reports, cloud; see plan_features_service).
 """
@@ -40,6 +42,8 @@ MODULE_PREFIXES = (
     ("/api/cloud", "CLOUD"),
     ("/api/discovery", "SCAN"),
     ("/api/reports", "REPORTS"),
+    # Aggregate dashboard figures, which a Reporting user's own dashboard shows.
+    ("/api/dashboard", "REPORTS"),
 )
 
 # Paths any signed-in user may change (their own account and inbox).
@@ -104,6 +108,13 @@ class ScopedRoleWriteGuard(BaseHTTPMiddleware):
                 content={"detail": "Users can only access their own assets, tickets, software, access and reports."},
             )
         if reading:
+            if role == PlatformRole.REPORTING_USER:
+                module = module_for(path)
+                if module != "REPORTS" and (module is None or module not in modules):
+                    return JSONResponse(
+                        status_code=403,
+                        content={"detail": "Reporting users can read reports and the modules assigned to them."},
+                    )
             return await call_next(request)
         if role == PlatformRole.REPORTING_USER and module_for(path) != "REPORTS":
             return JSONResponse(status_code=403, content={"detail": "Reporting users have read-only access."})

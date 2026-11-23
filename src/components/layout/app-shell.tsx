@@ -159,6 +159,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   // organization: an agent awaiting one would just get a 400.
   useEffect(() => {
     if (!authenticatedUser || awaitingOrganization || workspaceForRole(authenticatedUser.role) !== "it") return;
+    // Reporting users cannot read these lists, so they get no badges.
+    if (authenticatedUser.role === roles.REPORTING_USER) return;
     getDashboardCounts()
       .then(setCounts)
       // Badges are optional; a failure should not interrupt the page.

@@ -212,6 +212,40 @@ code, data = call("reportA", "POST", "/asset-requests", {"asset_category_id": A[
 check("reporting user cannot raise tickets", code == 403, data)
 code, data = call("reportA", "PUT", "/profile", {"name": "Report User"})
 check("reporting user edits own profile", code == 200, data)
+
+print("Reporting user permissions")
+for path in ("/users", "/users/unassigned", "/audit-logs", "/financial", "/assets", "/inventory", "/vendors", "/software",
+             "/asset-requests", "/cloud/resources", "/departments", "/organization"):
+    code, data = call("reportA", "GET", path)
+    check(f"reporting user without a module cannot read {path} (403)", code == 403, (code, data))
+code, data = call("reportA", "GET", "/reports/runs")
+check("reporting user can still read reports", code == 200, (code, data))
+code, data = call("reportA", "GET", "/dashboard/overview")
+check("reporting user can read the aggregate dashboard figures", code == 200, (code, data))
+code, data = call("reportA", "GET", "/profile")
+check("reporting user can read their own profile", code == 200, (code, data))
+code, data = call("reportA", "GET", "/notifications")
+check("reporting user can read their notifications", code == 200, (code, data))
+code, data = call("reportA", "POST", "/assets", {"asset_tag": "R", "serial_number": "R", "name": "r", "category": "Laptop"})
+check("reporting user still cannot write assets (403)", code == 403, (code, data))
+with Session() as db:
+    db.query(User).filter(User.id == IDS["reportA"]).update({"modules": ["HAM"]})
+    db.commit()
+code, data = call("reportA", "GET", "/assets")
+check("a module assigned to the reporting user opens that module's data", code == 200, (code, data))
+code, data = call("reportA", "GET", "/software")
+check("a module that is not assigned stays closed (403)", code == 403, (code, data))
+code, data = call("reportA", "GET", "/users")
+check("an assigned data module does not open the user list (403)", code == 403, (code, data))
+code, data = call("reportA", "POST", "/assets", {"asset_tag": "R", "serial_number": "R", "name": "r", "category": "Laptop"})
+check("an assigned module is still read-only (403 on write)", code == 403, (code, data))
+with Session() as db:
+    db.query(User).filter(User.id == IDS["reportA"]).update({"modules": None})
+    db.commit()
+code, data = call("reportA", "GET", "/assets")
+check("clearing the modules closes the data again (403)", code == 403, (code, data))
+code, data = call("adminA", "GET", "/assets")
+check("an IT Admin is not affected", code == 200, (code, data))
 code, data = call("samA", "GET", "/profile")
 check("profile lists sub-admin modules", code == 200 and data["user"]["modules"] == ["SAM"], data)
 code, data = call("agentA", "PUT", f"/assets/{A['asset']}", {"name": "renamed"})
@@ -344,9 +378,11 @@ check("an IT Admin cannot remove an admin of another company", code == 404, data
 
 # --- Privilege escalation ---------------------------------------------------
 print("Privilege escalation")
-code, data = call("adminA", "POST", "/users", {"email": "boss@example.com", "full_name": "Boss", "password": "password123", "role": "SUPER_ADMIN"})
+code, data = call("adminA", "POST", "/users", {"email": "boss@example.com", "full_name": "Boss", "password": "password123", "role": "SUPER_ADMIN",
+                                              "registrationKey": "whatever-key-1234", "registrationKeyConfirm": "whatever-key-1234"})
 check("IT Admin cannot create a Super Admin", code == 403, data)
-code, data = call("adminA", "PUT", f"/users/{A['user']}", {"role": "SUPER_ADMIN"})
+code, data = call("adminA", "PUT", f"/users/{A['user']}", {"role": "SUPER_ADMIN",
+                                              "registrationKey": "whatever-key-1234", "registrationKeyConfirm": "whatever-key-1234"})
 check("IT Admin cannot promote a user to Super Admin", code == 403, data)
 code, data = call("adminA", "PUT", f"/users/{IDS['adminA']}", {"role": "EMPLOYEE"})
 check("IT Admin cannot change their own role", code == 400, data)
