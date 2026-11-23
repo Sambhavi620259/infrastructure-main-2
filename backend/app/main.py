@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.access_guard import ScopedRoleWriteGuard
 from app.core.config import settings
 from app.core.http_guard import BodySizeLimitMiddleware, SecurityHeadersMiddleware
-from app.core.database import get_db
+from app.core.database import engine, get_db
 from app.core.logging_config import configure_logging
 from app.core.seed import seed_initial_users
 from app.services.warranty_alerts import warranty_alert_loop
@@ -59,8 +59,19 @@ async def lifespan(app: FastAPI):
     # so migrations are the single source of truth.
     seed_initial_users()
     warranty_task = asyncio.create_task(warranty_alert_loop())
+    logging.getLogger("app").info(
+        "ITAM API started (environment=%s, database=%s).",
+        settings.ENVIRONMENT, engine.url.render_as_string(hide_password=True).split("@")[-1],
+    )
     yield
+    logging.getLogger("app").info("ITAM API shutting down.")
     warranty_task.cancel()
+    try:
+        await warranty_task
+    except asyncio.CancelledError:
+        pass
+    engine.dispose()
+    logging.getLogger("app").info("ITAM API stopped.")
 
 # The interactive API docs are for development; production does not publish the schema.
 _docs = {} if not settings.is_production else {"docs_url": None, "redoc_url": None, "openapi_url": None}
@@ -132,9 +143,17 @@ async def unhandled_error(request: Request, exc: Exception) -> JSONResponse:
     )
 
 
+@app.get("/api/health/live")
+def health_live():
+    """Liveness: the process is up and serving. Does not touch the database."""
+    return {"status": "ok"}
+
+
+@app.get("/api/health/ready")
 @app.get("/api/health")
 def health(db: Session = Depends(get_db)):
-    """Liveness and database check for load balancers and Docker. 503 when the database cannot be reached."""
+    """Readiness: the process is up and the database answers. 503 when the database cannot be reached.
+    (/api/health is kept as an alias of /api/health/ready for existing monitors and Docker.)"""
     try:
         db.execute(text("SELECT 1"))
     except Exception:

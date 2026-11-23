@@ -69,7 +69,7 @@ def module_for(path: str) -> Optional[str]:
 class ScopedRoleWriteGuard(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
-        if request.method == "OPTIONS" or not path.startswith("/api/") or path == "/api/health" \
+        if request.method == "OPTIONS" or not path.startswith("/api/") or path.startswith("/api/health") \
                 or path.startswith(ALWAYS_ALLOWED):
             return await call_next(request)
         auth = request.headers.get("authorization", "")

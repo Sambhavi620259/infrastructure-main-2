@@ -6,6 +6,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 _DEFAULT_SECRET = "production-itam-super-secret-key-change-me-2026"
+_DEFAULT_DATABASE_URL = "postgresql+psycopg2://itam_user:itam_password@localhost:5432/itam_db"
+_DEFAULT_CORS = "http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001"
 
 
 class Settings(BaseSettings):
@@ -21,7 +23,7 @@ class Settings(BaseSettings):
     # Database Connection
     DATABASE_URL: str = os.getenv(
         "DATABASE_URL", 
-        "postgresql+psycopg2://itam_user:itam_password@localhost:5432/itam_db"
+        _DEFAULT_DATABASE_URL
     )
 
     # JWT Security settings
@@ -33,7 +35,7 @@ class Settings(BaseSettings):
     # CORS Configuration (Supports both port 3000 and 3001 for Next.js dev server shifts)
     CORS_ORIGINS: Union[str, List[str]] = os.getenv(
         "CORS_ORIGINS", 
-        "http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001"
+        _DEFAULT_CORS
     )
 
     # Optional first Super Admin, created on startup only when both are set and
@@ -83,8 +85,16 @@ class Settings(BaseSettings):
         problems = []
         if self.SECRET_KEY == _DEFAULT_SECRET or len(self.SECRET_KEY) < 32:
             problems.append("JWT_SECRET must be set to a random value of at least 32 characters")
-        if "itam_password" in self.DATABASE_URL:
+        if self.DATABASE_URL == _DEFAULT_DATABASE_URL:
+            problems.append("DATABASE_URL is not set (the development default must never run in production)")
+        elif "itam_password" in self.DATABASE_URL:
             problems.append("DATABASE_URL still uses the example database password")
+        if not self.DATABASE_URL.startswith("postgresql"):
+            problems.append("DATABASE_URL must point to PostgreSQL (SQLite is for local tests only)")
+        if self.CORS_ORIGINS == [i.strip() for i in _DEFAULT_CORS.split(",")]:
+            problems.append("CORS_ORIGINS is not set (it must list your real frontend origin)")
+        if not self.CORS_ORIGINS:
+            problems.append("CORS_ORIGINS must not be empty")
         if any(origin == "*" for origin in self.CORS_ORIGINS):
             problems.append("CORS_ORIGINS must list your real frontend origins, not *")
         if problems:
