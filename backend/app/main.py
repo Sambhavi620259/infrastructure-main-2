@@ -134,6 +134,10 @@ async def unhandled_error(request: Request, exc: Exception) -> JSONResponse:
 
 @app.get("/api/health")
 def health(db: Session = Depends(get_db)):
-    """Liveness and database check for load balancers and Docker."""
-    db.execute(text("SELECT 1"))
+    """Liveness and database check for load balancers and Docker. 503 when the database cannot be reached."""
+    try:
+        db.execute(text("SELECT 1"))
+    except Exception:
+        logging.getLogger(__name__).exception("Health check: the database is unavailable.")
+        return JSONResponse(status_code=503, content={"status": "unavailable"})
     return {"status": "ok"}

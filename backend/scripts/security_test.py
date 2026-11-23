@@ -666,6 +666,28 @@ code, data, hdrs = raw("GET", "/health")
 hdrs = {k.lower(): v for k, v in hdrs.items()}
 check("API answers carry security headers", code == 200 and hdrs.get("x-content-type-options") == "nosniff"
       and hdrs.get("x-frame-options") == "DENY" and "no-store" in hdrs.get("cache-control", ""), hdrs)
+check("the health check says ok when the database answers", code == 200 and data == {"status": "ok"}, (code, data))
+# Database down: a session on a database that cannot be opened.
+_broken_engine = create_engine("sqlite:////nonexistent-folder/itam.db", connect_args={"check_same_thread": False})
+_BrokenSession = sessionmaker(bind=_broken_engine)
+
+
+def _broken_db():
+    session = _BrokenSession()
+    try:
+        yield session
+    finally:
+        session.close()
+
+
+_working_db = app.dependency_overrides[get_db]
+app.dependency_overrides[get_db] = _broken_db
+code, data, hdrs = raw("GET", "/health")
+app.dependency_overrides[get_db] = _working_db
+check("the health check returns 503 when the database is unavailable", code == 503, (code, data))
+check("and says so without revealing details", data == {"status": "unavailable"}, data)
+code, data, _ = raw("GET", "/health")
+check("the health check recovers once the database is back", code == 200, (code, data))
 for path in ("/users?limit=100000", "/audit-logs?limit=100000", "/vendors?limit=100000", "/inventory?limit=100000", "/users?skip=-1"):
     code, data, _ = raw("GET", path, token=TOKENS["adminA"])
     check(f"GET {path.split('?')[0]} refuses an unbounded page", code == 422, (code, data))
