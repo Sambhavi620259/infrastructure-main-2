@@ -109,6 +109,22 @@ try:
     check("development mode still allows local settings", True)
 except RuntimeError as error:
     check("development mode still allows local settings", False, error)
+ORIGIN_GOOD = "o" + "Kx9" * 15  # 46 characters
+try:
+    Settings(**GOOD, ORIGIN_VERIFY_SECRET=ORIGIN_GOOD).check_production_safety()
+    check("a long random origin-verification secret is accepted in production", True)
+except RuntimeError as error:
+    check("a long random origin-verification secret is accepted in production", False, error)
+msg = refused(ORIGIN_VERIFY_SECRET="short-secret")
+check("a short origin-verification secret is refused in production", msg and "ORIGIN_VERIFY_SECRET" in msg, msg)
+msg = refused(ORIGIN_VERIFY_SECRET="CHANGE_ME" + "x" * 40)
+check("a CHANGE_ME placeholder origin-verification secret is refused in production", msg and "ORIGIN_VERIFY_SECRET" in msg, msg)
+msg = refused(ORIGIN_VERIFY_SECRET_PREVIOUS=ORIGIN_GOOD)
+check("a previous secret without a current one is refused", msg and "ORIGIN_VERIFY_SECRET_PREVIOUS" in msg, msg)
+msg = refused(ORIGIN_VERIFY_SECRET=ORIGIN_GOOD, ORIGIN_VERIFY_SECRET_PREVIOUS="tiny")
+check("a short previous secret is refused too", msg and "ORIGIN_VERIFY_SECRET_PREVIOUS" in msg, msg)
+check("a trailing newline from an env file is not part of the secret", Settings(**GOOD, ORIGIN_VERIFY_SECRET=ORIGIN_GOOD + "\n").ORIGIN_VERIFY_SECRET == ORIGIN_GOOD)
+check("the error message never repeats the origin-verification secret", ORIGIN_GOOD not in (refused(ORIGIN_VERIFY_SECRET=ORIGIN_GOOD, SECRET_KEY="short") or ""))
 check("postgres:// URLs from a host are upgraded to the installed driver",
       Settings(**{**GOOD, "DATABASE_URL": "postgres://u:p@h:5432/d"}).DATABASE_URL.startswith("postgresql+psycopg2://"))
 
@@ -197,6 +213,34 @@ code, data = http(port, "GET", "/profile", token=ADMIN_TOKEN)
 check("a locally issued token is accepted: authentication is independent of Authify", code == 200, (code, data))
 code, data = http(port, "GET", "/profile", token="not-a-token")
 check("an invalid token is refused (401)", code == 401, (code, data))
+
+print("Origin verification in a real process")
+ORIGIN_SECRET = "p" + "Qr7" * 14
+WRONG_SECRET = "w" + "Zt3" * 14
+port_o = free_port()
+server_o = start_server(port_o, {"ORIGIN_VERIFY_SECRET": ORIGIN_SECRET})
+check("the API starts with origin verification on", wait_up(port_o, server_o), open(LOG_FILE).read()[-300:])
+
+
+def call_o(path, token=None, headers=None):
+    request = urllib.request.Request(f"http://127.0.0.1:{port_o}/api{path}", headers={**({"Authorization": f"Bearer {token}"} if token else {}), **(headers or {})})
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return response.status
+    except urllib.error.HTTPError as error:
+        return error.code
+
+
+check("a request without the header is refused (403)", call_o("/profile", ADMIN_TOKEN) == 403)
+check("a request with a wrong header is refused (403)", call_o("/profile", ADMIN_TOKEN, {"X-Origin-Verify": WRONG_SECRET}) == 403)
+check("a request with the right header is accepted", call_o("/profile", ADMIN_TOKEN, {"X-Origin-Verify": ORIGIN_SECRET}) == 200)
+check("the health endpoints stay open for the deploy script", call_o("/health/ready") == 200 and call_o("/health/live") == 200)
+server_o.send_signal(signal.SIGTERM)
+server_o.wait(timeout=20)
+log_o = open(LOG_FILE).read()
+check("start-up says origin verification is on", "Origin verification is on" in log_o, log_o[-300:])
+check("the refusal is logged without any header value", "without a valid origin verification header" in log_o, log_o[-300:])
+check("the log never contains the secret or the wrong value that was sent", ORIGIN_SECRET not in log_o and WRONG_SECRET not in log_o)
 
 print("File upload survives a restart")
 code, ticket = http(port, "POST", "/asset-requests", {"asset_category_id": CATEGORY, "reason": "needs a laptop"}, token=AGENT_TOKEN)
@@ -315,7 +359,7 @@ for line in open(template):
         key, _, value = line.partition("=")
         values[key] = value
 check("the staging environment template exists and names the required variables",
-      all(k in values for k in ("ENVIRONMENT", "DATABASE_URL", "JWT_SECRET", "CORS_ORIGINS", "TRUSTED_PROXY_COUNT")), sorted(values))
+      all(k in values for k in ("ENVIRONMENT", "DATABASE_URL", "JWT_SECRET", "CORS_ORIGINS", "TRUSTED_PROXY_COUNT", "ORIGIN_VERIFY_SECRET")), sorted(values))
 msg = None
 try:
     Settings(ENVIRONMENT=values["ENVIRONMENT"], SECRET_KEY=values["JWT_SECRET"], DATABASE_URL=values["DATABASE_URL"],
@@ -323,6 +367,14 @@ try:
 except RuntimeError as error:
     msg = str(error)
 check("the template cannot be started as it is: its CHANGE_ME placeholders are refused", msg is not None and "CHANGE_ME" in msg, msg)
+msg_origin = None
+try:
+    Settings(**{**GOOD, "ORIGIN_VERIFY_SECRET": values["ORIGIN_VERIFY_SECRET"]}).check_production_safety()
+except RuntimeError as error:
+    msg_origin = str(error)
+check("the template's origin secret placeholder is refused on its own", msg_origin is not None and "ORIGIN_VERIFY_SECRET" in msg_origin, msg_origin)
+check("the template ships an empty previous secret and TRUSTED_PROXY_COUNT=2",
+      values.get("ORIGIN_VERIFY_SECRET_PREVIOUS", None) == "" and values.get("TRUSTED_PROXY_COUNT") == "2", values)
 check("the template defaults keep public sign-up closed",
       all(values.get(k) == "false" for k in ("ALLOW_PUBLIC_IT_ADMIN_SIGNUP", "ALLOW_PUBLIC_AGENT_SIGNUP", "ALLOW_PUBLIC_SUPER_ADMIN_SIGNUP")), values)
 tracked = subprocess.run(["git", "ls-files"], cwd=REPO, capture_output=True, text=True)

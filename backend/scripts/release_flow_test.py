@@ -55,9 +55,11 @@ for _name, _body in (("python", f'exec "{sys.executable}" "$@"'), ("pip", f'exec
 ENV_FILE = os.path.join(ROOT, "itam.env")
 JWT = "release-flow-secret-0123456789abcdef0123456789abcd"
 PASSWORD = "A-long-seed-password-1"
+ORIGIN_SECRET = "rf" + "Mn6" * 15
 GOOD_ENV = f"""ENVIRONMENT=production
 DATABASE_URL={URL}
 JWT_SECRET={JWT}
+ORIGIN_VERIFY_SECRET={ORIGIN_SECRET}
 CORS_ORIGINS=https://itam.example.com
 SEED_SUPER_ADMIN_EMAIL=root@itam.example.com
 SEED_SUPER_ADMIN_PASSWORD={PASSWORD}
@@ -120,10 +122,10 @@ def healthy():
         return False
 
 
-def login():
+def login(origin=True):
     request = urllib.request.Request(f"http://127.0.0.1:{PORT}/api/auth/login", method="POST",
                                      data=json.dumps({"email": "root@itam.example.com", "password": PASSWORD}).encode(),
-                                     headers={"Content-Type": "application/json"})
+                                     headers={"Content-Type": "application/json", **({"X-Origin-Verify": ORIGIN_SECRET} if origin else {})})
     try:
         return urllib.request.urlopen(request, timeout=5).status
     except Exception as error:
@@ -139,7 +141,9 @@ try:
     check("the API is healthy after the deploy", healthy())
     check("migrations ran and the seeded Super Admin signs in (independent authentication)", login() == 200, login())
     check("the configuration file lives outside the release", not any(f.endswith(".env") for f in os.listdir(os.path.join(RELEASES, release1, "backend"))))
-    check("the deploy printed no secrets", JWT not in first.stdout + first.stderr and PASSWORD not in first.stdout + first.stderr)
+    check("the deploy printed no secrets", all(x not in first.stdout + first.stderr for x in (JWT, PASSWORD, ORIGIN_SECRET)))
+    check("with ORIGIN_VERIFY_SECRET set, the deploy's own health check still works (health stays open)", healthy())
+    check("and a sign-in that skips the CloudFront header is refused (403)", login(origin=False) == 403, login(origin=False))
 
     print("Second deploy and rollback")
     time.sleep(1.1)  # release ids are timestamps
@@ -177,7 +181,7 @@ try:
     time.sleep(1.5)
     log = open(LOG).read()
     check("shutdown was logged by the API", "ITAM API shutting down" in log, log[-200:])
-    check("service logs carry no JWT secret or Super Admin password", JWT not in log and PASSWORD not in log)
+    check("service logs carry no JWT secret, origin secret or Super Admin password", JWT not in log and PASSWORD not in log and ORIGIN_SECRET not in log)
 finally:
     subprocess.run([STUB, "stop"], env=ENV)
     shutil.rmtree(ROOT, ignore_errors=True)

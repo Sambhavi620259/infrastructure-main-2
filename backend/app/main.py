@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.access_guard import ScopedRoleWriteGuard
 from app.core.config import settings
-from app.core.http_guard import BodySizeLimitMiddleware, SecurityHeadersMiddleware
+from app.core.http_guard import BodySizeLimitMiddleware, OriginVerifyMiddleware, SecurityHeadersMiddleware
 from app.core.database import engine, get_db
 from app.core.logging_config import configure_logging
 from app.core.seed import seed_initial_users
@@ -57,6 +57,12 @@ async def lifespan(app: FastAPI):
     # Schema is owned by Alembic (see backend/migrations/README.md).
     # Run `alembic upgrade head` before starting; create_all is deliberately gone
     # so migrations are the single source of truth.
+    if settings.ORIGIN_VERIFY_SECRET:
+        logging.getLogger("app").info("Origin verification is on: requests need the X-Origin-Verify header from CloudFront.")
+    elif settings.is_production:
+        logging.getLogger("app").warning(
+            "ORIGIN_VERIFY_SECRET is not set: this API accepts requests that did not come through CloudFront."
+        )
     seed_initial_users()
     warranty_task = asyncio.create_task(warranty_alert_loop())
     logging.getLogger("app").info(
@@ -91,6 +97,8 @@ app.add_middleware(
 app.add_middleware(ScopedRoleWriteGuard)
 # Outermost last: the size limit and headers wrap everything above them.
 app.add_middleware(BodySizeLimitMiddleware)
+# Refuses requests that did not come through CloudFront (only when ORIGIN_VERIFY_SECRET is set).
+app.add_middleware(OriginVerifyMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 
 # Include routers

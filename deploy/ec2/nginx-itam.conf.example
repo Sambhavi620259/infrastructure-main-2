@@ -1,0 +1,53 @@
+# TLS terminator for the ITAM API on the EC2 instance. TEMPLATE: copy to /etc/nginx/conf.d/itam.conf and fill in.
+# It is the middle of the proxy chain:
+#
+#   Browser -> CloudFront --HTTPS--> nginx (this file, port 443) --HTTP on 127.0.0.1--> uvicorn 127.0.0.1:8000
+#
+# The last hop never leaves the machine (uvicorn listens on 127.0.0.1 only). Nothing in this file contains a secret.
+# The origin-verification header (X-Origin-Verify) passes through untouched and is checked by the API itself.
+
+server {
+    listen 443 ssl;
+    http2 on;
+    # The name CloudFront uses for the API origin. CloudFront checks that the certificate matches it.
+    server_name api-origin.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/api-origin.example.com/fullchain.pem;   # your certificate
+    ssl_certificate_key /etc/letsencrypt/live/api-origin.example.com/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+
+    # The API accepts 8 MB per request (uploads are base64 in JSON): leave room above that.
+    client_max_body_size 9m;
+
+    # Do NOT log request headers. In particular never add $http_x_origin_verify or $http_authorization to a log_format:
+    # the default "combined" format does not include them.
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host              $host;
+        # APPEND to the list CloudFront sent (client address, then this proxy adds CloudFront's): the API reads the
+        # second address from the right, which is why TRUSTED_PROXY_COUNT=2.
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # WebSockets (live updates). The sign-in token travels in Sec-WebSocket-Protocol, which nginx passes on.
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+    }
+
+    # Everything else is not the API.
+    location / {
+        return 404;
+    }
+}
+
+# Needed by the WebSocket headers above (goes in the http {} context, e.g. /etc/nginx/conf.d/00-websocket-map.conf).
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}

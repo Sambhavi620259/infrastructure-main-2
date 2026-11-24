@@ -4,7 +4,10 @@ Two small ASGI middlewares: a request-size limit and security headers.
 Plain ASGI (not BaseHTTPMiddleware) so the body is counted as it streams in,
 which also covers requests that send no Content-Length.
 """
+import hmac
 import json
+import logging
+import time
 from typing import Awaitable, Callable
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -97,3 +100,65 @@ class SecurityHeadersMiddleware:
             await send(message)
 
         await self.app(scope, receive, send_with_headers)
+
+
+_logger = logging.getLogger("app")
+
+
+class OriginVerifyMiddleware:
+    """
+    Accept only requests that came through CloudFront.
+
+    When ORIGIN_VERIFY_SECRET is set, a request (HTTP or WebSocket) must carry the header
+    X-Origin-Verify with that value; CloudFront adds it as an origin custom header and overwrites
+    anything a visitor sends under the same name. Everything else is refused with 403 (a WebSocket
+    is closed before it opens). The health endpoints stay open, because the deploy script and
+    monitors call them on the instance itself; they return only {"status": ...}.
+
+    The value is compared in constant time, is read on every request (so it can be rotated and
+    tested), and is never logged, echoed or stored anywhere by this class.
+    """
+
+    HEADER = b"x-origin-verify"
+    OPEN_PATHS = frozenset({"/api/health", "/api/health/live", "/api/health/ready"})
+    LOG_EVERY_SECONDS = 60.0
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+        self._last_log = 0.0
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+        accepted = [s.encode() for s in (settings.ORIGIN_VERIFY_SECRET, settings.ORIGIN_VERIFY_SECRET_PREVIOUS) if s]
+        if not accepted or (scope["type"] == "http" and scope.get("path") in self.OPEN_PATHS):
+            await self.app(scope, receive, send)
+            return
+
+        supplied = b""
+        for name, value in scope.get("headers", []):
+            if name == self.HEADER:
+                supplied = value
+                break
+        # Compare against every accepted secret, so the time taken does not say which one matched.
+        matches = [hmac.compare_digest(supplied, secret) for secret in accepted]
+        if any(matches):
+            await self.app(scope, receive, send)
+            return
+
+        now = time.monotonic()
+        if now - self._last_log >= self.LOG_EVERY_SECONDS:  # one line a minute at most, never the header value
+            self._last_log = now
+            _logger.warning(
+                "Refused a request without a valid origin verification header (%s %s); it did not come through CloudFront.",
+                scope.get("method", "WEBSOCKET"), scope.get("path", ""),
+            )
+        if scope["type"] == "websocket":
+            await receive()  # the connect message
+            await send({"type": "websocket.close", "code": 4403})
+            return
+        body = json.dumps({"detail": "Forbidden."}).encode()
+        await send({"type": "http.response.start", "status": 403, "headers": [
+            (b"content-type", b"application/json"), (b"content-length", str(len(body)).encode()), (b"cache-control", b"no-store")]})
+        await send({"type": "http.response.body", "body": body})

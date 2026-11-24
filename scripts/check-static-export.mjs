@@ -38,7 +38,7 @@ check("hashed, cacheable assets are under /_next/static/", files.some((f) => /^\
 
 console.log("Nothing private is in the files that go to S3");
 const text = files.filter((f) => /\.(html|js|txt|json|css|map)$/.test(f)).map((f) => [f, readFileSync(path.join(out, f), "utf8")]);
-const forbidden = ["BACKEND_PROXY_KEY", "BACKEND_API_URL", "http://127.0.0.1", "itam_password", "JWT_SECRET", "PROXY_SHARED_SECRET", "SEED_SUPER_ADMIN"];
+const forbidden = ["BACKEND_PROXY_KEY", "BACKEND_API_URL", "http://127.0.0.1", "itam_password", "JWT_SECRET", "PROXY_SHARED_SECRET", "SEED_SUPER_ADMIN", "ORIGIN_VERIFY", "X-Origin-Verify"];
 for (const word of forbidden) {
   const hits = text.filter(([, body]) => body.includes(word)).map(([f]) => f);
   check(`no file mentions ${word}`, hits.length === 0, hits.slice(0, 3));

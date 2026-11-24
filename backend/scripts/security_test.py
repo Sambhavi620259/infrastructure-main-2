@@ -719,6 +719,83 @@ code, data, hdrs = raw("OPTIONS", "/users", headers={"Origin": "https://evil.exa
 hdrs = {k.lower(): v for k, v in hdrs.items()}
 check("a preflight from another website is not approved", "access-control-allow-origin" not in hdrs, (code, hdrs))
 
+print("Origin verification (CloudFront secret header)")
+_S = "origin-secret-" + "a1B2" * 10
+_P = "previous-secret-" + "z9Y8" * 10
+_H = lambda value: {"X-Origin-Verify": value}  # noqa: E731
+check("origin verification is off by default (local development and Docker)", settings.ORIGIN_VERIFY_SECRET == "" and settings.ORIGIN_VERIFY_SECRET_PREVIOUS == "")
+code, data, _ = raw("GET", "/profile", token=TOKENS["adminA"])
+check("with it off, a request without the header works", code == 200, (code, data))
+settings.ORIGIN_VERIFY_SECRET = _S
+code, data, hdrs = raw("GET", "/profile", token=TOKENS["adminA"])
+hdrs = {k.lower(): v for k, v in hdrs.items()}
+check("secret set, header missing: refused (403)", code == 403, (code, data))
+check("the refusal says nothing about the secret", _S not in json.dumps(data) and _S not in json.dumps(hdrs) and data == {"detail": "Forbidden."}, (data, hdrs))
+check("the refusal carries the usual security headers and is not cached",
+      hdrs.get("x-content-type-options") == "nosniff" and "no-store" in hdrs.get("cache-control", ""), hdrs)
+for label, value in (("a wrong value", "wrong-" + _S[6:]), ("an empty value", ""), ("a prefix of the secret", _S[:-1]), ("the secret plus a character", _S + "x"),
+                     ("the secret reversed", _S[::-1]), ("the secret in another case", _S.upper()), ("the previous secret while none is set", _P)):
+    code, data, _ = raw("GET", "/profile", token=TOKENS["adminA"], headers=_H(value))
+    check(f"secret set, header has {label}: refused (403)", code == 403, (code, data))
+code, data, _ = raw("GET", "/profile", token=TOKENS["adminA"], headers=_H(_S))
+check("secret set, correct header: accepted", code == 200, (code, data))
+code, data, _ = raw("GET", "/profile", token=TOKENS["adminA"], headers={"x-origin-verify": _S})
+check("the header name is case-insensitive", code == 200, (code, data))
+code, data, _ = raw("GET", "/profile", token="not-a-token", headers=_H(_S))
+check("a correct header does not replace signing in (bad token: 401)", code == 401, (code, data))
+code, data, _ = raw("GET", "/users", headers=_H(_S))
+check("a correct header with no token is still 401", code == 401, (code, data))
+code, data, _ = raw("POST", "/auth/login", {"email": "x@example.com", "password": "password123"})
+check("public endpoints are protected too: sign-in without the header (403)", code == 403, (code, data))
+code, data, _ = raw("POST", "/auth/login", {"email": "x@example.com", "password": "password123"}, headers=_H(_S))
+check("sign-in with the header reaches the normal check (401, wrong credentials)", code == 401, (code, data))
+code, data, _ = raw("OPTIONS", "/users", headers={"Origin": settings.CORS_ORIGINS[0], "Access-Control-Request-Method": "GET"})
+check("a preflight without the header is refused (403)", code == 403, (code, data))
+for path in ("/health", "/health/live", "/health/ready"):
+    code, data, _ = raw("GET", path)
+    check(f"{path} stays open for the deploy script and monitors", code == 200, (code, data))
+code, data, _ = raw("GET", "/health/live/")
+check("only the exact health paths are open (a look-alike path is refused)", code == 403, (code, data))
+settings.ORIGIN_VERIFY_SECRET_PREVIOUS = _P
+code, data, _ = raw("GET", "/profile", token=TOKENS["adminA"], headers=_H(_P))
+check("rotation: the previous secret is accepted while it is configured", code == 200, (code, data))
+code, data, _ = raw("GET", "/profile", token=TOKENS["adminA"], headers=_H(_S))
+check("rotation: the current secret is accepted too", code == 200, (code, data))
+code, data, _ = raw("GET", "/profile", token=TOKENS["adminA"], headers=_H("neither-" + _S))
+check("rotation: any other value is refused", code == 403, (code, data))
+settings.ORIGIN_VERIFY_SECRET_PREVIOUS = ""
+code, data, _ = raw("GET", "/profile", token=TOKENS["adminA"], headers=_H(_P))
+check("rotation finished: the previous secret stops working", code == 403, (code, data))
+
+
+async def _origin_ws():
+    target = f"ws://127.0.0.1:{PORT}/api/assets/ws/{COMPANIES['A']}"
+    outcome = {}
+
+    async def opens(extra):
+        try:
+            async with websockets.connect(target, subprotocols=["itam.v1", f"bearer.{TOKENS['adminA']}"], additional_headers=extra) as ws:
+                await ws.send("hello")
+                return (await asyncio.wait_for(ws.recv(), timeout=2)) == "pong: hello"
+        except Exception:
+            return False
+
+    outcome["missing"] = await opens({})
+    outcome["wrong"] = await opens({"X-Origin-Verify": "wrong-" + _S[6:]})
+    outcome["valid"] = await opens({"X-Origin-Verify": _S})
+    return outcome
+
+
+_ws_origin = asyncio.run(_origin_ws())
+check("a WebSocket without the header is refused", _ws_origin["missing"] is False, _ws_origin)
+check("a WebSocket with a wrong header is refused", _ws_origin["wrong"] is False, _ws_origin)
+check("a WebSocket with the right header and a valid token opens", _ws_origin["valid"] is True, _ws_origin)
+settings.ORIGIN_VERIFY_SECRET = ""
+code, data, _ = raw("GET", "/profile", token=TOKENS["adminA"])
+check("switched off again, requests without the header work (local development and Docker)", code == 200, (code, data))
+code, data, _ = raw("GET", "/profile", token=TOKENS["adminA"], headers=_H("anything"))
+check("and a stray header is simply ignored when it is off", code == 200, (code, data))
+
 print("Limits and headers")
 code, data, hdrs = raw("GET", "/health")
 hdrs = {k.lower(): v for k, v in hdrs.items()}

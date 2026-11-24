@@ -17,10 +17,10 @@ Status words: **VERIFIED** = a command ran in this work and its output is quoted
 | 2 | Frontend compatible with S3 + CloudFront? | **Yes in code, VERIFIED locally.** `npm run build:static` produces a valid static site (26 automated checks) and 23 browser checks pass against it behind a stand-in for CloudFront. Real CloudFront behaviours are NOT VERIFIED (section 5). |
 | 3 | FastAPI ready for EC2 + Uvicorn + systemd? | **Yes in code and scripts, VERIFIED by simulation** (real process, SIGTERM, restart, release switch, rollback). The unit has not been run under real systemd. |
 | 4 | PostgreSQL on Amazon RDS verified? | **PostgreSQL 16 VERIFIED. Amazon RDS itself NOT VERIFIED** (TLS to RDS, parameter group and network path need a real instance). |
-| 5 | Critical security issues fixed? | **Yes, VERIFIED** with regression tests, with the limits in section 9. |
+| 5 | Critical security issues fixed? | **Yes, VERIFIED** with regression tests, with the limits in section 9. The API also refuses requests that skipped CloudFront (origin verification, section 12). |
 | 6 | Existing modules preserved and tested? | **Yes.** No file, route, migration or workflow was removed; all existing suites pass on SQLite and PostgreSQL, and the Docker server mode passes the same 23 browser checks as the static site. |
 | 7 | File uploads and persistent storage ready? | **Yes, VERIFIED.** Files are stored in the database (no filesystem path, nothing in release directories). They survive a restart (test). |
-| 8 | Environment variables and secrets safe? | **Yes, VERIFIED** (section 7): production refuses unsafe config; no `.env`, AWS key or private key is committed; the static output contains no backend secret or URL. |
+| 8 | Environment variables and secrets safe? | **Yes, VERIFIED** (section 7): production refuses unsafe config; no `.env`, AWS key or private key is committed; the static output contains no backend secret or URL; the CloudFront origin-verification secret lives only in the backend environment and is never logged or returned (tested). |
 | 9 | Critical automated tests passing? | **Yes**, section 3. |
 | 10 | Can the AWS staging deployment start? | **Yes, DevOps can start**, following `deploy/ec2/README.md` and `deploy/cloudfront/README.md`, on the conditions in section 9. |
 
@@ -32,6 +32,7 @@ Status words: **VERIFIED** = a command ran in this work and its output is quoted
 | 2 Security | Reporting-user read restriction; Super Admin-only unassigned users; sign-up closed by default (IT Admin, user and Super Admin); health 503. Super Admin key removal (separate commit `ce8b1b8`, droppable). | `access_guard.py`, `users.py`, `auth.py`, `config.py`, `main.py`, register/login/dashboard pages |
 | 3 Backend | Production refuses SQLite, unset DATABASE_URL/CORS_ORIGINS, `*`, CHANGE_ME; liveness (`/api/health/live`) vs readiness (`/api/health/ready`, 503 when the database is down; `/api/health` kept as an alias); start/stop logged; background task awaited and pool closed on shutdown. | `config.py`, `main.py`, `access_guard.py` |
 | 4 PostgreSQL | `postgres_checks.py`; every suite can run on PostgreSQL; disposable-database guard. | `scripts/postgres_checks.py`, `scripts/_dbguard.py`, `security_test.py` |
+| 5b Origin verification | **Implemented (approved).** `X-Origin-Verify` secret header validated by the API, with rotation support. | `http_guard.py`, `config.py`, `main.py`, `deploy/ec2/nginx-itam.conf.example`, `deploy/cloudfront/README.md` section 4A |
 | 5 Frontend | **Implemented (approved).** Static build for S3 + CloudFront; Docker and `next dev` unchanged. | `next.config.ts`, `scripts/build-static.mjs`, 5 detail pages (+ `page-client.tsx`), `src/lib/route-id.ts`, `deploy/cloudfront/*` |
 | 6 Config | Staging template with placeholders only; template cannot be started as is; committed-secret scan. | `deploy/ec2/itam.env.example`, `deploy_readiness_test.py` |
 | 7 EC2 | systemd unit, deploy and rollback scripts, simulated end to end. | `deploy/ec2/*`, `scripts/release_flow_test.py` |
@@ -41,25 +42,25 @@ All 21 changed files: `git diff --name-only 580c0e0..HEAD`.
 
 ## 3. Tests: exact commands and results (all run after the last change)
 
-New: `deploy_readiness_test.py` (46), `postgres_checks.py` (32), `release_flow_test.py` (17), the Reporting/unassigned/registration/health/token/CORS sections of `security_test.py`.
+New: `deploy_readiness_test.py` (63), `postgres_checks.py` (37), `release_flow_test.py` (19), the Reporting/unassigned/registration/health/token/CORS sections of `security_test.py`.
 Existing and unchanged in meaning: `smoke_test_assets_api.py`, `workflow_test.py`, `ticket_workflow_test.py`, `delete_paths_check.py`. Three existing checks were rewritten because they asserted the old, unsafe behaviour (IT Admin claiming sign-ups; IT Admin notified of sign-ups).
 
 ```
 cd backend
 # SQLite (default)
-python scripts/security_test.py            312/312 passed
+python scripts/security_test.py            344/344 passed
 python scripts/smoke_test_assets_api.py    ALL PASSED
 python scripts/workflow_test.py            113/113 passed
 python scripts/ticket_workflow_test.py     114/114 passed
-python scripts/deploy_readiness_test.py     46/46 passed
+python scripts/deploy_readiness_test.py     63/63 passed
 # PostgreSQL 16 (empty disposable databases, migrated with `alembic upgrade head`)
-SECURITY_TEST_DATABASE_URL=...  python scripts/security_test.py            312/312 passed
+SECURITY_TEST_DATABASE_URL=...  python scripts/security_test.py            344/344 passed
 SMOKE_DATABASE_URL=...          python scripts/smoke_test_assets_api.py    ALL PASSED
 WORKFLOW_DATABASE_URL=...       python scripts/workflow_test.py            113/113 passed
 TICKET_DATABASE_URL=...         python scripts/ticket_workflow_test.py     118/118 passed
 DELETE_CHECK_DATABASE_URL=...   python scripts/delete_paths_check.py        16/16 passed
-POSTGRES_CHECK_DATABASE_URL=... python scripts/postgres_checks.py           32/32 passed
-RELEASE_TEST_DATABASE_URL=...   python scripts/release_flow_test.py         17/17 passed
+POSTGRES_CHECK_DATABASE_URL=... python scripts/postgres_checks.py           37/37 passed
+RELEASE_TEST_DATABASE_URL=...   python scripts/release_flow_test.py         19/19 passed
 # frontend
 npm run lint && npm run typecheck           clean
 npx next build (Node server, as Docker)     Compiled successfully
@@ -89,7 +90,7 @@ Why the plain export failed, and what was changed (details of each experiment ar
 
 Evidence (all local): `npm run check:static` 26/26. Browser, 23 checks each, against the static site served through the real function with `/api` going straight to the backend, and against the Docker server mode: `/` lands on sign-in; unknown address answers 404; each role lands in the right place; ticket, asset, user, own-ticket and work pages open by address and after a refresh and ask the API for the real id; `/assets/new` is the "new" page, not an asset; a user cannot open `/users`; no API call failed. Making each check fail on purpose (a removed page in the function, a changed CSP) is caught.
 **NOT VERIFIED:** real CloudFront (OAC, the function in the console, response headers policy, behaviours), WebSockets through CloudFront, the TLS origin. Those are DevOps's first tasks; `deploy/cloudfront/README.md` has the exact configuration and a smoke test.
-Choices made without asking, easy to revisit: no distribution-wide custom error responses (they would also rewrite the API's 403/404 JSON answers); the API origin must be HTTPS only; `TRUSTED_PROXY_COUNT=2` (CloudFront + the TLS terminator on the instance).
+Decisions (approved by the project owner): no distribution-wide custom error responses for now (they would also rewrite the API's 403/404 JSON answers; the 404 page can be improved later); the API origin is HTTPS only; `TRUSTED_PROXY_COUNT=2` (CloudFront + the TLS terminator on the instance), explained hop by hop in `deploy/cloudfront/README.md` section 0.
 
 ## 6. Backend on EC2 + systemd (VERIFIED by simulation)
 `deploy/ec2/itam-backend.service` (one worker, `EnvironmentFile`, journal logging, `SuccessExitStatus=143`), `deploy.sh`, `rollback.sh`, tested in `release_flow_test.py`: fresh deploy; migrations run; configuration outside the release; second deploy keeps the first; `rollback.sh`; a release that does not start rolls itself back and the old one is healthy again; an unsafe configuration is refused (exit 3) before anything changes; the logs hold no secret. SIGTERM ends the process after a graceful shutdown (uvicorn re-raises SIGTERM, so the exit status is -15/143, which the unit treats as success). **Not run:** the unit under real systemd, `journalctl`, Amazon Linux package versions.
@@ -97,8 +98,8 @@ Choices made without asking, easy to revisit: no distribution-wide custom error 
 ## 7. Required staging environment variables (placeholders only; see `deploy/ec2/itam.env.example`)
 API (`/etc/itam/itam.env`)
 - Required: `ENVIRONMENT=production`, `DATABASE_URL` (PostgreSQL on RDS, with `?sslmode=require`), `JWT_SECRET` (32+ chars), `CORS_ORIGINS=https://<site domain>` (also the allowed `Origin` for WebSockets).
-- Needed in practice: `TRUSTED_PROXY_COUNT=2` (CloudFront + the TLS terminator on the instance), `SEED_SUPER_ADMIN_EMAIL` / `SEED_SUPER_ADMIN_PASSWORD` (12+ chars) for the first Super Admin.
-- Optional: `ALLOW_PUBLIC_IT_ADMIN_SIGNUP`, `ALLOW_PUBLIC_AGENT_SIGNUP`, `ALLOW_PUBLIC_SUPER_ADMIN_SIGNUP` (all default `false`), `LOG_LEVEL`, `AUTH_RATE_LIMIT_PER_MINUTE`, `LOGIN_FAILURE_LIMIT`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `MAX_REQUEST_BODY_BYTES`, `DB_POOL_SIZE`, `DB_MAX_OVERFLOW`, `WEB_CONCURRENCY` (keep 1).
+- Needed in practice: `ORIGIN_VERIFY_SECRET` (32+ random characters; the value of the CloudFront origin custom header `X-Origin-Verify`; stored in Secrets Manager / SSM, never in Git), `TRUSTED_PROXY_COUNT=2` (CloudFront + the TLS terminator on the instance), `SEED_SUPER_ADMIN_EMAIL` / `SEED_SUPER_ADMIN_PASSWORD` (12+ chars) for the first Super Admin.
+- Optional: `ORIGIN_VERIFY_SECRET_PREVIOUS` (only while rotating), `ALLOW_PUBLIC_IT_ADMIN_SIGNUP`, `ALLOW_PUBLIC_AGENT_SIGNUP`, `ALLOW_PUBLIC_SUPER_ADMIN_SIGNUP` (all default `false`), `LOG_LEVEL`, `AUTH_RATE_LIMIT_PER_MINUTE`, `LOGIN_FAILURE_LIMIT`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `MAX_REQUEST_BODY_BYTES`, `DB_POOL_SIZE`, `DB_MAX_OVERFLOW`, `WEB_CONCURRENCY` (keep 1).
 Frontend build (one variable): `NEXT_PUBLIC_WS_URL=wss://<site domain>` (no path; baked in at build time; no secret belongs here).
 Not used with S3 + CloudFront: `BACKEND_API_URL`, `BACKEND_PROXY_KEY`, `PROXY_SHARED_SECRET` (they belong to the Next.js proxy used by Docker and local development).
 
@@ -107,8 +108,9 @@ Branch `security-fixes-on-main`, commit `ca68a16`, clean working tree, before th
 
 ## 9. Known limitations and remaining blockers
 Application-code blockers: none known. Conditions before a real staging deployment is called done (DevOps / verification):
-(a) CloudFront configured as in `deploy/cloudfront/README.md` and its smoke test passed (including live updates through CloudFront); (b) the HTTPS API origin (TLS terminator and certificate on the instance) in place; (c) RDS verified with the checks in section 4 against a disposable RDS database, with TLS; (d) the systemd unit run on the real instance and one rollback rehearsed.
+(a) CloudFront configured as in `deploy/cloudfront/README.md` and its smoke test passed (including live updates through CloudFront); (b) the HTTPS API origin (TLS terminator and certificate on the instance) in place, and the origin-verification secret created, stored securely, set on the instance and as the CloudFront origin custom header (`deploy/cloudfront/README.md` section 4A, including its verification steps); (c) RDS verified with the checks in section 4 against a disposable RDS database, with TLS; (d) the systemd unit run on the real instance and one rollback rehearsed.
 Limitations:
+- **Origin verification is only as strong as the secret.** It is off when `ORIGIN_VERIFY_SECRET` is empty (the default, used by local development and Docker); production without it starts but logs a warning. The health endpoints stay open without the header so the deploy script and monitors work. Anyone who can read the CloudFront distribution configuration or `/etc/itam/itam.env` can read the secret: restrict both, and rotate it (zero-downtime procedure in section 4A) if it may have leaked. It does not replace the security group rule; use both. The Docker/local Next.js proxy does not send the header, so the secret must not be set there.
 - **One instance, one worker.** Sign-in rate limits and WebSocket updates live in process memory; the daily warranty/licence alert job runs inside the API process. More than one instance or worker multiplies limits and sends updates to only some viewers (duplicate alerts are suppressed).
 - **No server-side logout.** Tokens are stateless; they stop working on password change, deactivation or expiry (12 hours by default).
 - **Reporting users can read `/api/dashboard`** (aggregate counts) so their dashboard works.
@@ -137,6 +139,11 @@ DevOps (AWS)
 - [ ] CloudFront: behaviours `/api/*`, `/_next/static/*`, default; the viewer-request function on the default behaviour only; the response headers policy on the two static behaviours only; NO custom error responses; origin HTTPS only
 - [ ] Smoke test (`deploy/cloudfront/README.md`, section 8), including a deep link + refresh and live updates
 - [ ] `TRUSTED_PROXY_COUNT=2` confirmed (two sign-in attempts from different networks are limited separately)
+- [ ] Origin verification: secret generated (not equal to `JWT_SECRET`), stored in Secrets Manager / SSM, written to `/etc/itam/itam.env` (mode 600) and set as the `X-Origin-Verify` origin custom header on the API origin only; verified: through CloudFront 200, a forged header through CloudFront still 200, the origin name directly without the header 403, health endpoints 200; read access to the distribution config restricted; rotation rehearsed once
 - [ ] CloudWatch / journal forwarding for `itam-backend`; alarm on `/api/health/ready`
 - [ ] All suites re-run against a disposable copy of the staging database (never production); API rollback rehearsed once on staging
 
+## 12. Origin verification (CloudFront secret header): what was built and how it was tested
+`OriginVerifyMiddleware` (`backend/app/core/http_guard.py`): when `ORIGIN_VERIFY_SECRET` is set, every HTTP request and WebSocket handshake needs `X-Origin-Verify: <secret>` or gets `403 {"detail":"Forbidden."}` (a socket is closed before it opens). Constant-time comparison; the value is read on every request so it can be rotated; `ORIGIN_VERIFY_SECRET_PREVIOUS` is accepted next to it only while rotating. `/api/health`, `/api/health/live` and `/api/health/ready` stay open. Empty secret = off, so local development and Docker are unchanged. In production the secret must be 32+ characters and not a `CHANGE_ME` placeholder (the API refuses to start otherwise); an empty secret in production logs a warning. The value is never logged (one refusal line a minute at most, without any value), never returned, never in the frontend or `./out`, and the template in Git holds only `CHANGE_ME`.
+Tests (all VERIFIED, SQLite and PostgreSQL where applicable, and each fails if the middleware is removed): missing header, wrong value, empty value, prefix, longer, reversed, wrong case, previous-secret-while-unset, correct value, header-name case, correct header with a bad or missing token (still 401), public endpoints and preflight protected, only the exact health paths open, rotation (previous accepted, then not), WebSocket missing / wrong / valid, switched off again; in real processes: start-up and refusal log lines contain no secret or wrong value, production + PostgreSQL + secret refuses a request without the header, production without the secret starts and warns, the deploy script's health check works with the secret enabled, and the secret placeholders and short values are refused. `npm run check:static` fails if the static output mentions `ORIGIN_VERIFY` or `X-Origin-Verify`.
+DevOps procedure (create, store, set on the instance, set on CloudFront, verify, rotate, troubleshoot): `deploy/cloudfront/README.md` section 4A. The proxy chain (CloudFront, TLS terminator, uvicorn) and what each hop adds: section 0 of the same file; nginx template: `deploy/ec2/nginx-itam.conf.example`.

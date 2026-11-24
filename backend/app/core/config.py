@@ -68,6 +68,14 @@ class Settings(BaseSettings):
     ALLOW_PUBLIC_AGENT_SIGNUP: bool = os.getenv("ALLOW_PUBLIC_AGENT_SIGNUP", "false").lower() in ("1", "true", "yes")
     ALLOW_PUBLIC_SUPER_ADMIN_SIGNUP: bool = os.getenv("ALLOW_PUBLIC_SUPER_ADMIN_SIGNUP", "false").lower() in ("1", "true", "yes")
 
+    # CloudFront origin verification. When ORIGIN_VERIFY_SECRET is set, every request must carry the header
+    # "X-Origin-Verify: <that value>", which CloudFront adds as an ORIGIN CUSTOM HEADER. A request that went
+    # round CloudFront (straight to the instance) has no such header and is refused with 403. Empty = off
+    # (local development and Docker). ORIGIN_VERIFY_SECRET_PREVIOUS is accepted as well, only to rotate the
+    # secret without downtime. Never log, print or return either value. See deploy/cloudfront/README.md.
+    ORIGIN_VERIFY_SECRET: str = os.getenv("ORIGIN_VERIFY_SECRET", "")
+    ORIGIN_VERIFY_SECRET_PREVIOUS: str = os.getenv("ORIGIN_VERIFY_SECRET_PREVIOUS", "")
+
     # Largest request body the API accepts, in bytes (file uploads are base64 in JSON).
     MAX_REQUEST_BODY_BYTES: int = int(os.getenv("MAX_REQUEST_BODY_BYTES", str(8 * 1024 * 1024)))
 
@@ -88,6 +96,12 @@ class Settings(BaseSettings):
             problems.append("JWT_SECRET must be set to a random value of at least 32 characters")
         if "CHANGE_ME" in self.SECRET_KEY or "CHANGE_ME" in self.DATABASE_URL:
             problems.append("a CHANGE_ME placeholder from the example environment file is still in JWT_SECRET or DATABASE_URL")
+        if self.ORIGIN_VERIFY_SECRET_PREVIOUS and not self.ORIGIN_VERIFY_SECRET:
+            problems.append("ORIGIN_VERIFY_SECRET_PREVIOUS is set but ORIGIN_VERIFY_SECRET is not")
+        for name in ("ORIGIN_VERIFY_SECRET", "ORIGIN_VERIFY_SECRET_PREVIOUS"):
+            value = getattr(self, name)
+            if value and (len(value) < 32 or "CHANGE_ME" in value):
+                problems.append(f"{name} must be a random value of at least 32 characters (not a placeholder)")
         if self.DATABASE_URL == _DEFAULT_DATABASE_URL:
             problems.append("DATABASE_URL is not set (the development default must never run in production)")
         elif "itam_password" in self.DATABASE_URL:
@@ -102,6 +116,12 @@ class Settings(BaseSettings):
             problems.append("CORS_ORIGINS must list your real frontend origins, not *")
         if problems:
             raise RuntimeError("Unsafe production configuration: " + "; ".join(problems))
+
+    @field_validator("ORIGIN_VERIFY_SECRET", "ORIGIN_VERIFY_SECRET_PREVIOUS", mode="after")
+    @classmethod
+    def trim_origin_secret(cls, v: str) -> str:
+        """A trailing space or newline from an env file must not become part of the secret."""
+        return v.strip()
 
     @field_validator("DATABASE_URL", mode="after")
     @classmethod

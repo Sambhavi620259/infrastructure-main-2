@@ -223,10 +223,11 @@ def free_port():
         return s.getsockname()[1]
 
 
-def http(port, method, path, body=None, token=None):
+def http(port, method, path, body=None, token=None, origin=True):
     request = urllib.request.Request(
         f"http://127.0.0.1:{port}/api{path}", data=json.dumps(body).encode() if body is not None else None, method=method,
-        headers={"Content-Type": "application/json", **({"Authorization": f"Bearer {token}"} if token else {})})
+        headers={"Content-Type": "application/json", **({"Authorization": f"Bearer {token}"} if token else {}),
+                 **({"X-Origin-Verify": ORIGIN_SECRET} if origin else {})})
     try:
         with urllib.request.urlopen(request, timeout=10) as response:
             return response.status, json.loads(response.read() or b"{}")
@@ -237,7 +238,8 @@ def http(port, method, path, body=None, token=None):
             return error.code, {}
 
 
-PROD = {"ENVIRONMENT": "production", "DATABASE_URL": URL, "JWT_SECRET": JWT, "CORS_ORIGINS": "https://itam.example.com",
+ORIGIN_SECRET = "pg" + "Hj4" * 15
+PROD = {"ENVIRONMENT": "production", "ORIGIN_VERIFY_SECRET": ORIGIN_SECRET, "DATABASE_URL": URL, "JWT_SECRET": JWT, "CORS_ORIGINS": "https://itam.example.com",
         "SEED_SUPER_ADMIN_EMAIL": "root@itam.example.com", "SEED_SUPER_ADMIN_PASSWORD": "A-long-seed-password-1"}
 port = free_port()
 logfile = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".pgcheck.log"), "wb")
@@ -254,6 +256,8 @@ for _ in range(150):
     except Exception:
         time.sleep(0.2)
 check("production mode starts against PostgreSQL and readiness answers 200", up, "")
+code, data = http(port, "POST", "/auth/login", {"email": "root@itam.example.com", "password": "A-long-seed-password-1", "role": "SUPER_ADMIN"}, origin=False)
+check("production + PostgreSQL + origin secret: a request that skipped CloudFront (no header) is refused (403)", code == 403, (code, data))
 code, data = http(port, "POST", "/auth/login", {"email": "root@itam.example.com", "password": "A-long-seed-password-1", "role": "SUPER_ADMIN"})
 check("the seeded Super Admin signs in with email and password", code == 200 and data.get("role") == "SUPER_ADMIN", (code, data))
 token = data.get("access_token")
@@ -271,6 +275,37 @@ except subprocess.TimeoutExpired:
     server.kill()
     stopped = False
 check("SIGTERM stops it", stopped)
+logfile.close()
+pg_log = open(os.path.join(BACKEND, ".pgcheck.log")).read()
+check("the log never contains the origin secret, the JWT secret or the seeded password",
+      ORIGIN_SECRET not in pg_log and JWT not in pg_log and "A-long-seed-password-1" not in pg_log)
+check("start-up says origin verification is on", "Origin verification is on" in pg_log, pg_log[-200:])
+# Production WITHOUT the origin secret (how Docker and local production-mode runs behave): it must start, and warn.
+port_n = free_port()
+with open(os.path.join(BACKEND, ".pgcheck3.log"), "wb") as handle_n:
+    env_n = {**os.environ, **PROD}
+    env_n.pop("ORIGIN_VERIFY_SECRET")
+    server_n = subprocess.Popen([sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", str(port_n), "--no-proxy-headers"],
+                                cwd=BACKEND, env=env_n, stdout=handle_n, stderr=subprocess.STDOUT)
+    up_n = False
+    for _ in range(150):
+        if server_n.poll() is not None:
+            break
+        try:
+            urllib.request.urlopen(f"http://127.0.0.1:{port_n}/api/health/ready", timeout=1)
+            up_n = True
+            break
+        except Exception:
+            time.sleep(0.2)
+    code_n, _data = http(port_n, "POST", "/auth/login", {"email": "root@itam.example.com", "password": "A-long-seed-password-1", "role": "SUPER_ADMIN"}, origin=False)
+    server_n.send_signal(signal.SIGTERM)
+    try:
+        server_n.wait(timeout=20)
+    except subprocess.TimeoutExpired:
+        server_n.kill()
+log_n = open(os.path.join(BACKEND, ".pgcheck3.log")).read()
+check("production without ORIGIN_VERIFY_SECRET still starts and signs in with no header (Docker / local behaviour)", up_n and code_n == 200, (up_n, code_n))
+check("and it logs a warning that requests are not verified as coming through CloudFront", "ORIGIN_VERIFY_SECRET is not set" in log_n, log_n[-200:])
 # No silent fallback to SQLite: an unreachable PostgreSQL must stop start-up.
 unreachable = URL.rsplit("@", 1)[0] + "@127.0.0.1:1/" + URL.rsplit("/", 1)[1]
 port = free_port()
@@ -284,7 +319,7 @@ with open(os.path.join(BACKEND, ".pgcheck2.log"), "wb") as handle:
         exit_code = "still running"
 check("with PostgreSQL unreachable, production start-up fails instead of falling back to SQLite",
       exit_code not in (0, "still running"), exit_code)
-for leftover_log in (".pgcheck.log", ".pgcheck2.log"):
+for leftover_log in (".pgcheck.log", ".pgcheck2.log", ".pgcheck3.log"):
     try:
         os.remove(os.path.join(BACKEND, leftover_log))
     except OSError:
